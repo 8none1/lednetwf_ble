@@ -151,8 +151,8 @@ class LEDNETWFLight(LightEntity):
             return "mdi:led-strip-variant"
     
     async def async_turn_on(self, **kwargs: Any) -> None:
-        # LOGGER.debug("async_turn_on called")
-        # LOGGER.debug("kwargs: %s", kwargs)
+        LOGGER.debug("async_turn_on called")
+        LOGGER.debug("kwargs: %s", kwargs)
 
         if not self.is_on:
             await self._instance.turn_on()

@@ -49,6 +49,8 @@ LOGGER = logging.getLogger(__name__)
 
 NAME_ARRAY                    = ["LEDnetWF"]
 SUPPORTED_MODELS              = [0x53, 0x56] # [Ring light with CW/WW, Strip light with RGB only]
+# FIXME:  At the moment we don't do anything with SUPPORTED_MODELS.  We should use this to filter out devices that don't match what we support.
+# However - that means that when they add new devices which might "just work" they won't get picked up and we will have to add them manually.
 WRITE_CHARACTERISTIC_UUIDS    = ["0000ff01-0000-1000-8000-00805f9b34fb"]
 NOTIFY_CHARACTERISTIC_UUIDS   = ["0000ff02-0000-1000-8000-00805f9b34fb"]
 INITIAL_PACKET                = bytearray.fromhex("00 01 80 00 00 04 05 0a 81 8a 8b 96")
@@ -135,13 +137,10 @@ class LEDNETWFInstance:
         self._hass    = hass
         self._mac     = mac
         self._delay   = self._options.get(CONF_DELAY, self._data.get(CONF_DELAY, 120)) # Try and read from options first, data second so that if this is changed via config then new values are picked up
-        # LOGGER.debug(f"In instantiation of LEDNET instance.  Delay: {self._delay}")
-        # LOGGER.debug(f"Data: {self._data}")
-        # LOGGER.debug(f"Options: {self._options}")
         self.loop     = asyncio.get_running_loop()
         self._device:   BLEDevice | None = None
         self._device  = bluetooth.async_ble_device_from_address(self._hass, self._mac)
-        # LOGGER.debug(f"INIT Device: {self._device}")
+
         if not self._device:
             raise ConfigEntryNotReady(
                 f"You need to add bluetooth integration (https://www.home-assistant.io/integrations/bluetooth) or couldn't find a nearby device with address: {self._mac}"
