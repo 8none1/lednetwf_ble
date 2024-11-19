@@ -306,32 +306,32 @@ class Model0x53(DefaultLEDNETDevice):
 
 
 
-class Model0x56(DefaultLEDNETDevice):
-    # Strip light
-    def set_color(self, hs_color, brightness):
-                # Returns the byte array to set the RGB colour
-    # on the device from an HS colour and a brightness
-    # By only using HS cols internally, we can make things
-    # easier to manage.  We don't have to worry about calculating
-    # brightness from RGB values
-    LOGGER.debug(f"Setting colour: {hs_color}")
-    self.color_mode = ColorMode.HS
-    self.hs_color = hs_color
-    self.brightness = brightness
-    self.effect = EFFECT_OFF
-    rgb_color = hsv_to_rgb(hs_color)
-    rgb_color = tuple(max(0, min(255, int(component * self.get_brightness_percent() / 100))) for component in rgb_color)
-    background_col = [0,0,0]
-    rgb_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
-    rgb_packet[9]  = 0 # Mode "0" leaves the static current mode unchanged.  If we want this to switch the device back to an actual static RGB mode change this to 1.
-    # Leaving it as zero allows people to use the colour picker to change the colour of the static mode in realtime.  I'm not sure what I prefer.  If people want actual
-    # static colours they can change to "Static Mode 1" in the effects.  But perhaps that's not what they would expect to have to do?  It's quite hidden.
-    # But they pay off is that they can change the colour of the other static modes as they drag the colour picker around, which is pretty neat. ?
-    rgb_packet[10:13] = rgb_color
-    rgb_packet[13:16] = background_col
-    rgb_packet[16]    = self.effect_speed
-    rgb_packet[20]    = sum(rgb_packet[8:19]) & 0xFF # Checksum
-    LOGGER.debug(f"Setting RGB colour: {rgb_color}")
-    return rgb_packet
+# class Model0x56(DefaultLEDNETDevice):
+#     # Strip light
+#     def set_color(self, hs_color, brightness):
+#                 # Returns the byte array to set the RGB colour
+#     # on the device from an HS colour and a brightness
+#     # By only using HS cols internally, we can make things
+#     # easier to manage.  We don't have to worry about calculating
+#     # brightness from RGB values
+#     LOGGER.debug(f"Setting colour: {hs_color}")
+#     self.color_mode = ColorMode.HS
+#     self.hs_color = hs_color
+#     self.brightness = brightness
+#     self.effect = EFFECT_OFF
+#     rgb_color = hsv_to_rgb(hs_color)
+#     rgb_color = tuple(max(0, min(255, int(component * self.get_brightness_percent() / 100))) for component in rgb_color)
+#     background_col = [0,0,0]
+#     rgb_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
+#     rgb_packet[9]  = 0 # Mode "0" leaves the static current mode unchanged.  If we want this to switch the device back to an actual static RGB mode change this to 1.
+#     # Leaving it as zero allows people to use the colour picker to change the colour of the static mode in realtime.  I'm not sure what I prefer.  If people want actual
+#     # static colours they can change to "Static Mode 1" in the effects.  But perhaps that's not what they would expect to have to do?  It's quite hidden.
+#     # But they pay off is that they can change the colour of the other static modes as they drag the colour picker around, which is pretty neat. ?
+#     rgb_packet[10:13] = rgb_color
+#     rgb_packet[13:16] = background_col
+#     rgb_packet[16]    = self.effect_speed
+#     rgb_packet[20]    = sum(rgb_packet[8:19]) & 0xFF # Checksum
+#     LOGGER.debug(f"Setting RGB colour: {rgb_color}")
+#     return rgb_packet
 
 
