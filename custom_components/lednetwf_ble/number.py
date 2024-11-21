@@ -4,6 +4,7 @@ from homeassistant.components.number import (
     NumberEntityDescription,
 )
 from .lednetwf import LEDNETWFInstance
+from .lednetwf import LEDNETWFNewInstance
 from .const import DOMAIN
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -24,13 +25,13 @@ async def async_setup_entry(
 class LEDNETWFSpeedSlider(NumberEntity):
     """LEDNETWF Slider for effect speed."""
 
-    def __init__(self, lednetfInstance: LEDNETWFInstance, attr_name: str, entry_id: str) -> None:
+    def __init__(self, lednetfInstance: LEDNETWFNewInstance, attr_name: str, entry_id: str) -> None:
         self._instance             = lednetfInstance
         self._attr_has_entity_name = True
         #self._attr_translation_key = attr_name # Can't get this to work
         self._attr_name            = attr_name
         self._attr_unique_id       = self._instance.mac
-        self._effect_speed         = self._instance._effect_speed
+        self._effect_speed         = self._instance._model_interface.effect_speed
 
     @property
     def available(self):

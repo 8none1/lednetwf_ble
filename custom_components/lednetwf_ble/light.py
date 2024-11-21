@@ -3,6 +3,7 @@ import voluptuous as vol
 from typing import Any, Optional, Tuple
 
 from .lednetwf import LEDNETWFInstance
+from .lednetwf import LEDNETWFNewInstance
 from .const import (DOMAIN, RING_LIGHT_MODEL, STRIP_LIGHT_MODEL)
 
 from homeassistant.const import CONF_MAC
@@ -40,18 +41,19 @@ class LEDNETWFLight(LightEntity):
     _attr_has_entity_name = False
 
     def __init__(
-        self, lednetwfinstance: LEDNETWFInstance, name: str, entry_id: str
+        self, lednetwfinstance: LEDNETWFNewInstance, name: str, entry_id: str
     ) -> None:
         self._instance = lednetwfinstance
         self._entry_id = entry_id
         # 2025.3 ColorMode.BRIGHTNESS should not be specified with other combination of supported color modes, as it will throw an error, but is is supported
         # when lights are rendering an effect automatically
         # https://developers.home-assistant.io/docs/core/entity/light/#color-modes
-        if self._instance._model == RING_LIGHT_MODEL:
-            self._attr_supported_color_modes = {ColorMode.COLOR_TEMP, ColorMode.HS}
-            self._color_temp_kelvin: self._instance._color_temp_kelvin
-        else:
-            self._attr_supported_color_modes = {ColorMode.RGB}
+        # if self._instance._model == RING_LIGHT_MODEL:
+        #     self._attr_supported_color_modes = {ColorMode.COLOR_TEMP, ColorMode.HS}
+        #     self._color_temp_kelvin: self._instance._color_temp_kelvin
+        # else:
+        #     self._attr_supported_color_modes = {ColorMode.RGB}
+        self._attr_supported_color_modes = self._instance._model_interface.supported_color_modes
         self._attr_supported_features = LightEntityFeature.EFFECT
         self._attr_name               = name
         self._attr_unique_id          = self._instance.mac
@@ -90,7 +92,7 @@ class LEDNETWFLight(LightEntity):
 
     @property
     def effect(self):
-        return self._instance._effect
+        return self._instance.effect
 
     @property
     def supported_features(self) -> int:
@@ -115,11 +117,11 @@ class LEDNETWFLight(LightEntity):
     @property
     def color_mode(self):
         """Return the color mode of the light."""
-        return self._instance._color_mode
+        return self._instance.color_mode
     
     @property
     def firmware_version(self):
-        return f"{self._instance._fw_major:02X}.{self._instance._fw_minor}"
+        return self._instance.firmware_version
     
     @property
     def device_info(self):
@@ -131,7 +133,7 @@ class LEDNETWFLight(LightEntity):
             },
             name=self.name,
             connections={(device_registry.CONNECTION_NETWORK_MAC, self._instance.mac)},
-            model=self._instance._model,
+            model=self._instance.model_number,
             sw_version=self.firmware_version
         )
 
@@ -145,10 +147,11 @@ class LEDNETWFLight(LightEntity):
     
     @property
     def icon(self):
-        if self._instance._model == RING_LIGHT_MODEL:
-            return "mdi:lightbulb"
-        else:
-            return "mdi:led-strip-variant"
+        return self._instance._model_interface.icon
+        # if self._instance._model == RING_LIGHT_MODEL:
+        #     return "mdi:lightbulb"
+        # else:
+        #     return "mdi:led-strip-variant"
     
     async def async_turn_on(self, **kwargs: Any) -> None:
         LOGGER.debug("async_turn_on called")
@@ -166,7 +169,7 @@ class LEDNETWFLight(LightEntity):
 
         if ATTR_COLOR_TEMP_KELVIN not in kwargs and ATTR_HS_COLOR not in kwargs and ATTR_EFFECT not in kwargs and ATTR_RGB_COLOR not in kwargs:
             # i.e. only a brightness change
-            if self._instance._effect is not None and self._instance._effect is not EFFECT_OFF:
+            if self._instance.effect is not None and self._instance.effect is not EFFECT_OFF:
                 # Before HA 2024.2
 
                 # effect check go first because of the way HA handles brightness changes
@@ -175,11 +178,11 @@ class LEDNETWFLight(LightEntity):
 
                 #HA 2024.2 changes this, setting color mode to "brightness" should allow to change effects brightness as well as introduces the predefined EFFECT_OFF status
                 kwargs[ATTR_EFFECT] = self._instance.effect
-            elif self._instance._color_mode is ColorMode.COLOR_TEMP:
+            elif self._instance.color_mode is ColorMode.COLOR_TEMP:
                 kwargs[ATTR_COLOR_TEMP_KELVIN] = self._instance.color_temp_kelvin
-            elif self._instance._color_mode is ColorMode.HS:
+            elif self._instance.color_mode is ColorMode.HS:
                 kwargs[ATTR_HS_COLOR] = self._instance.hs_color
-            elif self._instance._color_mode is ColorMode.RGB:
+            elif self._instance.color_mode is ColorMode.RGB:
                 kwargs[ATTR_RGB_COLOR] = self._instance.rgb_color
 
         if ATTR_BRIGHTNESS in kwargs and ATTR_EFFECT == EFFECT_OFF:
@@ -203,7 +206,7 @@ class LEDNETWFLight(LightEntity):
             temp_brightness = 254
         else:
             temp_brightness = self._instance.brightness + 1
-        if self._instance._color_mode is ColorMode.HS and ATTR_HS_COLOR not in kwargs:
+        if self._instance.color_mode is ColorMode.HS and ATTR_HS_COLOR not in kwargs:
             await self._instance.set_hs_color(self._instance.hs_color, temp_brightness)
 
         # Actual turn off

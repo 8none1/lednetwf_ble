@@ -2,6 +2,7 @@ import logging
 import asyncio
 import voluptuous as vol
 from .lednetwf import LEDNETWFInstance
+from .lednetwf import LEDNETWFNewInstance
 from typing import Any
 from bluetooth_data_tools import human_readable_name
 from homeassistant import config_entries
@@ -125,8 +126,8 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             LOGGER.debug(f"async step validate with User input: {user_input}")
             led_count   = getattr(self._instance, '_led_count', 64) #May be Unsafe, leave blank ?
-            led_type    = getattr(self._instance._chip_type, 'name', "Unknown")
-            color_order = getattr(self._instance._color_order, 'name ', "RGB")
+            led_type    = getattr(self._instance._model_interface.chip_type, 'name', "Unknown")
+            color_order = getattr(self._instance._model_interface.color_order, 'name ', "RGB")
             model_num   = getattr(self._instance, '_model', 0x53) #May be unsafe, leave blank ?
             data        = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120}
             options     = {CONF_LEDCOUNT: led_count, CONF_LEDTYPE: led_type, CONF_COLORORDER: color_order, CONF_MODEL: model_num}
@@ -159,18 +160,26 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def toggle_light(self):
         if not self._instance:
-            self._instance = LEDNETWFInstance(self.mac, self.hass)
+            self._instance = LEDNETWFNewInstance(self.mac, self.hass)
         try:
+            LOGGER.debug(f"In setup toggle, Attempting to update device")
             await self._instance.update()
+            LOGGER.debug(f"Sending initial packets")
             await self._instance.send_initial_packets()
             for n in range(3):
+                LOGGER.debug(f"Turning on and off: {n}")
                 await self._instance.turn_on()
+                LOGGER.debug(f"Turned on, waiting")
                 await asyncio.sleep(1)
+                LOGGER.debug(f"Turning off")
                 await self._instance.turn_off()
+                LOGGER.debug(f"Turned off, waiting")
                 await asyncio.sleep(1)
         except (Exception) as error:
+            LOGGER.error(f"Error connecting to device: {error}", exc_info=True)
             return error
         finally:
+            LOGGER.debug(f"Finally, stopping instance")
             await self._instance.stop()
 
     @staticmethod
