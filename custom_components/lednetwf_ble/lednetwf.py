@@ -1,4 +1,6 @@
 import asyncio
+import importlib
+import pkgutil
 from homeassistant.components import bluetooth
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.components.light import (ColorMode)
@@ -21,35 +23,19 @@ import traceback
 import logging
 
 from .const import (
-    EFFECT_MAP_0x56,
-    EFFECT_LIST_0x56,
-    EFFECT_ID_TO_NAME_0x56,
-    RING_LIGHT_MODEL,
-    STRIP_LIGHT_MODEL,
-    CONF_LEDCOUNT,
-    CONF_LEDTYPE,
-    CONF_COLORORDER,
-    CONF_LEDCOUNT,
     CONF_DELAY,
-    DOMAIN,
-    CONF_NAME,
-    CONF_MODEL,
-    LedTypes_StripLight,
-    LedTypes_RingLight,
-    ColorOrdering
 )
 
-from .model_abstractions import DefaultModelAbstraction
-from .model_0x53 import Model0x53
+# Iterate through all modules in the current package
+package = __package__
+for _, module_name, _ in pkgutil.iter_modules([package.replace('.', '/')]):
+    if module_name.startswith('model_0x'):
+        module = importlib.import_module(f'.{module_name}', package)
+        class_name = f'Model{module_name.split("_")[1]}'
+        if hasattr(module, class_name):
+            globals()[class_name] = getattr(module, class_name)
 
-
-LOGGER = logging.getLogger(__name__)
-
-NAME_ARRAY                    = ["LEDnetWF"]
-# SUPPORTED_MODELS              = [0x53, 0x56] # [Ring light with CW/WW, Strip light with RGB only]
-# FIXME:  At the moment we don't do anything with SUPPORTED_MODELS.  We should use this to filter out devices that don't match what we support.
-# However - that means that when they add new devices which might "just work" they won't get picked up and we will have to add them manually.
-#  Now implemented in the config flow - can delete this if it works
+LOGGER                        = logging.getLogger(__name__)
 WRITE_CHARACTERISTIC_UUIDS    = ["0000ff01-0000-1000-8000-00805f9b34fb"]
 NOTIFY_CHARACTERISTIC_UUIDS   = ["0000ff02-0000-1000-8000-00805f9b34fb"]
 INITIAL_PACKET                = bytearray.fromhex("00 01 80 00 00 04 05 0a 81 8a 8b 96")

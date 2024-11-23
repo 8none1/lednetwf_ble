@@ -83,6 +83,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the bluetooth discovery step."""
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
+        LOGGER.debug("ASB: Discovered bluetooth devices: %s", discovery_info)
         self.device_data = DeviceData(discovery_info)
         self.mac = self.device_data.address()
         self.name = human_readable_name(None, self.device_data.name(), self.mac)

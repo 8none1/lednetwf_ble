@@ -14,6 +14,7 @@ from homeassistant.components.light import (
 EFFECT_MAP_0x56 = {}
 for e in range(1,100):
     EFFECT_MAP_0x56[f"Effect {e}"] = e
+EFFECT_MAP_0x56["Cycle Modes"] = 255
 
 # So called "static" effects.  Actually they are effects which can also be set to a specific colour.
 for e in range(1,11):
@@ -38,23 +39,23 @@ class Model0x56(DefaultModelAbstraction):
         self.icon = "mdi:led-strip-variant"
         self.effect_list = EFFECT_LIST_0x56
 
-        LOGGER.debug(f"Manu data: {manu_data}")
-        LOGGER.debug(f"Manu data 15: {manu_data[15]}")
-        LOGGER.debug(f"Manu data 16: {manu_data[16]}")
+        LOGGER.debug(f"Manu data: {[hex(x) for x in self.manu_data]}")
+        LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
+        LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
 
         if self.manu_data[15] == 0x61:
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
-            self.hs_color = tuple(super().rgb_to_hsv(rgb_color)[0:2])
-            self.brightness = super().rgb_to_hsv(rgb_color)[2]
+            self.hs_color = tuple(super().rgb_to_hsv(rgb_color))[0:2]
+            self.brightness = (super().rgb_to_hsv(rgb_color)[2]) * 255 // 100
             self.color_mode = ColorMode.HS
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
             if self.manu_data[16] != 0xf0:
                 # We're not in a colour mode, so set the effect
-                self.effect_speed = manu_data[17]
-                if 0x02 <= manu_data[16] <= 0x0a:
-                    self.effect = EFFECT_ID_TO_NAME_0x56[manu_data[16] << 8]
+                self.effect_speed = self.manu_data[17]
+                if 0x02 <= self.manu_data[16] <= 0x0a:
+                    self.effect = EFFECT_ID_TO_NAME_0x56[self.manu_data[16] << 8]
                 else:
                     self._effect = EFFECT_OFF
         elif self.manu_data[15] == 0x62:
@@ -86,7 +87,7 @@ class Model0x56(DefaultModelAbstraction):
         self.hs_color   = hs_color
         self.brightness = brightness
         self.effect     = EFFECT_OFF
-        rgb_color = self.hsv_to_rgb(hs_color[0], hs_color[1], self.brightness)
+        rgb_color = self.hsv_to_rgb((hs_color[0], hs_color[1], self.brightness))
         LOGGER.debug(f"Setting RGB colour: {rgb_color}")
         background_col = [0,0,0] # Consider adding support for this in the future?  For now, set black
         rgb_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
@@ -96,9 +97,9 @@ class Model0x56(DefaultModelAbstraction):
         # But they pay off is that they can change the colour of the other static modes as they drag the colour picker around, which is pretty neat. ?
         rgb_packet[10:13] = rgb_color
         rgb_packet[13:16] = background_col
-        rgb_packet[16]    = self._effect_speed
+        rgb_packet[16]    = self.effect_speed
         rgb_packet[20]    = sum(rgb_packet[8:19]) & 0xFF # Checksum
-        LOGGER.debug(f"Set RGB. RGB {self._rgb_color} Brightness {self._brightness}")
+        LOGGER.debug(f"Set RGB. RGB {self.get_rgb_color()} Brightness {self.brightness}")
         return rgb_packet
 
     def set_effect(self, effect, brightness):
@@ -139,7 +140,7 @@ class Model0x56(DefaultModelAbstraction):
             effect_packet[18]    = self.effect_speed # Actually sensitivity, but would like to avoid another slider if possible
             effect_packet[19]    = self.get_brightness_percent()
             effect_packet[20]    = sum(effect_packet[8:19]) & 0xFF
-            self.log(f"music effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+            LOGGER.debug(f"music effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
             return effect_packet
         
         effect_packet     = bytearray.fromhex("00 00 80 00 00 05 06 0b 42 01 32 64 d9")
@@ -205,6 +206,7 @@ class Model0x56(DefaultModelAbstraction):
             return None
         payload = bytearray.fromhex(payload)
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{byte:02X}' for byte in payload])}")
+        # return
         if payload[0] == 0x81:
             # Status request response
             power           = payload[2]
