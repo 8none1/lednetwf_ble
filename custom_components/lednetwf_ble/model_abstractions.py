@@ -67,11 +67,11 @@ class DefaultModelAbstraction:
         self.effect_speed      = 50
         self.color_mode        = ColorMode.UNKNOWN
         self.icon              = "mdi:lightbulb"
-        self.color_temp_kelvin = None
         self.max_color_temp    = 6500
         self.min_color_temp    = 2700
-        self.supported_color_modes   = {ColorMode.UNKNOWN}
-        self.supported_features      = LightEntityFeature.EFFECT
+        self.color_temperature_kelvin      = None
+        self.supported_color_modes         = {ColorMode.UNKNOWN}
+        self.supported_features            = LightEntityFeature.EFFECT
         self.WRITE_CHARACTERISTIC_UUIDS    = ["0000ff01-0000-1000-8000-00805f9b34fb"]
         self.NOTIFY_CHARACTERISTIC_UUIDS   = ["0000ff02-0000-1000-8000-00805f9b34fb"]
         self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 04 05 0a 81 8a 8b 96")

@@ -133,7 +133,7 @@ def rgb_to_hsv(r,g,b):
 
 class LEDNETWFNewInstance:
     def __init__(self, mac, hass, data={}, options={}) -> None:
-        self._data   = data
+        self._data    = data
         self._options = options
         self._hass    = hass
         self._mac     = mac
@@ -145,10 +145,22 @@ class LEDNETWFNewInstance:
             raise ConfigEntryNotReady(
                 f"You need to add bluetooth integration (https://www.home-assistant.io/integrations/bluetooth) or couldn't find a nearby device with address: {self._mac}"
             )
+        
         service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
         LOGGER.debug(f"Service info: {service_info}")
         LOGGER.debug(f"Service info keys: {service_info.keys()}")
-        self._model_interface = Model0x53(service_info['manufacturer_data'])
+        manu_data = service_info['manufacturer_data'].values()
+        manu_data = next(iter(manu_data))
+        LOGGER.debug(f"Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
+        fw_major = f"0x{manu_data[0]:02X}"
+        model_class_name = f"Model{fw_major}"
+        LOGGER.debug(f"Model class name: {model_class_name}")
+        try:
+            model_class = globals()[model_class_name]
+        except KeyError:
+            LOGGER.error(f"Model class {model_class_name} not found.  This model is not supported.")
+            raise ConfigEntryNotReady(f"Model class {model_class_name} not found.  This model is not supported.")
+        self._model_interface = model_class(service_info['manufacturer_data'])
         self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._client: BleakClientWithServiceCache | None = None
         self._disconnect_timer: asyncio.TimerHandle | None = None
@@ -218,7 +230,7 @@ class LEDNETWFNewInstance:
 
     @property
     def color_temp_kelvin(self):
-        return self._model_interface.color_temp_kelvin
+        return self._model_interface.color_temperature_kelvin
 
     @property
     def hs_color(self):
@@ -284,7 +296,11 @@ class LEDNETWFNewInstance:
         led_settings_packet = self._model_interface.set_led_settings(options)
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
         await self._write(led_settings_packet)
+        LOGGER.debug("Sending 1st copy of set led settings packet")
+        await self._write(led_settings_packet)
+        LOGGER.debug("Sending 2nd copy of set led settings packet")
         await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
+        await self.turn_off()
         await self.stop()
 
     @retry_bluetooth_connection_error
@@ -423,7 +439,7 @@ class LEDNETWFInstance:
         self._cached_services: BleakGATTServiceCollection | None = None
         self._expected_disconnect   = False
         self._packet_counter        = 0
-        self._is_on                 = None
+        # self._is_on                 = None
         self._hs_color              = None
         self._rgb_color             = None
         self._brightness            = 255
@@ -908,7 +924,7 @@ class LEDNETWFInstance:
         self._delay = options.get(CONF_DELAY, 120)
         
         if led_count is None or chip_type is None or color_order is None:
-            LOGGER.warn("LED count, chip type or colour order is None and shouldn't be.  Not setting LED settings.")
+            LOGGER.error("LED count, chip type or colour order is None and shouldn't be.  Not setting LED settings.")
             return
         
         if led_count == self._led_count and chip_type == self._chip_type and color_order == self._color_order:

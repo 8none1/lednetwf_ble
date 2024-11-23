@@ -145,7 +145,7 @@ class Model0x53(DefaultModelAbstraction):
                 self.hs_color = tuple(super().rgb_to_hsv(rgb_color)[0:2])
                 self.brightness = super().rgb_to_hsv(rgb_color)[2]
                 self.color_mode = ColorMode.HS
-                self.color_temperature_kelvin = self.min_color_temp
+                #self.color_temperature_kelvin = self.min_color_temp
                 LOGGER.debug(f"From manu RGB colour: {rgb_color}")
                 LOGGER.debug(f"From manu HS colour: {self.hs_color}")
                 LOGGER.debug(f"From manu Brightness: {self.brightness}")
@@ -165,11 +165,19 @@ class Model0x53(DefaultModelAbstraction):
             LOGGER.debug(f"Music reactive mode detected on 0x53 device, but not supported here")
         elif self.manu_data[15] == 0x25:
             # Effect mode
-            self.effect       = EFFECTS_LIST_0x53[self.manu_data[16]-1]
+            LOGGER.debug(f"Effect mode detected. self.manu_data: {self.manu_data}")
+            effect = self.manu_data[16]
+            if effect < len(EFFECTS_LIST_0x53):
+                self.effect = EFFECTS_LIST_0x53[effect - 1]
+            elif effect == 0xFF:
+                self.effect = EFFECTS_LIST_0x53[-1]
+            else:
+                LOGGER.error(f"Unknown effect: {effect}")
+                raise NotImplementedError("Unknown effect")
             self.effect_speed = self.manu_data[19]
             self.brightness   = int(self.manu_data[18] * 255 // 100)
             self.color_mode   = ColorMode.BRIGHTNESS
-            self.color_temperature_kelvin = self.min_color_temp
+            #self.color_temperature_kelvin = self.min_color_temp
         LOGGER.debug(f"Effect: {self.effect}")
         LOGGER.debug(f"Effect speed: {self.effect_speed}")
         LOGGER.debug(f"Brightness: {self.brightness}")
@@ -189,7 +197,7 @@ class Model0x53(DefaultModelAbstraction):
         self.brightness = brightness
         self.effect = EFFECT_OFF
         if color_temp_kelvin is None:
-            LOGGER.error("color_temp_kelvin is None")
+            LOGGER.debug("color_temp_kelvin is None")
             color_temp_kelvin = self.min_color_temp
         color_temp_kelvin = max(2700, min(color_temp_kelvin, 6500))
         self.color_temperature_kelvin = color_temp_kelvin
@@ -251,6 +259,7 @@ class Model0x53(DefaultModelAbstraction):
             return
     
     def set_led_settings(self, options: dict):
+        LOGGER.debug(f"Setting LED settings: {options}")
         led_count   = options.get(const.CONF_LEDCOUNT)
         chip_type   = options.get(const.CONF_LEDTYPE)
         color_order = options.get(const.CONF_COLORORDER)
@@ -262,10 +271,11 @@ class Model0x53(DefaultModelAbstraction):
             self.chip_type         = getattr(const.LedTypes_RingLight, chip_type).value
             self.color_order       = getattr(const.ColorOrdering, color_order).value
             self.led_count         = led_count
+        LOGGER.debug(f"Setting LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}")
         led_settings_packet     = bytearray.fromhex("00 00 80 00 00 06 07 0a 62 00 0e 01 00 71")
-        led_settings_packet[10] = led_count & 0xFF
-        led_settings_packet[11] = chip_type
-        led_settings_packet[12] = color_order
+        led_settings_packet[10] = self.led_count & 0xFF
+        led_settings_packet[11] = self.chip_type
+        led_settings_packet[12] = self.color_order
         led_settings_packet[13] = sum(led_settings_packet[8:12]) & 0xFF
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
         # REMEMBER: The calling function must also call stop() on the device to apply the settings
