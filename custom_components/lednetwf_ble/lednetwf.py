@@ -1,9 +1,9 @@
 import asyncio
-from datetime import datetime
+# from datetime import datetime
 from homeassistant.components import bluetooth
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.components.light import (ColorMode)
-from homeassistant.const import CONF_MAC
+# from homeassistant.const import CONF_MAC
 from homeassistant.components.light import EFFECT_OFF
 
 from bleak.backends.device import BLEDevice
@@ -14,14 +14,16 @@ from bleak_retry_connector import (
     BleakClientWithServiceCache,
     BleakError,
     BleakNotFoundError,
-    ble_device_has_changed,
+    # ble_device_has_changed,
     establish_connection,
+    retry_bluetooth_connection_error,
 )
+
 from typing import Any, TypeVar, cast, Tuple
 from collections.abc import Callable
 import traceback
 import logging
-import colorsys
+# import colorsys
 
 from .const import (
     EFFECT_MAP_0x56,
@@ -61,6 +63,7 @@ BLEAK_BACKOFF_TIME            = 0.25
 RETRY_BACKOFF_EXCEPTIONS      = (BleakDBusError)
 
 WrapFuncType = TypeVar("WrapFuncType", bound=Callable[..., Any])
+
 
 def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
     async def _async_wrap_retry_bluetooth_connection_error(
@@ -316,21 +319,25 @@ class LEDNETWFNewInstance:
             LOGGER.debug(f"ES {self.name}: Connection already in progress, waiting for it to complete")
         
         if self._client and self._client.is_connected:
+            LOGGER.debug(f"{self.name}: Already connected, patting the dog")
             self._reset_disconnect_timer()
             return
 
         async with self._connect_lock:
             # Check again while holding the lock
             if self._client and self._client.is_connected:
+                LOGGER.debug(f"{self.name}: Already connected AND locked, patting the dog")
                 self._reset_disconnect_timer()
                 return
-            LOGGER.debug(f"{self.name}: Connecting")
+            
+            LOGGER.debug(f"{self.name}: Not connected yet, connecting now...")
             client = await establish_connection(
                 BleakClientWithServiceCache,
                 self._bluetooth_device,
                 self.name,
                 self._disconnected,
-                cached_services=self._cached_services,
+                # cached_services=self._cached_services,
+                use_services_cache=True,
                 ble_device_callback=lambda: self._bluetooth_device,
             )
             LOGGER.debug(f"{self.name}: Connected")
