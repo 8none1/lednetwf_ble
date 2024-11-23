@@ -1,20 +1,16 @@
 import asyncio
-# from datetime import datetime
 from homeassistant.components import bluetooth
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.components.light import (ColorMode)
-# from homeassistant.const import CONF_MAC
 from homeassistant.components.light import EFFECT_OFF
-
 from bleak.backends.device import BLEDevice
 from bleak.backends.service import BleakGATTCharacteristic, BleakGATTServiceCollection
 from bleak.exc import BleakDBusError
 from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS as BLEAK_EXCEPTIONS
 from bleak_retry_connector import (
     BleakClientWithServiceCache,
-    BleakError,
+    # BleakError,
     BleakNotFoundError,
-    # ble_device_has_changed,
     establish_connection,
     retry_bluetooth_connection_error,
 )
@@ -23,7 +19,6 @@ from typing import Any, TypeVar, cast, Tuple
 from collections.abc import Callable
 import traceback
 import logging
-# import colorsys
 
 from .const import (
     EFFECT_MAP_0x56,
@@ -51,9 +46,10 @@ from .model_0x53 import Model0x53
 LOGGER = logging.getLogger(__name__)
 
 NAME_ARRAY                    = ["LEDnetWF"]
-SUPPORTED_MODELS              = [0x53, 0x56] # [Ring light with CW/WW, Strip light with RGB only]
+# SUPPORTED_MODELS              = [0x53, 0x56] # [Ring light with CW/WW, Strip light with RGB only]
 # FIXME:  At the moment we don't do anything with SUPPORTED_MODELS.  We should use this to filter out devices that don't match what we support.
 # However - that means that when they add new devices which might "just work" they won't get picked up and we will have to add them manually.
+#  Now implemented in the config flow - can delete this if it works
 WRITE_CHARACTERISTIC_UUIDS    = ["0000ff01-0000-1000-8000-00805f9b34fb"]
 NOTIFY_CHARACTERISTIC_UUIDS   = ["0000ff02-0000-1000-8000-00805f9b34fb"]
 INITIAL_PACKET                = bytearray.fromhex("00 01 80 00 00 04 05 0a 81 8a 8b 96")
@@ -64,10 +60,9 @@ RETRY_BACKOFF_EXCEPTIONS      = (BleakDBusError)
 
 WrapFuncType = TypeVar("WrapFuncType", bound=Callable[..., Any])
 
-
 def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
     async def _async_wrap_retry_bluetooth_connection_error(
-        self: "LEDNETWFNewInstance", *args: Any, **kwargs: Any
+        self: "LEDNETWFInstance", *args: Any, **kwargs: Any
     ) -> Any:
         attempts = DEFAULT_ATTEMPTS
         max_attempts = attempts - 1
@@ -129,7 +124,7 @@ def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
     return cast(WrapFuncType, _async_wrap_retry_bluetooth_connection_error)
 
 
-class LEDNETWFNewInstance:
+class LEDNETWFInstance:
     def __init__(self, mac, hass, data={}, options={}) -> None:
         self._data    = data
         self._options = options
@@ -145,8 +140,8 @@ class LEDNETWFNewInstance:
             )
         
         service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
-        LOGGER.debug(f"Service info: {service_info}")
-        LOGGER.debug(f"Service info keys: {service_info.keys()}")
+        # LOGGER.debug(f"Service info: {service_info}")
+        # LOGGER.debug(f"Service info keys: {service_info.keys()}")
         manu_data = service_info['manufacturer_data'].values()
         manu_data = next(iter(manu_data))
         LOGGER.debug(f"Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
@@ -336,7 +331,7 @@ class LEDNETWFNewInstance:
                 self._bluetooth_device,
                 self.name,
                 self._disconnected,
-                # cached_services=self._cached_services,
+                # cached_services=self._cached_services, # NOTE: removed this and added the next 
                 use_services_cache=True,
                 ble_device_callback=lambda: self._bluetooth_device,
             )

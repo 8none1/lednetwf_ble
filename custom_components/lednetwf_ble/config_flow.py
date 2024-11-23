@@ -2,7 +2,6 @@ import logging
 import asyncio
 import voluptuous as vol
 from .lednetwf import LEDNETWFInstance
-from .lednetwf import LEDNETWFNewInstance
 from typing import Any
 from bluetooth_data_tools import human_readable_name
 from homeassistant import config_entries
@@ -30,7 +29,8 @@ from .const import (
     STRIP_LIGHT_MODEL,
     LedTypes_StripLight,
     LedTypes_RingLight,
-    ColorOrdering
+    ColorOrdering,
+    SUPPORTED_MODELS
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -38,8 +38,19 @@ LOGGER = logging.getLogger(__name__)
 class DeviceData(BluetoothData):
     def __init__(self, discovery_info) -> None:
         self._discovery = discovery_info
+        # LOGGER.debug(f"DeviceData: {discovery_info}")
+        try:
+            manu_data = self._discovery.manufacturer_data.values()
+            manu_data = next(iter(manu_data))
+            LOGGER.debug(f"DISCOVERY Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
+            self.fw_major = manu_data[0]
+        except:
+            pass
     def supported(self):
-        return self._discovery.name.lower().startswith("lednetwf")
+        if self._discovery.name.lower().startswith("lednetwf") and self.fw_major in SUPPORTED_MODELS:
+            return True
+        else:
+            return False
     def address(self):
         return self._discovery.address
     def get_device_name(self):
@@ -51,7 +62,7 @@ class DeviceData(BluetoothData):
     def rssi(self):
         return self._discovery.rssi
     def model(self):
-        return self._discovery.model
+        return self.fw_major
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
         LOGGER.debug("Parsing BLE advertisement data: %s", service_info)
@@ -160,7 +171,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def toggle_light(self):
         if not self._instance:
-            self._instance = LEDNETWFNewInstance(self.mac, self.hass)
+            self._instance = LEDNETWFInstance(self.mac, self.hass)
         try:
             LOGGER.debug(f"In setup toggle, Attempting to update device")
             await self._instance.update()

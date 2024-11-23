@@ -185,9 +185,6 @@ class Model0x53(DefaultModelAbstraction):
         LOGGER.debug(f"Firmware version: {self.fw_major}.{self.fw_minor}")
         LOGGER.debug(f"Is on: {self.is_on}")
         LOGGER.debug(f"Colour mode: {self.color_mode}")
-        LOGGER.debug(f"Effect: {self.effect}")
-        LOGGER.debug(f"Effect speed: {self.effect_speed}")
-        LOGGER.debug(f"Brightness: {self.brightness}")
         LOGGER.debug(f"HS colour: {self.hs_color}")
 
     def set_color_temp_kelvin(self, color_temp_kelvin: int, brightness: int):
@@ -306,7 +303,7 @@ class Model0x53(DefaultModelAbstraction):
                 if selected_effect == 0xf0:
                     # Light is in colour mode
                     rgb_color = (payload[6], payload[7], payload[8])
-                    hsv_color = super.rgb_to_hsv(rgb_color)
+                    hsv_color = super().rgb_to_hsv(rgb_color)
                     self.hs_color = tuple(hsv_color[0:2])
                     self.brightness = int(hsv_color[2] * 255 // 100)
                     self.effect = EFFECT_OFF

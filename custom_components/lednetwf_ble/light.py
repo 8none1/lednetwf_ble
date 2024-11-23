@@ -2,8 +2,8 @@ import logging
 import voluptuous as vol
 from typing import Any, Optional, Tuple
 
+# from .lednetwf import LEDNETWFInstance
 from .lednetwf import LEDNETWFInstance
-from .lednetwf import LEDNETWFNewInstance
 from .const import (DOMAIN, RING_LIGHT_MODEL, STRIP_LIGHT_MODEL)
 
 from homeassistant.const import CONF_MAC
@@ -41,7 +41,7 @@ class LEDNETWFLight(LightEntity):
     _attr_has_entity_name = False
 
     def __init__(
-        self, lednetwfinstance: LEDNETWFNewInstance, name: str, entry_id: str
+        self, lednetwfinstance: LEDNETWFInstance, name: str, entry_id: str
     ) -> None:
         self._instance = lednetwfinstance
         self._entry_id = entry_id
@@ -148,10 +148,6 @@ class LEDNETWFLight(LightEntity):
     @property
     def icon(self):
         return self._instance._model_interface.icon
-        # if self._instance._model == RING_LIGHT_MODEL:
-        #     return "mdi:lightbulb"
-        # else:
-        #     return "mdi:led-strip-variant"
     
     async def async_turn_on(self, **kwargs: Any) -> None:
         LOGGER.debug("async_turn_on called")

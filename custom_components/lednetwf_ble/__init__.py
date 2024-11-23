@@ -7,7 +7,6 @@ from homeassistant.const import Platform
 
 from .const import DOMAIN, CONF_RESET, CONF_DELAY, CONF_LEDCOUNT, CONF_LEDTYPE, CONF_COLORORDER
 from .lednetwf import LEDNETWFInstance
-from .lednetwf import LEDNETWFNewInstance
 import logging
 
 LOGGER = logging.getLogger(__name__)
@@ -20,11 +19,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up from a config entry."""
     config     = entry.data
     options    = entry.options
-    instance   = LEDNETWFNewInstance(entry.data[CONF_MAC], hass, config, options)
+    instance   = LEDNETWFInstance(entry.data[CONF_MAC], hass, config, options)
     # reset = entry.options.get(CONF_RESET, None) or entry.data.get(CONF_RESET, None)
     delay = entry.options.get(CONF_DELAY, None) or entry.data.get(CONF_DELAY, None)
     # LOGGER.debug("Config Reset data: %s and config delay data: %s", reset, delay)
-
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = instance
 
