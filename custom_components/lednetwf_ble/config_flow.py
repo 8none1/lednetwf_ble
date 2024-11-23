@@ -25,8 +25,6 @@ from .const import (
     CONF_LEDTYPE,
     CONF_COLORORDER,
     CONF_MODEL,
-    RING_LIGHT_MODEL,
-    STRIP_LIGHT_MODEL,
     LedTypes_StripLight,
     LedTypes_RingLight,
     ColorOrdering,
@@ -38,12 +36,17 @@ LOGGER = logging.getLogger(__name__)
 class DeviceData(BluetoothData):
     def __init__(self, discovery_info) -> None:
         self._discovery = discovery_info
-        # LOGGER.debug(f"DeviceData: {discovery_info}")
+        LOGGER.debug(f"DeviceData: {discovery_info}")
         try:
             manu_data = self._discovery.manufacturer_data.values()
+            if manu_data is None:
+                raise Exception("No manufacturer data found")
             manu_data = next(iter(manu_data))
             LOGGER.debug(f"DISCOVERY Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
+            LOGGER.debug(f"DISCOVERY manufacturer name: {self._discovery.name}")
+            LOGGER.debug(f"DISCOVERY manufacturer address: {self._discovery.address}")
             self.fw_major = manu_data[0]
+            LOGGER.debug(f"DISCOVERY manufacturer fw_major: {self.fw_major}")
         except:
             pass
     def supported(self):
@@ -55,8 +58,8 @@ class DeviceData(BluetoothData):
         return self._discovery.address
     def get_device_name(self):
         return self._discovery.name
-    def name(self):
-        return self._discovery.name
+    # def name(self):
+    #     return self._discovery.name
     def human_readable_name(self):
         return human_readable_name(None, self._discovery.name, self._discovery.address)
     def rssi(self):
@@ -86,7 +89,8 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         LOGGER.debug("ASB: Discovered bluetooth devices: %s", discovery_info)
         self.device_data = DeviceData(discovery_info)
         self.mac = self.device_data.address()
-        self.name = human_readable_name(None, self.device_data.name(), self.mac)
+        # self.name = human_readable_name(None, self.device_data.get_device_name(), self.mac)
+        self.name = human_readable_name(None, self.device_data.get_device_name(), self.device_data.address())
         self.context["title_placeholders"] = {"name": self.name}
         if self.device_data.supported():
             self._discovered_devices.append(self.device_data)
@@ -103,6 +107,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle the user step to pick discovered device.  All we care about here is getting the MAC of the device we want to connect to."""
         if user_input is not None:
+            LOGGER.debug(f"async step user with User input: {user_input}")
             self.mac = user_input[CONF_MAC]
             if self.name is None:
                 self.name = human_readable_name(None, self.mac_dict[self.mac], self.mac)
@@ -122,7 +127,8 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             device = DeviceData(discovery_info)
             if device.supported():
                 self._discovered_devices.append(device)
-        self.mac_dict = { dev.address(): dev.name() for dev in self._discovered_devices }
+                LOGGER.debug(f"X Discovered device: {device}")
+        self.mac_dict = { dev.address(): dev.get_device_name() for dev in self._discovered_devices }
         if len(self.mac_dict) == 0:
             return self.async_abort(reason="no_devices_found")
         

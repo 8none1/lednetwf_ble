@@ -64,7 +64,7 @@ def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
                 if attempt >= max_attempts:
                     LOGGER.debug(
                         "%s: %s error calling %s, reach max attempts (%s/%s)",
-                        self.name,
+                        self.bluetooth_device_name,
                         type(err),
                         func,
                         attempt,
@@ -74,7 +74,7 @@ def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
                     raise
                 LOGGER.debug(
                     "%s: %s error calling %s, backing off %ss, retrying (%s/%s)...",
-                    self.name,
+                    self.bluetooth_device_name,
                     type(err),
                     func,
                     BLEAK_BACKOFF_TIME,
@@ -87,7 +87,7 @@ def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
                 if attempt >= max_attempts:
                     LOGGER.debug(
                         "%s: %s error calling %s, reach max attempts (%s/%s): %s",
-                        self.name,
+                        self.bluetooth_device_name,
                         type(err),
                         func,
                         attempt,
@@ -98,7 +98,7 @@ def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
                     raise
                 LOGGER.debug(
                     "%s: %s error calling %s, retrying  (%s/%s)...: %s",
-                    self.name,
+                    self.bluetooth_device_name,
                     type(err),
                     func,
                     attempt,
@@ -113,6 +113,13 @@ def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
 class LEDNETWFInstance:
     def __init__(self, mac, hass, data={}, options={}) -> None:
         self._data    = data
+        # LOGGER.debug(f"Data: {data}")
+        # LOGGER.debug(type(data))
+        # LOGGER.debug(dir(data))
+        # LOGGER.debug(f"Items: {data.items()}")
+        # LOGGER.debug(f"Keys: {data.keys()}")
+        # LOGGER.debug(f"Name: {data['name']}")
+        self._name    = self._data['name']
         self._options = options
         self._hass    = hass
         self._mac     = mac
@@ -158,7 +165,7 @@ class LEDNETWFInstance:
         await self._write_while_connected(data)
 
     async def _write_while_connected(self, data: bytearray):
-        LOGGER.debug(f"Writing data to {self.name}: {' '.join([f'{byte:02X}' for byte in data])}")
+        LOGGER.debug(f"Writing data to {self._name}: {' '.join([f'{byte:02X}' for byte in data])}")
         await self._client.write_gatt_char(self._write_uuid, data, False)
     
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
@@ -172,7 +179,7 @@ class LEDNETWFInstance:
         if not self._model_interface.chip_type:
             # We should only need to get this once, since config is immutable.
             # All future changes of this data will come via the config flow.
-            LOGGER.debug(f"Sending GET_LED_SETTINGS_PACKET to {self.name}")
+            LOGGER.debug(f"Sending GET_LED_SETTINGS_PACKET to {self.bluetooth_device_name}")
             await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
     
     @property
@@ -184,7 +191,7 @@ class LEDNETWFInstance:
     #     return self._reset
 
     @property
-    def name(self):
+    def bluetooth_device_name(self):
         return self._bluetooth_device.name
 
     @property
@@ -285,7 +292,7 @@ class LEDNETWFInstance:
     @retry_bluetooth_connection_error
     async def update(self):
         # Called when HA starts up and wants the devices to initialise themselves
-        LOGGER.debug(f"{self.name}: Update in lwdnetwfnew called")
+        LOGGER.debug(f"{self._name}: Update in lednetwf called")
         try:
             await self._ensure_connected()
         except Exception as error:
@@ -295,33 +302,33 @@ class LEDNETWFInstance:
 
     async def _ensure_connected(self) -> None:
         """Ensure connection to device is established."""
-        LOGGER.debug(f"{self.name}: Ensure connected")
+        LOGGER.debug(f"{self._name}: Ensure connected")
         if self._connect_lock.locked():
-            LOGGER.debug(f"ES {self.name}: Connection already in progress, waiting for it to complete")
+            LOGGER.debug(f"ES {self._name}: Connection already in progress, waiting for it to complete")
         
         if self._client and self._client.is_connected:
-            LOGGER.debug(f"{self.name}: Already connected, patting the dog")
+            LOGGER.debug(f"{self._name}: Already connected, patting the dog")
             self._reset_disconnect_timer()
             return
 
         async with self._connect_lock:
             # Check again while holding the lock
             if self._client and self._client.is_connected:
-                LOGGER.debug(f"{self.name}: Already connected AND locked, patting the dog")
+                LOGGER.debug(f"{self._name}: Already connected AND locked, patting the dog")
                 self._reset_disconnect_timer()
                 return
             
-            LOGGER.debug(f"{self.name}: Not connected yet, connecting now...")
+            LOGGER.debug(f"{self._name}: Not connected yet, connecting now...")
             client = await establish_connection(
                 BleakClientWithServiceCache,
                 self._bluetooth_device,
-                self.name,
+                self.bluetooth_device_name,
                 self._disconnected,
                 # cached_services=self._cached_services, # NOTE: removed this and added the next 
                 use_services_cache=True,
                 ble_device_callback=lambda: self._bluetooth_device,
             )
-            LOGGER.debug(f"{self.name}: Connected")
+            LOGGER.debug(f"{self._name}: Connected")
             resolved = self._resolve_characteristics(client.services)
             if not resolved:
                 # Try to handle services failing to load
@@ -333,8 +340,9 @@ class LEDNETWFInstance:
 
             # Subscribe to notification is needed for LEDnetWF devices to accept commands
             self._notification_callback = self._notification_handler
-            await client.start_notify(self._read_uuid, self._notification_callback)
-            LOGGER.debug(f"{self.name}: Subscribed to notifications")
+            # XXX Just changed this to self._client instead of client
+            await self._client.start_notify(self._read_uuid, self._notification_callback)
+            LOGGER.debug(f"{self._name}: Subscribed to notifications")
 
     def _resolve_characteristics(self, services: BleakGATTServiceCollection) -> bool:
         """Resolve characteristics."""
@@ -370,7 +378,7 @@ class LEDNETWFInstance:
 
     async def stop(self) -> None:
         """Stop the LEDNET WF device."""
-        LOGGER.debug("%s: Stop", self.name)
+        LOGGER.debug("%s: Stop", self._name)
         await self._execute_disconnect()
 
     async def _execute_timed_disconnect(self) -> None:

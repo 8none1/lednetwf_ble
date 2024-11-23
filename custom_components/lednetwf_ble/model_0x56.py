@@ -46,7 +46,7 @@ class Model0x56(DefaultModelAbstraction):
         if self.manu_data[15] == 0x61:
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
             self.hs_color = tuple(super().rgb_to_hsv(rgb_color))[0:2]
-            self.brightness = (super().rgb_to_hsv(rgb_color)[2]) * 255 // 100
+            self.brightness = (super().rgb_to_hsv(rgb_color)[2])
             self.color_mode = ColorMode.HS
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
@@ -184,9 +184,9 @@ class Model0x56(DefaultModelAbstraction):
         led_count_bytes         = bytearray(led_count.to_bytes(2, byteorder='big'))
         led_settings_packet[9:11] = led_count_bytes
         led_settings_packet[11:13] = [0, 1]  # We're only supporting a single segment
-        led_settings_packet[13] = chip_type
-        led_settings_packet[14] = color_order
-        led_settings_packet[15] = led_count & 0xFF
+        led_settings_packet[13] = self.chip_type
+        led_settings_packet[14] = self.color_order
+        led_settings_packet[15] = self.led_count & 0xFF
         led_settings_packet[16] = 1 # 1 music mode segment, can support more in the app.
         led_settings_packet[17] = sum(led_settings_packet[9:18]) & 0xFF
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
