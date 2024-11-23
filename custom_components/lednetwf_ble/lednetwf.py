@@ -64,7 +64,7 @@ WrapFuncType = TypeVar("WrapFuncType", bound=Callable[..., Any])
 
 def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
     async def _async_wrap_retry_bluetooth_connection_error(
-        self: "LEDNETWFInstance | LEDNETWFNewInstance", *args: Any, **kwargs: Any
+        self: "LEDNETWFNewInstance", *args: Any, **kwargs: Any
     ) -> Any:
         attempts = DEFAULT_ATTEMPTS
         max_attempts = attempts - 1
@@ -125,11 +125,6 @@ def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
 
     return cast(WrapFuncType, _async_wrap_retry_bluetooth_connection_error)
 
-
-def rgb_to_hsv(r,g,b):
-    h, s, v = colorsys.rgb_to_hsv(r/255.0,g/255.0,b/255.0)
-    h, s, v = int(h*360), int(s*100), int(v*100)
-    return [h,s,v]
 
 class LEDNETWFNewInstance:
     def __init__(self, mac, hass, data={}, options={}) -> None:
