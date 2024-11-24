@@ -1,33 +1,46 @@
+# 0x62 device
+# String of non-addressable LEDs with a microphone
+# They have an annoying feature where as the light is turning off and so fading out, it reports the brightness multiple times
+# as they fade out.  So the brightness changes quick as they turn off.  This means that the UI can jump about it when changing modes etc.
+
 from .model_abstractions import DefaultModelAbstraction
 from . import const
-
+from enum import Enum
 import logging
 LOGGER = logging.getLogger(__name__)
 
-import colorsys
 from homeassistant.components.light import (
     ColorMode,
     EFFECT_OFF
 )
 
-# 0x56 Effect data
+# This device only supports three colour orders, so override the defaults with our own
+# In order to maintain compatibility with the rest of the code, we'll use some of the same values for unsupported colour orders
+# This will manifest to the user as the same colour order as RGB.
+class ColorOrdering(Enum):
+    RGB = 0x01
+    RBG = 0x01
+    GRB = 0x02
+    GBR = 0x01
+    BRG = 0x03
+    BGR = 0x01
+    
+    @classmethod
+    def from_value(cls, value):
+        for member in cls:
+            if member.value == value:
+                return member
+        raise ValueError(f"No member with value {value}")
+
+# 0x62 Effect data
 EFFECT_MAP_0x62 = {}
-for e in range(37,56):
+for e in range(37,58):
     EFFECT_MAP_0x62[f"Effect {e-36}"] = e
-
-
-# # So called "static" effects.  Actually they are effects which can also be set to a specific colour.
-# for e in range(1,11):
-#     EFFECT_MAP_0x62[f"Static Effect {e}"] = e << 8 # Give the static effects much higher values which we can then shift back again in the effect function
-
-# # Sound reactive effects.  Numbered 1-15 internally, we will offset them by 50 to avoid clashes with the other effects
-# for e in range(1+0x32, 16+0x32):
-#     EFFECT_MAP_0x62[f"Sound Reactive {e-0x32}"] = e << 8
-
-# #EFFECT_MAP_0x56["_Sound Reactive"] = 0xFFFF # This is going to be a special case
+EFFECT_MAP_0x62["_Effect Off"]         = 0
+EFFECT_MAP_0x62["Candle Mode"]        = 100
+EFFECT_MAP_0x62["Sound Reactive"]     = 200
 EFFECT_LIST_0x62 = sorted(EFFECT_MAP_0x62)
 EFFECT_ID_TO_NAME_0x62 = {v: k for k, v in EFFECT_MAP_0x62.items()}
-
 
 class Model0x62(DefaultModelAbstraction):
     # Strip light
@@ -35,7 +48,9 @@ class Model0x62(DefaultModelAbstraction):
         LOGGER.debug("Model 0x62 init")
         super().__init__(manu_data)
         self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 02 03 07 22 22")
-        self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 08 2c 02 07 00 0f ab")
+        #self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 08 2c 02 07 00 0f ab")
+        self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 0e 05 15 07 00 0f 9d")
+        #                                                 
         self.supported_color_modes = {ColorMode.HS} # Actually, it supports RGB, but this will allow us to separate colours from brightness
         self.icon = "mdi:led-strip-variant"
         self.effect_list = EFFECT_LIST_0x62
@@ -43,36 +58,39 @@ class Model0x62(DefaultModelAbstraction):
         LOGGER.debug(f"Manu data: {[f'{i}: {hex(x)}' for i, x in enumerate(self.manu_data)]}")
         LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
         LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
-        return
-
+        # return
+        if self.manu_data[15] == 0x38:
+            self.is_on = False
         if self.manu_data[15] == 0x61:
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
             self.hs_color = tuple(super().rgb_to_hsv(rgb_color))[0:2]
             self.brightness = (super().rgb_to_hsv(rgb_color)[2])
             self.color_mode = ColorMode.HS
+            self.is_on = True
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
-            if self.manu_data[16] != 0xf0:
-                # We're not in a colour mode, so set the effect
-                self.effect_speed = self.manu_data[17]
-                if 0x02 <= self.manu_data[16] <= 0x0a:
-                    self.effect = EFFECT_ID_TO_NAME_0x62[self.manu_data[16] << 8]
-                else:
-                    self._effect = EFFECT_OFF
-        elif self.manu_data[15] == 0x62:
-            # Music reactive mode. 
-            self._color_mode = ColorMode.BRIGHTNESS
-            effect = manu_data[16]
-            scaled_effect = (effect + 0x32) << 8
-            self.effect = EFFECT_ID_TO_NAME_0x62[scaled_effect]
-        elif self.manu_data[15] == 0x25:
+            # if self.manu_data[16] != 0xf0:
+            #     # We're not in a colour mode, so set the effect
+            #     self.effect_speed = self.manu_data[17]
+            #     if 0x02 <= self.manu_data[16] <= 0x0a:
+            #         self.effect = EFFECT_ID_TO_NAME_0x62[self.manu_data[16] << 8]
+            #     else:
+            #         self._effect = EFFECT_OFF
+        # elif self.manu_data[15] == 0x62:
+        #     # Music reactive mode. 
+        #     self._color_mode = ColorMode.BRIGHTNESS
+        #     effect = manu_data[16]
+        #     scaled_effect = (effect + 0x32) << 8
+        #     self.effect = EFFECT_ID_TO_NAME_0x62[scaled_effect]
+        elif self.manu_data[15] >= 37 and self.manu_data[15] <= 56:
             # Effect mode
-            effect = self.manu_data[16]
+            effect = self.manu_data[15]
             self.effect = EFFECT_ID_TO_NAME_0x62[effect]
             self.effect_speed = self.manu_data[17]
             self.brightness   = int(self.manu_data[18] * 255 // 100)
             self.color_mode   = ColorMode.BRIGHTNESS
+            self.is_on        = True
         
         LOGGER.debug(f"Effect:           {self.effect}")
         LOGGER.debug(f"Effect speed:     {self.effect_speed}")
@@ -106,51 +124,35 @@ class Model0x62(DefaultModelAbstraction):
             raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x62")
         self.effect = effect
         self.brightness = brightness
-        self.color_mode  = ColorMode.BRIGHTNESS
         effect_id = EFFECT_MAP_0x62.get(effect)
         
-        # if 0x0100 <= effect_id <= 0x1100: # See above for the meaning of these values.
-        #     # We are dealing with "static" special effect numbers
-        #     LOGGER.debug(f"'Static' effect: {effect_id}")
-        #     effect_id = effect_id >> 8 # Shift back to the actual effect id
-        #     LOGGER.debug(f"Special effect after shifting: {effect_id}")
-        #     # effect_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
-        #     effect_packet = bytearray.fromhex("00 0f 80 00 00 05 06 0b 38 28 18 19 91")
-        #     effect_packet[9] = effect_id
-        #     effect_packet[10:13] = self.get_rgb_color()
-        #     effect_packet[16] = self.effect_speed
-        #     effect_packet[20] = sum(effect_packet[8:12]) & 0xFF # checksum
-        #     LOGGER.debug(f"static effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
-        #     return effect_packet
+        if effect_id == 0: # Effect off
+            self.set_color(self.hs_color, self.brightness)
+            return None
         
-        # if 0x2100 <= effect_id <= 0x4100: # Music mode.
-        #     # We are dealing with a music mode effect
-        #     effect_packet = bytearray.fromhex("00 22 80 00 00 0d 0e 0b 73 00 26 01 ff 00 00 ff 00 00 20 1a d2")
-        #     LOGGER.debug(f"Music effect: {effect_id}")
-        #     effect_id = (effect_id >> 8) - 0x32 # Shift back to the actual effect id
-        #     LOGGER.debug(f"Music effect after shifting: {effect_id}")
-        #     effect_packet[9]     = 1 # On
-        #     effect_packet[11]    = effect_id
-        #     effect_packet[12:15] = self.get_rgb_color()
-        #     effect_packet[15:18] = self.get_rgb_color() # maybe background colour?
-        #     effect_packet[18]    = self.effect_speed # Actually sensitivity, but would like to avoid another slider if possible
-        #     effect_packet[19]    = self.get_brightness_percent()
-        #     effect_packet[20]    = sum(effect_packet[8:19]) & 0xFF
-        #     LOGGER.debug(f"music effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
-        #     return effect_packet
-        
-        effect_packet     = bytearray.fromhex("00 15 80 00 00 05 06 0b 38 25 01 64 c2")
-        self.color_mode   = ColorMode.BRIGHTNESS # 2024.2 Allows setting color mode for changing effects brightness.  Effects above here support RGB, so only set here.
-        effect_packet[9]  = effect_id
-        # Convert speed from percentage (0-100) to a value between 0x1f and 0x01
-        # 0x01 = 100% and 0x1f = 1%
-        speed = round(0x1f - (self.effect_speed - 1) * (0x1f - 0x01) / (100 - 1))
-        effect_packet[10] = speed
-        effect_packet[11] = self.get_brightness_percent()
-        effect_packet[12] = sum(effect_packet[8:11]) & 0xFF
-        LOGGER.debug(f"Effect packet: {' '.join([f'{byte:02X}' for byte in effect_packet])}")
-        # return effect_packet
-        return None
+        if 100 <= effect_id <= 200: # Candle mode
+            effect_packet = bytearray.fromhex("00 04 80 00 00 09 0a 0b 39 d1 ff 00 00 18 2e 03 52")
+            effect_packet[10:13] = self.get_rgb_color()
+            effect_packet[13]    = round(0x1f - (self.effect_speed - 1) * (0x1f - 0x01) / (100 - 1))
+            effect_packet[14]    = self.get_brightness_percent()
+            effect_packet[16]    = sum(effect_packet[8:16]) & 0xFF
+            LOGGER.debug(f"Candle effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+            return effect_packet
+        if 200 <= effect_id <= 300: # Sound reactive mode
+            LOGGER.debug("Sound reactive mode not implemented")
+            return None
+        else:
+            effect_packet     = bytearray.fromhex("00 15 80 00 00 05 06 0b 38 25 01 64 c2")
+            self.color_mode   = ColorMode.BRIGHTNESS # 2024.2 Allows setting color mode for changing effects brightness.  Effects above here support RGB, so only set here.
+            effect_packet[9]  = effect_id
+            # Convert speed from percentage (0-100) to a value between 0x1f and 0x01
+            # 0x01 = 100% and 0x1f = 1%
+            speed = round(0x1f - (self.effect_speed - 1) * (0x1f - 0x01) / (100 - 1))
+            effect_packet[10] = speed
+            effect_packet[11] = self.get_brightness_percent()
+            effect_packet[12] = sum(effect_packet[8:11]) & 0xFF
+            LOGGER.debug(f"Effect packet: {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+            return effect_packet
     
     def set_brightness(self, brightness):
         if brightness == self.brightness:
@@ -169,27 +171,18 @@ class Model0x62(DefaultModelAbstraction):
     
     def set_led_settings(self, options: dict):
         LOGGER.debug(f"Setting LED settings: {options}")
-        led_count   = options.get(const.CONF_LEDCOUNT)
-        chip_type   = options.get(const.CONF_LEDTYPE)
         color_order = options.get(const.CONF_COLORORDER)
         self._delay = options.get(const.CONF_DELAY, 120)
-        if led_count is None or chip_type is None or color_order is None:
-            LOGGER.error("LED count, chip type or colour order is None and shouldn't be.  Not setting LED settings.")
+        if color_order is None:
+            LOGGER.error("LED colour order is None and shouldn't be.  Not setting LED settings.")
             return
         else:
-            self.chip_type         = getattr(const.LedTypes_StripLight, chip_type).value
-            self.color_order       = getattr(const.ColorOrdering, color_order).value
-            self.led_count         = led_count
-        LOGGER.debug(f"Setting LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}")
-        led_settings_packet     = bytearray.fromhex("00 00 80 00 00 0b 0c 0b 62 00 64 00 03 01 00 64 03 f0 21")
-        led_count_bytes         = bytearray(led_count.to_bytes(2, byteorder='big'))
-        led_settings_packet[9:11] = led_count_bytes
-        led_settings_packet[11:13] = [0, 1]  # We're only supporting a single segment
-        led_settings_packet[13] = self.chip_type
-        led_settings_packet[14] = self.color_order
-        led_settings_packet[15] = self.led_count & 0xFF
-        led_settings_packet[16] = 1 # 1 music mode segment, can support more in the app.
-        led_settings_packet[17] = sum(led_settings_packet[9:18]) & 0xFF
+            self.color_order       = getattr(ColorOrdering, color_order).value
+            
+        LOGGER.debug(f"Setting LED settings: Colour order: {self.color_order}")
+        led_settings_packet     = bytearray.fromhex("00 04 80 00 00 05 06 0b 62 00 01 0f 72")
+        led_settings_packet[10] = self.color_order
+        led_settings_packet[12] = sum(led_settings_packet[8:12]) & 0xFF
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
         # REMEMBER: The calling function must also call stop() on the device to apply the settings
         return led_settings_packet
@@ -213,7 +206,6 @@ class Model0x62(DefaultModelAbstraction):
             power           = payload[2]
             mode            = payload[3]
             selected_effect = payload[4]
-            # self.led_count  = payload[12]
             self.is_on      = True if power == 0x23 else False
 
             if mode == 0x61:
@@ -232,6 +224,9 @@ class Model0x62(DefaultModelAbstraction):
                     self.effect = EFFECT_OFF
                     self.color_mode = ColorMode.HS
                     self.color_temperature_kelvin = None
+            elif mode == 0x5f:
+                # I think this is effect mode
+                LOGGER.debug(f"Effect mode notification?")
             #     elif selected_effect == 0x01:
             #         self.color_mode = ColorMode.HS
             #         self.effect = EFFECT_OFF
@@ -261,8 +256,8 @@ class Model0x62(DefaultModelAbstraction):
         
         elif payload[1] == 0x63:
             LOGGER.debug(f"LED settings response received")
-            self.led_count = int.from_bytes(bytes([payload[2], payload[3]]), byteorder='big') * payload[5]
-            self.chip_type = const.LedTypes_StripLight.from_value(payload[6])
-            self.color_order = const.ColorOrdering.from_value(payload[7])
+            #self.led_count = int.from_bytes(bytes([payload[2], payload[3]]), byteorder='big') * payload[5]
+            #self.chip_type = const.LedTypes_StripLight.from_value(payload[6])
+            #self.color_order = const.ColorOrdering.from_value(payload[7])
 
 

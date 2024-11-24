@@ -48,7 +48,7 @@ class DeviceData(BluetoothData):
             self.fw_major = manu_data[0]
             # LOGGER.debug(f"DISCOVERY manufacturer fw_major: {self.fw_major}")
         except:
-            pass
+            raise Exception("Error parsing manufacturer data")
     def supported(self):
         if self._discovery.name.lower().startswith("lednetwf") and self.fw_major in SUPPORTED_MODELS:
             LOGGER.debug(f"DeviceData: {self._discovery}")
@@ -183,6 +183,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120}
                 LOGGER.debug(f"Device data is None, creating new data to pass up: {data}")
             else:
+                # TODO:  Why not just this though by default and not use self.mac etc?
                 data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120}
                 LOGGER.debug(f"Device data exists: {data}")
             self._instance = LEDNETWFInstance(self.mac, self.hass, data)

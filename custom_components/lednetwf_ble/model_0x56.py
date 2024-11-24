@@ -109,7 +109,7 @@ class Model0x56(DefaultModelAbstraction):
             raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x53")
         self.effect = effect
         self.brightness = brightness
-        self.color_mode  = ColorMode.BRIGHTNESS
+        #self.color_mode  = XXX ColorMode.BRIGHTNESS # Don't set this here, we might want to change the color of the effects?
         effect_id = EFFECT_MAP_0x56.get(effect)
         # We might need to force a colour if there isn't one set. The strip lights effects sometimes need a colour to work properly
         # Leaving this off for now, but in the old way we just forced red.
