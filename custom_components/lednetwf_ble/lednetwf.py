@@ -141,6 +141,11 @@ class LEDNETWFInstance:
         fw_major = f"0x{manu_data[0]:02X}"
         model_class_name = f"Model{fw_major}"
         LOGGER.debug(f"Model class name: {model_class_name}")
+        # This might hack in support for more than one model to a single abstraction....
+        # This is to attempt support for this issue: https://github.com/raulgbcr/lednetwf_ble/issues/26
+        # and avoid just making another copy of 0x62 and renaming it.  This is a temporary fix until I work out a better way to do this.
+        if model_class_name == "Model0x55":
+            model_class_name = "Model0x62"
         try:
             model_class = globals()[model_class_name]
         except KeyError:
