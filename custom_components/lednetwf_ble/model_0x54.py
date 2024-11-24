@@ -1,7 +1,5 @@
-# 0x62 device
-# String of non-addressable LEDs with a microphone
-# They have an annoying feature where as the light is turning off and so fading out, it reports the brightness multiple times
-# as they fade out.  So the brightness changes quick as they turn off.  This means that the UI can jump about it when changing modes etc.
+# 0x54 device
+# Currently a copy of 0x62 
 
 from .model_abstractions import DefaultModelAbstraction
 from . import const
@@ -32,20 +30,20 @@ class ColorOrdering(Enum):
                 return member
         raise ValueError(f"No member with value {value}")
 
-# 0x62 Effect data
-EFFECT_MAP_0x62 = {}
+# 0x54 Effect data
+EFFECT_MAP_0x54 = {}
 for e in range(37,58):
-    EFFECT_MAP_0x62[f"Effect {e-36}"] = e
-EFFECT_MAP_0x62["_Effect Off"]         = 0
-EFFECT_MAP_0x62["Candle Mode"]        = 100
-EFFECT_MAP_0x62["Sound Reactive"]     = 200
-EFFECT_LIST_0x62 = sorted(EFFECT_MAP_0x62)
-EFFECT_ID_TO_NAME_0x62 = {v: k for k, v in EFFECT_MAP_0x62.items()}
+    EFFECT_MAP_0x54[f"Effect {e-36}"] = e
+EFFECT_MAP_0x54["_Effect Off"]         = 0
+EFFECT_MAP_0x54["Candle Mode"]        = 100
+EFFECT_MAP_0x54["Sound Reactive"]     = 200
+EFFECT_LIST_0x54 = sorted(EFFECT_MAP_0x54)
+EFFECT_ID_TO_NAME_0x54 = {v: k for k, v in EFFECT_MAP_0x54.items()}
 
-class Model0x62(DefaultModelAbstraction):
+class Model0x54(DefaultModelAbstraction):
     # Strip light
     def __init__(self, manu_data):
-        LOGGER.debug("Model 0x62 init")
+        LOGGER.debug("Model 0x54 init")
         super().__init__(manu_data)
         self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 02 03 07 22 22")
         #self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 08 2c 02 07 00 0f ab")
@@ -53,7 +51,7 @@ class Model0x62(DefaultModelAbstraction):
         #                                                 
         self.supported_color_modes = {ColorMode.HS} # Actually, it supports RGB, but this will allow us to separate colours from brightness
         self.icon = "mdi:led-strip-variant"
-        self.effect_list = EFFECT_LIST_0x62
+        self.effect_list = EFFECT_LIST_0x54
 
         LOGGER.debug(f"Manu data: {[f'{i}: {hex(x)}' for i, x in enumerate(self.manu_data)]}")
         LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
@@ -86,7 +84,7 @@ class Model0x62(DefaultModelAbstraction):
         elif self.manu_data[15] >= 37 and self.manu_data[15] <= 56:
             # Effect mode
             effect = self.manu_data[15]
-            self.effect = EFFECT_ID_TO_NAME_0x62[effect]
+            self.effect = EFFECT_ID_TO_NAME_0x54[effect]
             self.effect_speed = self.manu_data[17]
             self.brightness   = int(self.manu_data[18] * 255 // 100)
             self.color_mode   = ColorMode.BRIGHTNESS
@@ -118,11 +116,11 @@ class Model0x62(DefaultModelAbstraction):
     def set_effect(self, effect, brightness):
         # Returns the byte array to set the effect
         LOGGER.debug(f"Setting effect: {effect}")
-        if effect not in EFFECT_LIST_0x62:
-            raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x62")
+        if effect not in EFFECT_LIST_0x54:
+            raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x54")
         self.effect = effect
         self.brightness = brightness
-        effect_id = EFFECT_MAP_0x62.get(effect)
+        effect_id = EFFECT_MAP_0x54.get(effect)
         
         if effect_id == 0: # Effect off
             self.set_color(self.hs_color, self.brightness)
