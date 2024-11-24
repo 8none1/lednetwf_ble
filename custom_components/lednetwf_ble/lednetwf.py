@@ -143,6 +143,7 @@ class LEDNETWFInstance:
         # This might hack in support for more than one model to a single abstraction....
         # This is to attempt support for this issue: https://github.com/raulgbcr/lednetwf_ble/issues/26
         # and avoid just making another copy of 0x62 and renaming it.  This is a temporary fix until I work out a better way to do this.
+        # Perhaps maintaining a look up table in const would do?
         if model_class_name == "Model0x55":
             model_class_name = "Model0x62"
         LOGGER.debug(f"Model class name: {model_class_name}")
