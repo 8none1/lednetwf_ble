@@ -36,21 +36,22 @@ LOGGER = logging.getLogger(__name__)
 class DeviceData(BluetoothData):
     def __init__(self, discovery_info) -> None:
         self._discovery = discovery_info
-        LOGGER.debug(f"DeviceData: {discovery_info}")
+        # LOGGER.debug(f"DeviceData: {discovery_info}")
         try:
             manu_data = self._discovery.manufacturer_data.values()
             if manu_data is None:
                 raise Exception("No manufacturer data found")
             manu_data = next(iter(manu_data))
-            LOGGER.debug(f"DISCOVERY Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
-            LOGGER.debug(f"DISCOVERY manufacturer name: {self._discovery.name}")
-            LOGGER.debug(f"DISCOVERY manufacturer address: {self._discovery.address}")
+            # LOGGER.debug(f"DISCOVERY Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
+            # LOGGER.debug(f"DISCOVERY manufacturer name: {self._discovery.name}")
+            # LOGGER.debug(f"DISCOVERY manufacturer address: {self._discovery.address}")
             self.fw_major = manu_data[0]
-            LOGGER.debug(f"DISCOVERY manufacturer fw_major: {self.fw_major}")
+            # LOGGER.debug(f"DISCOVERY manufacturer fw_major: {self.fw_major}")
         except:
             pass
     def supported(self):
         if self._discovery.name.lower().startswith("lednetwf") and self.fw_major in SUPPORTED_MODELS:
+            LOGGER.debug(f"DeviceData: {self._discovery}")
             return True
         else:
             return False
@@ -178,7 +179,13 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def toggle_light(self):
         if not self._instance:
-            self._instance = LEDNETWFInstance(self.mac, self.hass)
+            if self.device_data is None:
+                data = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120}
+                LOGGER.debug(f"Device data is None, creating new data to pass up: {data}")
+            else:
+                data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120}
+                LOGGER.debug(f"Device data exists: {data}")
+            self._instance = LEDNETWFInstance(self.mac, self.hass, data)
         try:
             LOGGER.debug(f"In setup toggle, Attempting to update device")
             await self._instance.update()

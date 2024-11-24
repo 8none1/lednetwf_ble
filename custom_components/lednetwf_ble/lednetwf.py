@@ -113,7 +113,7 @@ def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
 class LEDNETWFInstance:
     def __init__(self, mac, hass, data={}, options={}) -> None:
         self._data    = data
-        # LOGGER.debug(f"Data: {data}")
+        LOGGER.debug(f"Data: {data}")
         # LOGGER.debug(type(data))
         # LOGGER.debug(dir(data))
         # LOGGER.debug(f"Items: {data.items()}")
@@ -156,6 +156,8 @@ class LEDNETWFInstance:
         self._read_uuid             = None
     async def _write(self, data: bytearray):
         """Send command to device and read response."""
+        if data is None:
+            return
         await self._ensure_connected()
         if self._packet_counter > 65535:
             self._packet_counter = 0

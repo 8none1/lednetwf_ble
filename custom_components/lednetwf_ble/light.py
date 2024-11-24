@@ -4,7 +4,7 @@ from typing import Any, Optional, Tuple
 
 # from .lednetwf import LEDNETWFInstance
 from .lednetwf import LEDNETWFInstance
-from .const import (DOMAIN, RING_LIGHT_MODEL, STRIP_LIGHT_MODEL)
+from .const import (DOMAIN)
 
 from homeassistant.const import CONF_MAC
 import homeassistant.helpers.config_validation as cv
@@ -197,13 +197,14 @@ class LEDNETWFLight(LightEntity):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        # Fix for turn of circle effect of HSV MODE(controller skips turn off animation if state is not changed since last turn on)
-        if self._instance.brightness == 255:
-            temp_brightness = 254
-        else:
-            temp_brightness = self._instance.brightness + 1
-        if self._instance.color_mode is ColorMode.HS and ATTR_HS_COLOR not in kwargs:
-            await self._instance.set_hs_color(self._instance.hs_color, temp_brightness)
+        # # Fix for turn of circle effect of HSV MODE(controller skips turn off animation if state is not changed since last turn on)
+        # Disabling for now, needs to be moved in to the 0x53 code as it is specific to that model
+        # if self._instance.brightness == 255:
+        #     temp_brightness = 254
+        # else:
+        #     temp_brightness = self._instance.brightness + 1
+        # if self._instance.color_mode is ColorMode.HS and ATTR_HS_COLOR not in kwargs:
+        #     await self._instance.set_hs_color(self._instance.hs_color, temp_brightness)
 
         # Actual turn off
         await self._instance.turn_off()
