@@ -36,17 +36,16 @@ LOGGER = logging.getLogger(__name__)
 class DeviceData(BluetoothData):
     def __init__(self, discovery_info) -> None:
         self._discovery = discovery_info
-        # LOGGER.debug(f"DeviceData: {discovery_info}")
+        LOGGER.debug(f"DeviceData: {discovery_info}")
+        LOGGER.debug(f"Name: {self._discovery.name}")
+        manu_data = next(iter(self._discovery.manufacturer_data.values()), None)
+        LOGGER.debug(f"Manufacturer data: {manu_data}")
         try:
-            manu_data = self._discovery.manufacturer_data.values()
             if manu_data is None:
-                raise Exception("No manufacturer data found")
-            manu_data = next(iter(manu_data))
-            # LOGGER.debug(f"DISCOVERY Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
-            # LOGGER.debug(f"DISCOVERY manufacturer name: {self._discovery.name}")
-            # LOGGER.debug(f"DISCOVERY manufacturer address: {self._discovery.address}")
-            self.fw_major = manu_data[0]
-            # LOGGER.debug(f"DISCOVERY manufacturer fw_major: {self.fw_major}")
+                self.fw_major = 0x00
+            else:
+                self.fw_major = manu_data[0]
+                LOGGER.debug(f"DISCOVERY manufacturer fw_major: 0x{self.fw_major:02x}")
         except:
             raise Exception("Error parsing manufacturer data")
     def supported(self):
@@ -65,7 +64,7 @@ class DeviceData(BluetoothData):
         return human_readable_name(None, self._discovery.name, self._discovery.address)
     def rssi(self):
         return self._discovery.rssi
-    def model(self):
+    def get_model(self):
         return self.fw_major
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
@@ -77,9 +76,10 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     def __init__(self) -> None:
-        self.mac = None
+        self.mac       = None
         self._instance = None
-        self.name = None
+        self.name      = None
+        self.model     = None
         self._discovered_device: DeviceData | None = None
         self._discovered_devices = []
 
@@ -91,7 +91,8 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.device_data = DeviceData(discovery_info)
         self.mac = self.device_data.address()
         # self.name = human_readable_name(None, self.device_data.get_device_name(), self.mac)
-        self.name = human_readable_name(None, self.device_data.get_device_name(), self.device_data.address())
+        self.name  = human_readable_name(None, self.device_data.get_device_name(), self.device_data.address())
+        self.model = self.device_data.get_model()
         self.context["title_placeholders"] = {"name": self.name}
         if self.device_data.supported():
             self._discovered_devices.append(self.device_data)
@@ -147,9 +148,9 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             led_count   = getattr(self._instance, '_led_count', 64) #May be Unsafe, leave blank ?
             led_type    = getattr(self._instance._model_interface.chip_type, 'name', "Unknown")
             color_order = getattr(self._instance._model_interface.color_order, 'name ', "RGB")
-            model_num   = getattr(self._instance, '_model', 0x53) #May be unsafe, leave blank ?
-            data        = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120}
-            options     = {CONF_LEDCOUNT: led_count, CONF_LEDTYPE: led_type, CONF_COLORORDER: color_order, CONF_MODEL: model_num}
+            # model_num   = getattr(self._instance, '_model', 0x53) #May be unsafe, leave blank ?
+            data        = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120, CONF_MODEL: self.model}
+            options     = {CONF_LEDCOUNT: led_count, CONF_LEDTYPE: led_type, CONF_COLORORDER: color_order}
 
             # TODO: deal with "none" better from old devices which haven't got config data yet. Also update the function in const to not error on none.
 
@@ -179,13 +180,16 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def toggle_light(self):
         if not self._instance:
-            if self.device_data is None:
-                data = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120}
-                LOGGER.debug(f"Device data is None, creating new data to pass up: {data}")
-            else:
-                # TODO:  Why not just this though by default and not use self.mac etc?
-                data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120}
-                LOGGER.debug(f"Device data exists: {data}")
+            # if self.device_data is None:
+            #     data = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120, CONF_MODEL: self.device_data.get_device_name()}
+            #     LOGGER.debug(f"Device data is None, creating new data to pass up: {data}")
+            # else:
+            #     # TODO:  Why not just this though by default and not use self.mac etc?
+            #     data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120, CONF_MODEL: self.device_data.model()}
+            #     LOGGER.debug(f"Device data exists: {data}")
+            data = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120, CONF_MODEL: self.device_data.get_model()}
+            data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120, CONF_MODEL: self.device_data.get_model()}
+            LOGGER.debug(f"Device data is None, creating new data to pass up: {data}")
             self._instance = LEDNETWFInstance(self.mac, self.hass, data)
         try:
             LOGGER.debug(f"In setup toggle, Attempting to update device")

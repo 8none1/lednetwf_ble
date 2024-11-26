@@ -24,6 +24,7 @@ import logging
 
 from .const import (
     CONF_DELAY,
+    CONF_MODEL,
 )
 
 # Iterate through all modules in the current package
@@ -120,9 +121,11 @@ class LEDNETWFInstance:
         # LOGGER.debug(f"Keys: {data.keys()}")
         # LOGGER.debug(f"Name: {data['name']}")
         self._name    = self._data['name']
+        self._model   = self._data.get(CONF_MODEL)
         self._options = options
         self._hass    = hass
         self._mac     = mac
+        # TODO: there are too many methods to do the same thing here, just use this one below?
         self._delay   = self._options.get(CONF_DELAY, self._data.get(CONF_DELAY, 120)) # Try and read from options first, data second so that if this is changed via config then new values are picked up
         self.loop     = asyncio.get_running_loop()
         self._bluetooth_device:   BLEDevice | None = None
@@ -133,19 +136,26 @@ class LEDNETWFInstance:
             )
         
         service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
-        # LOGGER.debug(f"Service info: {service_info}")
-        # LOGGER.debug(f"Service info keys: {service_info.keys()}")
+        LOGGER.debug(f"Service info: {service_info}")
+        LOGGER.debug(f"Service info keys: {service_info.keys()}")
         manu_data = service_info['manufacturer_data'].values()
-        manu_data = next(iter(manu_data))
-        LOGGER.debug(f"Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
-        fw_major = f"0x{manu_data[0]:02X}"
-        model_class_name = f"Model{fw_major}"
+        try:
+            manu_data = next(iter(manu_data))
+            LOGGER.debug(f"Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
+        except StopIteration:
+            LOGGER.error("Manufacturer data not found.")
+        # fw_major = f"0x{manu_data[0]:02X}"
+        # model_class_name = f"Model{fw_major}"
+        model_class_name = f"Model0x{self._model:02X}"
         # This might hack in support for more than one model to a single abstraction....
         # This is to attempt support for this issue: https://github.com/raulgbcr/lednetwf_ble/issues/26
         # and avoid just making another copy of 0x62 and renaming it.  This is a temporary fix until I work out a better way to do this.
         # Perhaps maintaining a look up table in const would do?
+        # Add a supported model to each model class and then check if the model is supported in the model class?
         if model_class_name == "Model0x55":
             model_class_name = "Model0x62"
+        if model_class_name == "Model0x00":
+            model_class_name = "Model0x53"
         LOGGER.debug(f"Model class name: {model_class_name}")
         try:
             model_class = globals()[model_class_name]

@@ -45,6 +45,7 @@ class Model0x54(DefaultModelAbstraction):
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x54 init")
         super().__init__(manu_data)
+        self.SUPPORTED_VERSIONS      = [0x54]
         self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 02 03 07 22 22")
         #self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 08 2c 02 07 00 0f ab")
         self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 0e 05 15 07 00 0f 9d")

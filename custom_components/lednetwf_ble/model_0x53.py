@@ -134,6 +134,7 @@ class Model0x53(DefaultModelAbstraction):
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x53 init")
         super().__init__(manu_data)
+        self.SUPPORTED_VERSIONS      = [0x53, 0x00]
         self.supported_color_modes = {ColorMode.HS, ColorMode.COLOR_TEMP}
         self.icon = "mdi:lightbulb"
         self.effect_list = EFFECTS_LIST_0x53
