@@ -134,51 +134,56 @@ class Model0x53(DefaultModelAbstraction):
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x53 init")
         super().__init__(manu_data)
-        self.SUPPORTED_VERSIONS      = [0x53, 0x00]
+        self.SUPPORTED_VERSIONS    = [0x53, 0x00] # Why am I mixing case here?  FIXME
         self.supported_color_modes = {ColorMode.HS, ColorMode.COLOR_TEMP}
-        self.icon = "mdi:lightbulb"
-        self.effect_list = EFFECTS_LIST_0x53
+        self.icon                  = "mdi:lightbulb"
+        self.effect_list           = EFFECTS_LIST_0x53
+        self.model_specific_manu_data(manu_data)
 
-        if self.manu_data[15] == 0x61:
-            if self.manu_data[16] == 0xf0:
-                # RGB mode
-                rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
-                self.hs_color = tuple(super().rgb_to_hsv(rgb_color)[0:2])
-                self.brightness = super().rgb_to_hsv(rgb_color)[2]
-                self.color_mode = ColorMode.HS
-                #self.color_temperature_kelvin = self.min_color_temp
-                LOGGER.debug(f"From manu RGB colour: {rgb_color}")
-                LOGGER.debug(f"From manu HS colour: {self.hs_color}")
-                LOGGER.debug(f"From manu Brightness: {self.brightness}")
-            elif self.manu_data[16] == 0x0f:
-                # White mode
-                col_temp = self.manu_data[21]
-                white_brightness = self.manu_data[17]
-                self.color_temperature_kelvin = self.min_color_temp + col_temp * (self.max_color_temp - self.min_color_temp) / 100
-                self.brightness = int(white_brightness * 255 // 100)
-                self.color_mode = ColorMode.COLOR_TEMP
-            else:
-                LOGGER.error(f"Unknown colour mode: {self.manu_data[16]}. Assuming RGB")
-                raise NotImplementedError("Unknown colour mode")
-        elif self.manu_data[15] == 0x62:
-            # Music reactive mode.  Do the ring lights support this?
-            # I don't think so, so...
-            LOGGER.debug(f"Music reactive mode detected on 0x53 device, but not supported here")
-        elif self.manu_data[15] == 0x25:
-            # Effect mode
-            LOGGER.debug(f"Effect mode detected. self.manu_data: {self.manu_data}")
-            effect = self.manu_data[16]
-            if effect < len(EFFECTS_LIST_0x53):
-                self.effect = EFFECTS_LIST_0x53[effect - 1]
-            elif effect == 0xFF:
-                self.effect = EFFECTS_LIST_0x53[-1]
-            else:
-                LOGGER.error(f"Unknown effect: {effect}")
-                raise NotImplementedError("Unknown effect")
-            self.effect_speed = self.manu_data[19]
-            self.brightness   = int(self.manu_data[18] * 255 // 100)
-            self.color_mode   = ColorMode.BRIGHTNESS
-            #self.color_temperature_kelvin = self.min_color_temp
+    def model_specific_manu_data(self, manu_data):
+        if manu_data is None:
+            LOGGER.debug("Manu data is None, using defaults")
+            self.color_mode = ColorMode.HS
+            self.hs_color = (0, 100)
+            self.brightness = 255
+            self.effect = EFFECT_OFF
+            self.effect_speed = 50
+            self.led_count = None
+        else:
+            if self.manu_data[15] == 0x61:
+                if self.manu_data[16] == 0xf0:
+                    # RGB mode
+                    rgb_color       = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
+                    self.hs_color   = tuple(super().rgb_to_hsv(rgb_color)[0:2])
+                    self.brightness = super().rgb_to_hsv(rgb_color)[2]
+                    self.color_mode = ColorMode.HS
+                    #self.color_temperature_kelvin = self.min_color_temp
+                    LOGGER.debug(f"From manu RGB colour: {rgb_color}")
+                    LOGGER.debug(f"From manu HS colour: {self.hs_color}")
+                    LOGGER.debug(f"From manu Brightness: {self.brightness}")
+                elif self.manu_data[16] == 0x0f:
+                    # White mode
+                    self.color_temperature_kelvin = self.min_color_temp + self.manu_data[21] * (self.max_color_temp - self.min_color_temp) / 100
+                    self.brightness               = int(self.manu_data[17] * 255 // 100) # Suspect that one of these brightness is a % and one is a byte, but which one?
+                    LOGGER.debug(f"From manu data white brightness: {self.brightness}")
+                    self.color_mode               = ColorMode.COLOR_TEMP
+                else:
+                    LOGGER.error(f"Unknown colour mode: {self.manu_data[16]}. Assuming RGB")
+                    raise NotImplementedError("Unknown colour mode")
+            elif self.manu_data[15] == 0x25:
+                # Effect mode
+                LOGGER.debug(f"Effect mode detected. self.manu_data: {self.manu_data}")
+                effect = self.manu_data[16]
+                if effect < len(EFFECTS_LIST_0x53):
+                    self.effect = EFFECTS_LIST_0x53[effect - 1]
+                elif effect == 0xFF:
+                    self.effect = EFFECTS_LIST_0x53[-1]
+                else:
+                    LOGGER.error(f"Unknown effect: {effect}")
+                    raise NotImplementedError("Unknown effect")
+                self.effect_speed = self.manu_data[19]
+                self.brightness   = int(self.manu_data[18] * 255 // 100)
+                self.color_mode   = ColorMode.BRIGHTNESS
         LOGGER.debug(f"Effect: {self.effect}")
         LOGGER.debug(f"Effect speed: {self.effect_speed}")
         LOGGER.debug(f"Brightness: {self.brightness}")

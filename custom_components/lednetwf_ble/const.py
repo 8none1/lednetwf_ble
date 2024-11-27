@@ -8,7 +8,7 @@ CONF_LEDCOUNT     = "ledcount"
 CONF_LEDTYPE      = "ledtype"
 CONF_COLORORDER   = "colororder"
 CONF_MODEL        = "model"
-SUPPORTED_MODELS  = [0x53, 0x54, 0x56, 0x62]
+SUPPORTED_MODELS  = [0x00, 0x53, 0x54, 0x56, 0x62]
 
 
 class LedTypes_StripLight(Enum):

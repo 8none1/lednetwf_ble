@@ -39,6 +39,8 @@ class DeviceData(BluetoothData):
         LOGGER.debug(f"DeviceData: {discovery_info}")
         LOGGER.debug(f"Name: {self._discovery.name}")
         manu_data = next(iter(self._discovery.manufacturer_data.values()), None)
+        # Test the devices without manu data...
+        #manu_data = None # seems to work, pushing to github...
         LOGGER.debug(f"Manufacturer data: {manu_data}")
         try:
             if manu_data is None:

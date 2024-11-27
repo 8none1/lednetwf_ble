@@ -20,15 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 class DefaultModelAbstraction:
     def __init__(self, manu_data):
-        LOGGER.debug(f"Manu data: {manu_data}")
-        manu_data_id           = next(iter(manu_data))
-        self.manu_data         = bytearray(manu_data[manu_data_id])
-        self.fw_major          = self.manu_data[0]
-        self.fw_minor          = f'{self.manu_data[8]:02X}{self.manu_data[9]:02X}.{self.manu_data[10]:02X}'
-        self.led_count         = self.manu_data[24]
-        self.chip_type         = None
-        self.color_order       = None
-        self.is_on             = True if self.manu_data[14] == 0x23 else False
+        self.process_manu_data(manu_data)
         self.brightness        = None
         self.hs_color          = None
         self.effect            = EFFECT_OFF
@@ -44,6 +36,26 @@ class DefaultModelAbstraction:
         self.NOTIFY_CHARACTERISTIC_UUIDS   = ["0000ff02-0000-1000-8000-00805f9b34fb"]
         self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 04 05 0a 81 8a 8b 96")
         self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12 21 f0 86")
+
+    def process_manu_data(self, manu_data):
+        LOGGER.debug(f"Manu data: {manu_data}")
+        if manu_data is not None:
+            manu_data_id           = next(iter(manu_data))
+            self.manu_data         = bytearray(manu_data[manu_data_id])
+            self.fw_major          = self.manu_data[0]
+            self.fw_minor          = f'{self.manu_data[8]:02X}{self.manu_data[9]:02X}.{self.manu_data[10]:02X}'
+            self.led_count         = self.manu_data[24]
+            self.chip_type         = None
+            self.color_order       = None
+            self.is_on             = True if self.manu_data[14] == 0x23 else False
+        else:
+            LOGGER.debug("No manu data")
+            self.fw_major          = 0x00
+            self.fw_minor          = "Unknown version"
+            self.led_count         = None
+            self.chip_type         = None
+            self.color_order       = None
+            self.is_on             = False # Needs to be something which isn't None or the device won't be "available"
 
     def detect_model(self):
         raise NotImplementedError("This method should be implemented by the subclass")
