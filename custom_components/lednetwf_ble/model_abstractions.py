@@ -21,14 +21,14 @@ LOGGER = logging.getLogger(__name__)
 class DefaultModelAbstraction:
     def __init__(self, manu_data):
         self.process_manu_data(manu_data)
-        self.brightness        = None
-        self.hs_color          = None
-        self.effect            = EFFECT_OFF
-        self.effect_speed      = 50
-        self.color_mode        = ColorMode.UNKNOWN
-        self.icon              = "mdi:lightbulb"
-        self.max_color_temp    = 6500
-        self.min_color_temp    = 2700
+        self.brightness                    = None
+        self.hs_color                      = None
+        self.effect                        = EFFECT_OFF
+        self.effect_speed                  = 50
+        self.color_mode                    = ColorMode.UNKNOWN
+        self.icon                          = "mdi:lightbulb"
+        self.max_color_temp                = 6500
+        self.min_color_temp                = 2700
         self.color_temperature_kelvin      = None
         self.supported_color_modes         = {ColorMode.UNKNOWN}
         self.supported_features            = LightEntityFeature.EFFECT
@@ -39,7 +39,7 @@ class DefaultModelAbstraction:
 
     def process_manu_data(self, manu_data):
         LOGGER.debug(f"Manu data: {manu_data}")
-        if manu_data is not None:
+        if manu_data:
             manu_data_id           = next(iter(manu_data))
             self.manu_data         = bytearray(manu_data[manu_data_id])
             self.fw_major          = self.manu_data[0]
@@ -50,6 +50,7 @@ class DefaultModelAbstraction:
             self.is_on             = True if self.manu_data[14] == 0x23 else False
         else:
             LOGGER.debug("No manu data")
+            self.manu_data         = chr(0) * 25 # Mock manu_data to prevent truth testing errors in the future
             self.fw_major          = 0x00
             self.fw_minor          = "Unknown version"
             self.led_count         = None
