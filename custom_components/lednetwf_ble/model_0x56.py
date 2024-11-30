@@ -35,7 +35,7 @@ class Model0x56(DefaultModelAbstraction):
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x56 init")
         super().__init__(manu_data)
-        self.SUPPORTED_VERSIONS      = [0x56]
+        self.SUPPORTED_VERSIONS    = [0x56]
         self.supported_color_modes = {ColorMode.HS} # Actually, it supports RGB, but this will allow us to separate colours from brightness
         self.icon = "mdi:led-strip-variant"
         self.effect_list = EFFECT_LIST_0x56

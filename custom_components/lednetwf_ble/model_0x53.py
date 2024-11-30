@@ -160,11 +160,11 @@ class Model0x53(DefaultModelAbstraction):
                     #self.color_temperature_kelvin = self.min_color_temp
                     LOGGER.debug(f"From manu RGB colour: {rgb_color}")
                     LOGGER.debug(f"From manu HS colour: {self.hs_color}")
-                    LOGGER.debug(f"From manu Brightness: {self.brightness}")
+                    LOGGER.debug(f"From manu RGB Brightness: {self.brightness}")
                 elif self.manu_data[16] == 0x0f:
                     # White mode
                     self.color_temperature_kelvin = self.min_color_temp + self.manu_data[21] * (self.max_color_temp - self.min_color_temp) / 100
-                    self.brightness               = int(self.manu_data[17] * 255 // 100) # Suspect that one of these brightness is a % and one is a byte, but which one?
+                    self.brightness               = int(self.manu_data[17] * 255 // 100) # This one is in range 0-FF
                     LOGGER.debug(f"From manu data white brightness: {self.brightness}")
                     self.color_mode               = ColorMode.COLOR_TEMP
                 else:
@@ -285,6 +285,7 @@ class Model0x53(DefaultModelAbstraction):
         return led_settings_packet
     
     def notification_handler(self, data):
+        LOGGER.debug(f"ZZZ Notification handler called in model 0x53")
         notification_data = data.decode("utf-8", errors="ignore")
         last_quote = notification_data.rfind('"')
         if last_quote > 0:

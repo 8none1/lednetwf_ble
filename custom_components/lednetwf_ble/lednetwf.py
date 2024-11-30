@@ -11,7 +11,7 @@ from bleak.exc import BleakDBusError
 from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS as BLEAK_EXCEPTIONS
 from bleak_retry_connector import (
     BleakClientWithServiceCache,
-    # BleakError,
+    BleakError,
     BleakNotFoundError,
     establish_connection,
     retry_bluetooth_connection_error,
@@ -120,7 +120,7 @@ class LEDNETWFInstance:
         # LOGGER.debug(f"Items: {data.items()}")
         # LOGGER.debug(f"Keys: {data.keys()}")
         # LOGGER.debug(f"Name: {data['name']}")
-        self._name    = self._data['name']
+        self._name    = self._data.get('name')
         self._model   = self._data.get(CONF_MODEL)
         self._options = options
         self._hass    = hass
@@ -138,6 +138,7 @@ class LEDNETWFInstance:
         service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
         LOGGER.debug(f"Service info: {service_info}")
         LOGGER.debug(f"Service info keys: {service_info.keys()}")
+        ## TODO: Do we really need this manu data check now?
         manu_data = service_info['manufacturer_data'].values()
         try:
             manu_data = next(iter(manu_data))
@@ -151,7 +152,7 @@ class LEDNETWFInstance:
         # This is to attempt support for this issue: https://github.com/raulgbcr/lednetwf_ble/issues/26
         # and avoid just making another copy of 0x62 and renaming it.  This is a temporary fix until I work out a better way to do this.
         # Perhaps maintaining a look up table in const would do?
-        # Add a supported model to each model class and then check if the model is supported in the model class?
+        # TODO: Add a supported model to each model class and then check if the model is supported in the model class?
         if model_class_name == "Model0x55":
             model_class_name = "Model0x62"
         if model_class_name == "Model0x00":
@@ -170,6 +171,7 @@ class LEDNETWFInstance:
         self._expected_disconnect   = False
         self._packet_counter        = 0
         self._read_uuid             = None
+    
     async def _write(self, data: bytearray):
         """Send command to device and read response."""
         if data is None:
@@ -187,6 +189,7 @@ class LEDNETWFInstance:
         await self._client.write_gatt_char(self._write_uuid, data, False)
     
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
+        LOGGER.debug(f"ZZZ Notification from {self.bluetooth_device_name}: {' '.join([f'{byte:02X}' for byte in data])}")
         self._model_interface.notification_handler(data)
         self.local_callback()
     
@@ -299,6 +302,8 @@ class LEDNETWFInstance:
     async def set_led_settings(self, options: dict):
         led_settings_packet = self._model_interface.set_led_settings(options)
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
+        # TODO:  Suspect that the reason I was trying to send these get-settings packets is because notifications aren't working
+        # can probably remove them again once notifications are fixed.
         await self._write(led_settings_packet)
         LOGGER.debug("Sending 1st copy of set led settings packet")
         await self._write(led_settings_packet)
@@ -342,7 +347,7 @@ class LEDNETWFInstance:
                 self._bluetooth_device,
                 self.bluetooth_device_name,
                 self._disconnected,
-                # cached_services=self._cached_services, # NOTE: removed this and added the next 
+                #cached_services=self._cached_services, # NOTE: removed this and added the next 
                 use_services_cache=True,
                 ble_device_callback=lambda: self._bluetooth_device,
             )
@@ -351,25 +356,37 @@ class LEDNETWFInstance:
             if not resolved:
                 # Try to handle services failing to load
                 resolved = self._resolve_characteristics(await client.get_services())
-            self._cached_services = client.services if resolved else None
+            #self._cached_services = client.services if resolved else None
 
             self._client = client
             self._reset_disconnect_timer()
 
-            # Subscribe to notification is needed for LEDnetWF devices to accept commands
-            self._notification_callback = self._notification_handler
+            # Subscribe to notifications
+            #self._notification_callback = self._notification_handler
             # XXX Just changed this to self._client instead of client
-            await self._client.start_notify(self._read_uuid, self._notification_callback)
-            LOGGER.debug(f"{self._name}: Subscribed to notifications")
+            LOGGER.debug(f"ZZZ Subscribing to notifications from {self.bluetooth_device_name}. Not done until you see ZZZ DONE")
+            LOGGER.debug(f"ZZZ read uuid: {self._read_uuid}")
+            LOGGER.debug(f"Client: {client}")
+            LOGGER.debug(f"self._cluent: {self._client}")
+            # await self._client.start_notify(self._read_uuid, self._notification_callback)
+            await client.start_notify(self._read_uuid, self._notification_handler)
+            # await client.start_notify(ru, lambda sender, data: LOGGER.debug(f"Notification from {sender}: {' '.join([f'{byte:02X}' for byte in data])}"))
+            # LOGGER.debug("ZZ Sending write")
+            # await self._write_while_connected(INITIAL_PACKET)
+            LOGGER.debug(f"Client: {client}")
+
+            LOGGER.debug(f"ZZZ DONE {self._name}: Subscribed to notifications")
 
     def _resolve_characteristics(self, services: BleakGATTServiceCollection) -> bool:
         """Resolve characteristics."""
         for characteristic in self._model_interface.NOTIFY_CHARACTERISTIC_UUIDS:
             if char := services.get_characteristic(characteristic):
+                LOGGER.debug(f"Found notify characteristic: {char}")
                 self._read_uuid = char
                 break
         for characteristic in self._model_interface.WRITE_CHARACTERISTIC_UUIDS:
             if char := services.get_characteristic(characteristic):
+                LOGGER.debug(f"Found write characteristic: {char}")
                 self._write_uuid = char
                 break
         return bool(self._read_uuid and self._write_uuid)
@@ -421,5 +438,6 @@ class LEDNETWFInstance:
     def local_callback(self):
         # Placeholder to be replaced by a call from light.py
         # I can't work out how to plumb a callback from here to light.py
+        LOGGER.debug("ZZZ Local callback called")
         return
 

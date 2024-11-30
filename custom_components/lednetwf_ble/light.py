@@ -1,8 +1,6 @@
 import logging
 import voluptuous as vol
 from typing import Any, Optional, Tuple
-
-# from .lednetwf import LEDNETWFInstance
 from .lednetwf import LEDNETWFInstance
 from .const import (DOMAIN)
 
@@ -216,6 +214,7 @@ class LEDNETWFLight(LightEntity):
         self.async_write_ha_state()
     
     def light_local_callback(self):
+        LOGGER.debug("ZZZ light_local_callback called")
         self.async_write_ha_state()
 
     def update_ha_state(self) -> None:

@@ -21,6 +21,8 @@ LOGGER = logging.getLogger(__name__)
 class DefaultModelAbstraction:
     def __init__(self, manu_data):
         self.process_manu_data(manu_data)
+        self.chip_type                     = None
+        self.color_order                   = None
         self.brightness                    = None
         self.hs_color                      = None
         self.effect                        = EFFECT_OFF
@@ -45,8 +47,6 @@ class DefaultModelAbstraction:
             self.fw_major          = self.manu_data[0]
             self.fw_minor          = f'{self.manu_data[8]:02X}{self.manu_data[9]:02X}.{self.manu_data[10]:02X}'
             self.led_count         = self.manu_data[24]
-            self.chip_type         = None
-            self.color_order       = None
             self.is_on             = True if self.manu_data[14] == 0x23 else False
         else:
             LOGGER.debug("No manu data")
@@ -87,6 +87,7 @@ class DefaultModelAbstraction:
     def set_color_temp_kelvin(self):
         return NotImplementedError("This method should be implemented by the subclass")
     def notification_handler(self):
+        LOGGER.debug("ZZZ Notification handler not implemented")
         raise NotImplementedError("This method should be implemented by the subclass")
     def rgb_to_hsv(self,rgb):
         # Home Assistant expects HS in the range 0-360, 0-100

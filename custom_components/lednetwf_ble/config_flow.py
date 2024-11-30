@@ -36,20 +36,22 @@ LOGGER = logging.getLogger(__name__)
 class DeviceData(BluetoothData):
     def __init__(self, discovery_info) -> None:
         self._discovery = discovery_info
-        LOGGER.debug(f"DeviceData: {discovery_info}")
-        LOGGER.debug(f"Name: {self._discovery.name}")
         manu_data = next(iter(self._discovery.manufacturer_data.values()), None)
         # Test the devices without manu data...
-        #manu_data = None # seems to work, pushing to github...
-        LOGGER.debug(f"Manufacturer data: {manu_data}")
-        try:
-            if manu_data is None:
-                self.fw_major = 0x00
-            else:
-                self.fw_major = manu_data[0]
-                LOGGER.debug(f"DISCOVERY manufacturer fw_major: 0x{self.fw_major:02x}")
-        except:
-            raise Exception("Error parsing manufacturer data")
+        #manu_data = None #
+        # LOGGER.debug(f"Manufacturer data: {manu_data}")
+        if discovery_info.name.lower().startswith("lednetwf"):
+            try:
+                if manu_data:
+                    self.fw_major = manu_data[0]
+                    LOGGER.debug(f"DeviceData: {discovery_info}")
+                    LOGGER.debug(f"Name: {self._discovery.name}")
+                    LOGGER.debug(f"DISCOVERY manufacturer fw_major: 0x{self.fw_major:02x}")
+                else:
+                    self.fw_major = 0x00
+            except:
+                raise Exception("Error parsing manufacturer data")
+    
     def supported(self):
         if self._discovery.name.lower().startswith("lednetwf") and self.fw_major in SUPPORTED_MODELS:
             LOGGER.debug(f"DeviceData: {self._discovery}")
@@ -60,8 +62,6 @@ class DeviceData(BluetoothData):
         return self._discovery.address
     def get_device_name(self):
         return self._discovery.name
-    # def name(self):
-    #     return self._discovery.name
     def human_readable_name(self):
         return human_readable_name(None, self._discovery.name, self._discovery.address)
     def rssi(self):
@@ -147,9 +147,16 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_validate(self, user_input: "dict[str, Any] | None" = None):
         if user_input is not None:
             LOGGER.debug(f"async step validate with User input: {user_input}")
-            led_count   = getattr(self._instance, '_led_count', 64) #May be Unsafe, leave blank ?
+            # NEXT:  this seems to be getting lost. Add some debugging output to see what's going on.
+            LOGGER.debug(f"self._instance: {self._instance}")
+            LOGGER.debug(f"self._instance._model_interface: {self._instance._model_interface}")
+            LOGGER.debug(f"self._instance._model_interface.chip_type: {self._instance._model_interface.chip_type}")
+            LOGGER.debug(f"self._instance._model_interface.color_order: {self._instance._model_interface.color_order}")
+            LOGGER.debug(f"self._instance._model_interface.led_count: {self._instance._model_interface.led_count}")
+            led_count   = getattr(self._instance._model_interface, 'led_count', 64) #May be Unsafe, leave blank ?
             led_type    = getattr(self._instance._model_interface.chip_type, 'name', "Unknown")
             color_order = getattr(self._instance._model_interface.color_order, 'name ', "RGB")
+            LOGGER.debug(f"Async step validate: LED Count: {led_count}, LED Type: {led_type}, Color Order: {color_order}")   
             # model_num   = getattr(self._instance, '_model', 0x53) #May be unsafe, leave blank ?
             data        = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120, CONF_MODEL: self.model}
             options     = {CONF_LEDCOUNT: led_count, CONF_LEDTYPE: led_type, CONF_COLORORDER: color_order}
@@ -198,6 +205,8 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             await self._instance.update()
             LOGGER.debug(f"Sending initial packets")
             await self._instance.send_initial_packets()
+            # await self._instance._write_packet(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
+            # await asyncio.sleep(1)
             for n in range(3):
                 LOGGER.debug(f"Turning on and off: {n}")
                 await self._instance.turn_on()
@@ -227,16 +236,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._data = config_entry.data
         self._config_entry = config_entry
         self._options = dict(config_entry.options)
+        LOGGER.debug(f"Options flow handler init.  Data: {self._data}, Options: {self._options}")
     
     async def async_step_init(self, _user_input=None):
         """Manage the options."""
-        LOGGER.debug(f"Options flow handler step init")
+        LOGGER.debug(f"Options flow handler step init.  Data: {self._data}, Options: {self._options}, _user_input: {_user_input}")
         return await self.async_step_user()
     
     async def async_step_user(self, user_input=None):
         """Handle a flow initialized by the user."""
         errors = {}
         model   = self._options.get("model")
+        LOGGER.debug(f"Options flow handler step user.  Data: {self._data}, Options: {self._options}, _user_input: {user_input}, model: {model}")
 
         if user_input is not None:
             new_led_type    = user_input.get(CONF_LEDTYPE)
