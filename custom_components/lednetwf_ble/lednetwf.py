@@ -3,7 +3,7 @@ import importlib
 import pkgutil
 from homeassistant.components import bluetooth
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.components.light import (ColorMode)
+# from homeassistant.components.light import (ColorMode)
 from homeassistant.components.light import EFFECT_OFF
 from bleak.backends.device import BLEDevice
 from bleak.backends.service import BleakGATTCharacteristic, BleakGATTServiceCollection
@@ -11,7 +11,7 @@ from bleak.exc import BleakDBusError
 from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS as BLEAK_EXCEPTIONS
 from bleak_retry_connector import (
     BleakClientWithServiceCache,
-    BleakError,
+#    BleakError,
     BleakNotFoundError,
     establish_connection,
     retry_bluetooth_connection_error,
@@ -115,11 +115,6 @@ class LEDNETWFInstance:
     def __init__(self, mac, hass, data={}, options={}) -> None:
         self._data    = data
         LOGGER.debug(f"Data: {data}")
-        # LOGGER.debug(type(data))
-        # LOGGER.debug(dir(data))
-        # LOGGER.debug(f"Items: {data.items()}")
-        # LOGGER.debug(f"Keys: {data.keys()}")
-        # LOGGER.debug(f"Name: {data['name']}")
         self._name    = self._data.get('name')
         self._model   = self._data.get(CONF_MODEL)
         self._options = options
@@ -139,12 +134,12 @@ class LEDNETWFInstance:
         LOGGER.debug(f"Service info: {service_info}")
         LOGGER.debug(f"Service info keys: {service_info.keys()}")
         ## TODO: Do we really need this manu data check now?
-        manu_data = service_info['manufacturer_data'].values()
-        try:
-            manu_data = next(iter(manu_data))
-            LOGGER.debug(f"Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
-        except StopIteration:
-            LOGGER.error("Manufacturer data not found.")
+        # manu_data = service_info['manufacturer_data'].values()
+        # try:
+        #     manu_data = next(iter(manu_data))
+        #     LOGGER.debug(f"Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
+        # except StopIteration:
+        #     LOGGER.error("Manufacturer data not found.")
         # fw_major = f"0x{manu_data[0]:02X}"
         # model_class_name = f"Model{fw_major}"
         model_class_name = f"Model0x{self._model:02X}"
@@ -189,7 +184,7 @@ class LEDNETWFInstance:
         await self._client.write_gatt_char(self._write_uuid, data, False)
     
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
-        LOGGER.debug(f"ZZZ Notification from {self.bluetooth_device_name}: {' '.join([f'{byte:02X}' for byte in data])}")
+        LOGGER.debug(f"Notification handler {self.bluetooth_device_name}: {' '.join([f'{byte:02X}' for byte in data])}")
         self._model_interface.notification_handler(data)
         self.local_callback()
     
@@ -304,10 +299,10 @@ class LEDNETWFInstance:
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
         # TODO:  Suspect that the reason I was trying to send these get-settings packets is because notifications aren't working
         # can probably remove them again once notifications are fixed.
-        await self._write(led_settings_packet)
-        LOGGER.debug("Sending 1st copy of set led settings packet")
-        await self._write(led_settings_packet)
-        LOGGER.debug("Sending 2nd copy of set led settings packet")
+        # await self._write(led_settings_packet)
+        # LOGGER.debug("Sending 1st copy of set led settings packet")
+        # await self._write(led_settings_packet)
+        # LOGGER.debug("Sending 2nd copy of set led settings packet")
         await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
         await self.turn_off()
         await self.stop()
@@ -330,14 +325,12 @@ class LEDNETWFInstance:
             LOGGER.debug(f"ES {self._name}: Connection already in progress, waiting for it to complete")
         
         if self._client and self._client.is_connected:
-            LOGGER.debug(f"{self._name}: Already connected, patting the dog")
             self._reset_disconnect_timer()
             return
 
         async with self._connect_lock:
             # Check again while holding the lock
             if self._client and self._client.is_connected:
-                LOGGER.debug(f"{self._name}: Already connected AND locked, patting the dog")
                 self._reset_disconnect_timer()
                 return
             
@@ -351,32 +344,17 @@ class LEDNETWFInstance:
                 use_services_cache=True,
                 ble_device_callback=lambda: self._bluetooth_device,
             )
+            
             LOGGER.debug(f"{self._name}: Connected")
             resolved = self._resolve_characteristics(client.services)
             if not resolved:
                 # Try to handle services failing to load
                 resolved = self._resolve_characteristics(await client.get_services())
-            #self._cached_services = client.services if resolved else None
-
+            
             self._client = client
             self._reset_disconnect_timer()
-
-            # Subscribe to notifications
-            #self._notification_callback = self._notification_handler
-            # XXX Just changed this to self._client instead of client
-            LOGGER.debug(f"ZZZ Subscribing to notifications from {self.bluetooth_device_name}. Not done until you see ZZZ DONE")
-            LOGGER.debug(f"ZZZ read uuid: {self._read_uuid}")
-            LOGGER.debug(f"Client: {client}")
-            LOGGER.debug(f"self._cluent: {self._client}")
-            # await self._client.start_notify(self._read_uuid, self._notification_callback)
-            await client.start_notify(self._read_uuid, self._notification_handler)
-            # await client.start_notify(ru, lambda sender, data: LOGGER.debug(f"Notification from {sender}: {' '.join([f'{byte:02X}' for byte in data])}"))
-            # LOGGER.debug("ZZ Sending write")
-            # await self._write_while_connected(INITIAL_PACKET)
-            LOGGER.debug(f"Client: {client}")
-
-            LOGGER.debug(f"ZZZ DONE {self._name}: Subscribed to notifications")
-
+            await self._client.start_notify(self._read_uuid, self._notification_handler)
+            
     def _resolve_characteristics(self, services: BleakGATTServiceCollection) -> bool:
         """Resolve characteristics."""
         for characteristic in self._model_interface.NOTIFY_CHARACTERISTIC_UUIDS:
@@ -438,6 +416,5 @@ class LEDNETWFInstance:
     def local_callback(self):
         # Placeholder to be replaced by a call from light.py
         # I can't work out how to plumb a callback from here to light.py
-        LOGGER.debug("ZZZ Local callback called")
         return
 

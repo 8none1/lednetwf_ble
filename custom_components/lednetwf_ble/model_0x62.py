@@ -215,9 +215,8 @@ class Model0x62(DefaultModelAbstraction):
                     rgb_color = (payload[6:9])
                     hsv_color = super().rgb_to_hsv(rgb_color)
                     self.hs_color = tuple(hsv_color[0:2])
-                    #self.brightness = int(hsv_color[2] * 255 // 100)
-                    self.brightness = int(hsv_color[2]) # It's coming back here already scaled to 0-255.  Why are we doing it again above?
-                    # Maybe this bug has alwyas been here and the brightness has never worked properly?
+                    #self.brightness = int(hsv_color[2] * 255 // 100) # This isn't needed it's already scaled 0-255 from the rgb_to_hsv function. TODO remove this line when everything works.
+                    self.brightness = int(hsv_color[2])
                     LOGGER.debug(f"RGB colour: {rgb_color}")
                     LOGGER.debug(f"HS colour: {self.hs_color}")
                     LOGGER.debug(f"Brightness: {self.brightness}")

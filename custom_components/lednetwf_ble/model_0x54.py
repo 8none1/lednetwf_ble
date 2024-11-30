@@ -214,6 +214,8 @@ class Model0x54(DefaultModelAbstraction):
                     #self.brightness = int(hsv_color[2] * 255 // 100)
                     self.brightness = int(hsv_color[2]) # It's coming back here already scaled to 0-255.  Why are we doing it again above?
                     # Maybe this bug has alwyas been here and the brightness has never worked properly?
+                    # Yes looks like it has.  Fixed here, and in 0x53.
+                    # TODO: Fix the others
                     LOGGER.debug(f"RGB colour: {rgb_color}")
                     LOGGER.debug(f"HS colour: {self.hs_color}")
                     LOGGER.debug(f"Brightness: {self.brightness}")
