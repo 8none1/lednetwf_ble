@@ -27,15 +27,6 @@ from .const import (
     CONF_MODEL,
 )
 
-# Iterate through all modules in the current package
-package = __package__
-for _, module_name, _ in pkgutil.iter_modules([package.replace('.', '/')]):
-    if module_name.startswith('model_0x'):
-        module = importlib.import_module(f'.{module_name}', package)
-        class_name = f'Model{module_name.split("_")[1]}'
-        if hasattr(module, class_name):
-            globals()[class_name] = getattr(module, class_name)
-
 LOGGER                        = logging.getLogger(__name__)
 WRITE_CHARACTERISTIC_UUIDS    = ["0000ff01-0000-1000-8000-00805f9b34fb"]
 NOTIFY_CHARACTERISTIC_UUIDS   = ["0000ff02-0000-1000-8000-00805f9b34fb"]
@@ -44,8 +35,24 @@ GET_LED_SETTINGS_PACKET       = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12
 DEFAULT_ATTEMPTS              = 3
 BLEAK_BACKOFF_TIME            = 0.25
 RETRY_BACKOFF_EXCEPTIONS      = (BleakDBusError)
+SUPPORTED_MODELS              = {}
 
 WrapFuncType = TypeVar("WrapFuncType", bound=Callable[..., Any])
+
+LOGGER.debug("XHXHXHXHXHXHXH")
+
+# Iterate through all modules in the current package
+package = __package__
+for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/models"]):
+    if module_name.startswith('model_0x'):
+        module = importlib.import_module(f'.models.{module_name}', package)
+        LOGGER.debug(f"Module: {module}")
+        LOGGER.debug(f"Dir: {dir(module)}")
+        class_name = f'Model{module_name.split("_")[1]}'
+        if hasattr(module, class_name):
+            globals()[class_name] = getattr(module, class_name)
+        if hasattr(module, "SUPPORTED_MODELS"):
+            LOGGER.debug(f"Supported models: {getattr(module, 'SUPPORTED_MODELS')}")
 
 def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
     async def _async_wrap_retry_bluetooth_connection_error(

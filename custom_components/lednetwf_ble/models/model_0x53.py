@@ -1,5 +1,5 @@
 from .model_abstractions import DefaultModelAbstraction
-from . import const
+from .. import const
 
 import logging
 LOGGER = logging.getLogger(__name__)
@@ -9,6 +9,8 @@ from homeassistant.components.light import (
     ColorMode,
     EFFECT_OFF
 )
+
+SUPPORTED_MODELS = [0x00, 0x53]
 
 EFFECTS_LIST_0x53 = [
     "Gold Ring",

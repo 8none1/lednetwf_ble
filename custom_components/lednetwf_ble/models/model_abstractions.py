@@ -9,7 +9,7 @@ from homeassistant.components.light import (
     LightEntityFeature
 )
 
-from .const import (
+from ..const import (
     LedTypes_StripLight,
     LedTypes_RingLight,
     ColorOrdering

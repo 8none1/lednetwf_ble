@@ -1,10 +1,8 @@
-# 0x62 device
-# String of non-addressable LEDs with a microphone
-# They have an annoying feature where as the light is turning off and so fading out, it reports the brightness multiple times
-# as they fade out.  So the brightness changes quick as they turn off.  This means that the UI can jump about it when changing modes etc.
+# 0x54 device
+# Currently a copy of 0x62 
 
 from .model_abstractions import DefaultModelAbstraction
-from . import const
+from .. import const
 from enum import Enum
 import logging
 LOGGER = logging.getLogger(__name__)
@@ -13,6 +11,8 @@ from homeassistant.components.light import (
     ColorMode,
     EFFECT_OFF
 )
+
+SUPPORTED_MODELS = [0x54]
 
 # This device only supports three colour orders, so override the defaults with our own
 # In order to maintain compatibility with the rest of the code, we'll use some of the same values for unsupported colour orders
@@ -32,29 +32,29 @@ class ColorOrdering(Enum):
                 return member
         raise ValueError(f"No member with value {value}")
 
-# 0x62 Effect data
-EFFECT_MAP_0x62 = {}
+# 0x54 Effect data
+EFFECT_MAP_0x54 = {}
 for e in range(37,58):
-    EFFECT_MAP_0x62[f"Effect {e-36}"] = e
-EFFECT_MAP_0x62["_Effect Off"]         = 0
-EFFECT_MAP_0x62["Candle Mode"]        = 100
-EFFECT_MAP_0x62["Sound Reactive"]     = 200
-EFFECT_LIST_0x62 = sorted(EFFECT_MAP_0x62)
-EFFECT_ID_TO_NAME_0x62 = {v: k for k, v in EFFECT_MAP_0x62.items()}
+    EFFECT_MAP_0x54[f"Effect {e-36}"] = e
+EFFECT_MAP_0x54["_Effect Off"]         = 0
+EFFECT_MAP_0x54["Candle Mode"]        = 100
+EFFECT_MAP_0x54["Sound Reactive"]     = 200
+EFFECT_LIST_0x54 = sorted(EFFECT_MAP_0x54)
+EFFECT_ID_TO_NAME_0x54 = {v: k for k, v in EFFECT_MAP_0x54.items()}
 
-class Model0x62(DefaultModelAbstraction):
+class Model0x54(DefaultModelAbstraction):
     # Strip light
     def __init__(self, manu_data):
-        LOGGER.debug("Model 0x62 init")
+        LOGGER.debug("Model 0x54 init")
         super().__init__(manu_data)
-        self.SUPPORTED_VERSIONS      = [0x62]
+        self.SUPPORTED_VERSIONS      = [0x54]
         self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 02 03 07 22 22")
         #self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 08 2c 02 07 00 0f ab")
         self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 0e 05 15 07 00 0f 9d")
         #                                                 
         self.supported_color_modes = {ColorMode.HS} # Actually, it supports RGB, but this will allow us to separate colours from brightness
         self.icon = "mdi:led-strip-variant"
-        self.effect_list = EFFECT_LIST_0x62
+        self.effect_list = EFFECT_LIST_0x54
 
         LOGGER.debug(f"Manu data: {[f'{i}: {hex(x)}' for i, x in enumerate(self.manu_data)]}")
         LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
@@ -87,7 +87,7 @@ class Model0x62(DefaultModelAbstraction):
         elif self.manu_data[15] >= 37 and self.manu_data[15] <= 56:
             # Effect mode
             effect = self.manu_data[15]
-            self.effect = EFFECT_ID_TO_NAME_0x62[effect]
+            self.effect = EFFECT_ID_TO_NAME_0x54[effect]
             self.effect_speed = self.manu_data[17]
             self.brightness   = int(self.manu_data[18] * 255 // 100)
             self.color_mode   = ColorMode.BRIGHTNESS
@@ -119,11 +119,11 @@ class Model0x62(DefaultModelAbstraction):
     def set_effect(self, effect, brightness):
         # Returns the byte array to set the effect
         LOGGER.debug(f"Setting effect: {effect}")
-        if effect not in EFFECT_LIST_0x62:
-            raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x62")
+        if effect not in EFFECT_LIST_0x54:
+            raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x54")
         self.effect = effect
         self.brightness = brightness
-        effect_id = EFFECT_MAP_0x62.get(effect)
+        effect_id = EFFECT_MAP_0x54.get(effect)
         
         if effect_id == 0: # Effect off
             self.set_color(self.hs_color, self.brightness)
@@ -197,8 +197,6 @@ class Model0x62(DefaultModelAbstraction):
                 return None
         else:
             return None
-        LOGGER.debug(f"N: Notification data: {notification_data}")
-        if "MACID" in payload: return None # Sometimes we get a JSON like structure with some other data in it, ignore it.
         payload = bytearray.fromhex(payload)
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{i}:{byte:02X}' for i, byte in enumerate(payload)])}")
         # return
@@ -215,8 +213,11 @@ class Model0x62(DefaultModelAbstraction):
                     rgb_color = (payload[6:9])
                     hsv_color = super().rgb_to_hsv(rgb_color)
                     self.hs_color = tuple(hsv_color[0:2])
-                    #self.brightness = int(hsv_color[2] * 255 // 100) # This isn't needed it's already scaled 0-255 from the rgb_to_hsv function. TODO remove this line when everything works.
-                    self.brightness = int(hsv_color[2])
+                    #self.brightness = int(hsv_color[2] * 255 // 100)
+                    self.brightness = int(hsv_color[2]) # It's coming back here already scaled to 0-255.  Why are we doing it again above?
+                    # Maybe this bug has alwyas been here and the brightness has never worked properly?
+                    # Yes looks like it has.  Fixed here, and in 0x53.
+                    # TODO: Fix the others
                     LOGGER.debug(f"RGB colour: {rgb_color}")
                     LOGGER.debug(f"HS colour: {self.hs_color}")
                     LOGGER.debug(f"Brightness: {self.brightness}")
