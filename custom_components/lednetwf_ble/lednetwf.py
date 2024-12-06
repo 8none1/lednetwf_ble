@@ -39,8 +39,6 @@ SUPPORTED_MODELS              = {}
 
 WrapFuncType = TypeVar("WrapFuncType", bound=Callable[..., Any])
 
-LOGGER.debug("XHXHXHXHXHXHXH")
-
 # Iterate through all modules in the current package
 package = __package__
 for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/models"]):
@@ -53,6 +51,15 @@ for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/mod
             globals()[class_name] = getattr(module, class_name)
         if hasattr(module, "SUPPORTED_MODELS"):
             LOGGER.debug(f"Supported models: {getattr(module, 'SUPPORTED_MODELS')}")
+            SUPPORTED_MODELS[class_name] = getattr(module, "SUPPORTED_MODELS")
+
+LOGGER.debug(f"All supported modules: {SUPPORTED_MODELS}")
+
+def find_model_for_value(value):
+    for model_name, models in SUPPORTED_MODELS.items():
+        if value in models:
+            return model_name
+    return None
 
 def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
     async def _async_wrap_retry_bluetooth_connection_error(
@@ -165,6 +172,8 @@ class LEDNETWFInstance:
         except KeyError:
             LOGGER.error(f"Model class {model_class_name} not found.  This model is not supported.")
             raise ConfigEntryNotReady(f"Model class {model_class_name} not found.  This model is not supported.")
+        model_class = find_model_for_value(self._model)
+        LOGGER.debug(f"Model class via lookup: {model_class}")
         self._model_interface = model_class(service_info['manufacturer_data'])
         self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._client: BleakClientWithServiceCache | None = None
