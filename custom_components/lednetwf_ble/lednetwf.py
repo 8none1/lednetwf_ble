@@ -156,23 +156,24 @@ class LEDNETWFInstance:
         #     LOGGER.error("Manufacturer data not found.")
         # fw_major = f"0x{manu_data[0]:02X}"
         # model_class_name = f"Model{fw_major}"
-        model_class_name = f"Model0x{self._model:02X}"
-        # This might hack in support for more than one model to a single abstraction....
-        # This is to attempt support for this issue: https://github.com/raulgbcr/lednetwf_ble/issues/26
-        # and avoid just making another copy of 0x62 and renaming it.  This is a temporary fix until I work out a better way to do this.
-        # Perhaps maintaining a look up table in const would do?
-        # TODO: Add a supported model to each model class and then check if the model is supported in the model class?
-        if model_class_name == "Model0x55":
-            model_class_name = "Model0x62"
-        if model_class_name == "Model0x00":
-            model_class_name = "Model0x53"
-        LOGGER.debug(f"Model class name: {model_class_name}")
-        try:
-            model_class = globals()[model_class_name]
-        except KeyError:
-            LOGGER.error(f"Model class {model_class_name} not found.  This model is not supported.")
-            raise ConfigEntryNotReady(f"Model class {model_class_name} not found.  This model is not supported.")
-        model_class = find_model_for_value(self._model)
+        # model_class_name = f"Model0x{self._model:02X}"
+        # # This might hack in support for more than one model to a single abstraction....
+        # # This is to attempt support for this issue: https://github.com/raulgbcr/lednetwf_ble/issues/26
+        # # and avoid just making another copy of 0x62 and renaming it.  This is a temporary fix until I work out a better way to do this.
+        # # Perhaps maintaining a look up table in const would do?
+        # # TODO: Add a supported model to each model class and then check if the model is supported in the model class?
+        # if model_class_name == "Model0x55":
+        #     model_class_name = "Model0x62"
+        # if model_class_name == "Model0x00":
+        #     model_class_name = "Model0x53"
+        # LOGGER.debug(f"Model class name: {model_class_name}")
+        # try:
+        #     model_class = globals()[model_class_name]
+        # except KeyError:
+        #     LOGGER.error(f"Model class {model_class_name} not found.  This model is not supported.")
+        #     raise ConfigEntryNotReady(f"Model class {model_class_name} not found.  This model is not supported.")
+        model_class_name = find_model_for_value(self._model)
+        model_class = globals()[model_class_name]
         LOGGER.debug(f"Model class via lookup: {model_class}")
         self._model_interface = model_class(service_info['manufacturer_data'])
         self._connect_lock: asyncio.Lock = asyncio.Lock()
