@@ -91,7 +91,8 @@ class Model0x62(DefaultModelAbstraction):
             effect = self.manu_data[15]
             self.effect = EFFECT_ID_TO_NAME_0x62[effect]
             self.effect_speed = self.manu_data[17]
-            self.brightness   = int(self.manu_data[18] * 255 // 100)
+            # self.brightness   = int(self.manu_data[18] * 255 // 100)
+            self.brightness   = int(self.manu_data[18])
             self.color_mode   = ColorMode.BRIGHTNESS
             self.is_on        = True
         
