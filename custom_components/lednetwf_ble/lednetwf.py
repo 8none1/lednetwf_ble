@@ -314,12 +314,7 @@ class LEDNETWFInstance:
     async def set_led_settings(self, options: dict):
         led_settings_packet = self._model_interface.set_led_settings(options)
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
-        # TODO:  Suspect that the reason I was trying to send these get-settings packets is because notifications aren't working
-        # can probably remove them again once notifications are fixed.
-        # await self._write(led_settings_packet)
-        # LOGGER.debug("Sending 1st copy of set led settings packet")
-        # await self._write(led_settings_packet)
-        # LOGGER.debug("Sending 2nd copy of set led settings packet")
+        await self._write(led_settings_packet)
         await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
         await self.turn_off()
         await self.stop()
