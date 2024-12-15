@@ -1,0 +1,66 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "data": {
+                    "mac": "Endereço MAC Bluetooth",
+                    "name": "Nome"
+                },
+                "title": "Escolher uma luz LEDnetWF"
+            },
+            "validate": {
+                "data": {
+                    "retry": "Tentar validar a ligação novamente?",
+                    "flicker": "A luz piscou?"
+                },
+                "title": "Validar ligação LEDnetWF"
+            },
+            "manual": {
+                "data": {
+                    "mac": "Endereço MAC Bluetooth",
+                    "name": "Nome"
+                },
+                "title": "Introduzir endereço MAC Bluetooth"
+            }
+        },
+        "error": {
+            "connect": "Não foi possível ligar ao LEDnetWF"
+        },
+        "abort": {
+            "cannot_validate": "Não foi possível validar a luz LEDnetWF",
+            "cannot_connect": "Não foi possível ligar ao LEDnetWF"
+        }
+    },
+    "options": {
+        "step": {
+            "user": {
+                "data": {
+                    "reset": "Reiniciar a cor quando o LED for ligado",
+                    "delay": "Atraso de desconexão (0 = nunca desligar)",
+                    "ledcount": "Número de LEDs",
+                    "name": "Nome",
+                    "ledtype": "Tipo de LED",
+                    "colororder": "Ordem das cores"
+                }
+            },
+            "init": {
+                "data": {
+                    "reset": "Reiniciar a cor quando o LED for ligado",
+                    "delay": "Atraso de desconexão (0 equivale a nunca desligar)",
+                    "ledcount": "Número de LEDs",
+                    "name": "Nome",
+                    "ledtype": "Tipo de LED",
+                    "colororder": "Ordem das cores"
+                },
+                "title": "LEDnetWF"
+            }
+        }
+    },
+    "entity": {
+        "number": {
+            "effect_speed": {
+                "name": "Velocidade do efeito"
+            }
+        }
+    }
+}
