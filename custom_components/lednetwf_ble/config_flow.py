@@ -16,6 +16,8 @@ from homeassistant.components.bluetooth import (
 import homeassistant.helpers.config_validation as cv
 from bluetooth_sensor_state_data import BluetoothData
 from home_assistant_bluetooth import BluetoothServiceInfo
+import importlib
+import pkgutil
 
 from .const import (
     DOMAIN,
@@ -27,11 +29,20 @@ from .const import (
     CONF_MODEL,
     LedTypes_StripLight,
     LedTypes_RingLight,
-    ColorOrdering,
-    SUPPORTED_MODELS
+    ColorOrdering
 )
 
 LOGGER = logging.getLogger(__name__)
+SUPPORTED_MODELS = []
+
+package = __package__
+for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/models"]):
+    if module_name.startswith('model_0x'):
+        module = importlib.import_module(f'.models.{module_name}', package)
+        if hasattr(module, "SUPPORTED_MODELS"):
+            LOGGER.debug(f"Supported models: {getattr(module, 'SUPPORTED_MODELS')}")
+            SUPPORTED_MODELS.extend(getattr(module, "SUPPORTED_MODELS"))
+LOGGER.debug(f"All supported modules: {SUPPORTED_MODELS}")
 
 class DeviceData(BluetoothData):
     def __init__(self, discovery_info) -> None:
@@ -196,7 +207,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             #     # TODO:  Why not just this though by default and not use self.mac etc?
             #     data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120, CONF_MODEL: self.device_data.model()}
             #     LOGGER.debug(f"Device data exists: {data}")
-            data = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120, CONF_MODEL: self.device_data.get_model()}
+            # data = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120, CONF_MODEL: self.device_data.get_model()}
             data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120, CONF_MODEL: self.device_data.get_model()}
             LOGGER.debug(f"Device data is None, creating new data to pass up: {data}")
             self._instance = LEDNETWFInstance(self.mac, self.hass, data)
@@ -205,7 +216,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             await self._instance.update()
             LOGGER.debug(f"Sending initial packets")
             await self._instance.send_initial_packets()
-            # await self._instance._write_packet(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
+            await self._instance._write_packet(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
             # await asyncio.sleep(1)
             for n in range(3):
                 LOGGER.debug(f"Turning on and off: {n}")
@@ -250,6 +261,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         LOGGER.debug(f"Options flow handler step user.  Data: {self._data}, Options: {self._options}, _user_input: {user_input}, model: {model}")
 
         if user_input is not None:
+            #TODO: check LED types codes for each type.  Does this lookup actually work for each type?
             new_led_type    = user_input.get(CONF_LEDTYPE)
             new_led_type    = LedTypes_StripLight[new_led_type].value if model == 0x56 else LedTypes_RingLight[new_led_type].value
             new_color_order = user_input.get(CONF_COLORORDER)

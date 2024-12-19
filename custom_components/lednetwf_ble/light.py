@@ -43,14 +43,6 @@ class LEDNETWFLight(LightEntity):
     ) -> None:
         self._instance = lednetwfinstance
         self._entry_id = entry_id
-        # 2025.3 ColorMode.BRIGHTNESS should not be specified with other combination of supported color modes, as it will throw an error, but is is supported
-        # when lights are rendering an effect automatically
-        # https://developers.home-assistant.io/docs/core/entity/light/#color-modes
-        # if self._instance._model == RING_LIGHT_MODEL:
-        #     self._attr_supported_color_modes = {ColorMode.COLOR_TEMP, ColorMode.HS}
-        #     self._color_temp_kelvin: self._instance._color_temp_kelvin
-        # else:
-        #     self._attr_supported_color_modes = {ColorMode.RGB}
         self._attr_supported_color_modes = self._instance._model_interface.supported_color_modes
         self._attr_supported_features = LightEntityFeature.EFFECT
         self._attr_name               = name
@@ -126,7 +118,6 @@ class LEDNETWFLight(LightEntity):
         """Return device info."""
         return DeviceInfo(
             identifiers={
-                # Serial numbers are unique identifiers within a specific domain
                 (DOMAIN, self._instance.mac)
             },
             name=self.name,
@@ -184,7 +175,6 @@ class LEDNETWFLight(LightEntity):
         
         if ATTR_COLOR_TEMP_KELVIN in kwargs:
             self._instance._color_mode = ColorMode.COLOR_TEMP
-            # self._instance._effect = EFFECT_OFF
             await self._instance.set_color_temp_kelvin(kwargs[ATTR_COLOR_TEMP_KELVIN], on_brightness)
         elif ATTR_HS_COLOR in kwargs:
             await self._instance.set_hs_color(kwargs[ATTR_HS_COLOR], on_brightness)
@@ -195,16 +185,6 @@ class LEDNETWFLight(LightEntity):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        # # Fix for turn of circle effect of HSV MODE(controller skips turn off animation if state is not changed since last turn on)
-        # Disabling for now, needs to be moved in to the 0x53 code as it is specific to that model
-        # if self._instance.brightness == 255:
-        #     temp_brightness = 254
-        # else:
-        #     temp_brightness = self._instance.brightness + 1
-        # if self._instance.color_mode is ColorMode.HS and ATTR_HS_COLOR not in kwargs:
-        #     await self._instance.set_hs_color(self._instance.hs_color, temp_brightness)
-
-        # Actual turn off
         await self._instance.turn_off()
         self.async_write_ha_state()
 
@@ -214,7 +194,6 @@ class LEDNETWFLight(LightEntity):
         self.async_write_ha_state()
     
     def light_local_callback(self):
-        LOGGER.debug("ZZZ light_local_callback called")
         self.async_write_ha_state()
 
     def update_ha_state(self) -> None:
@@ -230,8 +209,8 @@ class LEDNETWFLight(LightEntity):
                 #2025.3 When not sure of color mode ColorMode.UNKNOWN avoids throwing errors on unsupported combination of color modes
         elif self.hs_color is not None:
             self._color_mode = ColorMode.HS
-        elif self.rgb_color is not None:
-            self._color_mode = ColorMode.RGB
+        # elif self.rgb_color is not None:
+        #     self._color_mode = ColorMode.RGB
         elif self.color_temp_kelvin is not None:
             self._color_mode = ColorMode.COLOR_TEMP
         self.available = self._instance.is_on != None

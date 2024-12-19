@@ -3,7 +3,6 @@ import importlib
 import pkgutil
 from homeassistant.components import bluetooth
 from homeassistant.exceptions import ConfigEntryNotReady
-# from homeassistant.components.light import (ColorMode)
 from homeassistant.components.light import EFFECT_OFF
 from bleak.backends.device import BLEDevice
 from bleak.backends.service import BleakGATTCharacteristic, BleakGATTServiceCollection
@@ -11,12 +10,10 @@ from bleak.exc import BleakDBusError
 from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS as BLEAK_EXCEPTIONS
 from bleak_retry_connector import (
     BleakClientWithServiceCache,
-#    BleakError,
     BleakNotFoundError,
     establish_connection,
     retry_bluetooth_connection_error,
 )
-
 from typing import Any, TypeVar, cast, Tuple
 from collections.abc import Callable
 import traceback
@@ -24,7 +21,7 @@ import logging
 
 from .const import (
     CONF_DELAY,
-    CONF_MODEL,
+    CONF_MODEL
 )
 
 LOGGER                        = logging.getLogger(__name__)
@@ -134,7 +131,6 @@ class LEDNETWFInstance:
         self._options = options
         self._hass    = hass
         self._mac     = mac
-        # TODO: there are too many methods to do the same thing here, just use this one below?
         self._delay   = self._options.get(CONF_DELAY, self._data.get(CONF_DELAY, 120)) # Try and read from options first, data second so that if this is changed via config then new values are picked up
         self.loop     = asyncio.get_running_loop()
         self._bluetooth_device:   BLEDevice | None = None
@@ -143,35 +139,9 @@ class LEDNETWFInstance:
             raise ConfigEntryNotReady(
                 f"You need to add bluetooth integration (https://www.home-assistant.io/integrations/bluetooth) or couldn't find a nearby device with address: {self._mac}"
             )
-        
         service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
         LOGGER.debug(f"Service info: {service_info}")
         LOGGER.debug(f"Service info keys: {service_info.keys()}")
-        ## TODO: Do we really need this manu data check now?
-        # manu_data = service_info['manufacturer_data'].values()
-        # try:
-        #     manu_data = next(iter(manu_data))
-        #     LOGGER.debug(f"Formatted manufacturer data: {' '.join([f'0x{byte:02X}' for byte in manu_data])}")
-        # except StopIteration:
-        #     LOGGER.error("Manufacturer data not found.")
-        # fw_major = f"0x{manu_data[0]:02X}"
-        # model_class_name = f"Model{fw_major}"
-        # model_class_name = f"Model0x{self._model:02X}"
-        # # This might hack in support for more than one model to a single abstraction....
-        # # This is to attempt support for this issue: https://github.com/raulgbcr/lednetwf_ble/issues/26
-        # # and avoid just making another copy of 0x62 and renaming it.  This is a temporary fix until I work out a better way to do this.
-        # # Perhaps maintaining a look up table in const would do?
-        # # TODO: Add a supported model to each model class and then check if the model is supported in the model class?
-        # if model_class_name == "Model0x55":
-        #     model_class_name = "Model0x62"
-        # if model_class_name == "Model0x00":
-        #     model_class_name = "Model0x53"
-        # LOGGER.debug(f"Model class name: {model_class_name}")
-        # try:
-        #     model_class = globals()[model_class_name]
-        # except KeyError:
-        #     LOGGER.error(f"Model class {model_class_name} not found.  This model is not supported.")
-        #     raise ConfigEntryNotReady(f"Model class {model_class_name} not found.  This model is not supported.")
         model_class_name = find_model_for_value(self._model)
         model_class = globals()[model_class_name]
         LOGGER.debug(f"Model class via lookup: {model_class}")
@@ -328,7 +298,7 @@ class LEDNETWFInstance:
         except Exception as error:
             LOGGER.debug(f"Error getting status: {error}")
             track = traceback.format_exc()
-            LOGGER.debug(track)
+            LOGGER.error(track)
 
     async def _ensure_connected(self) -> None:
         """Ensure connection to device is established."""
@@ -352,7 +322,6 @@ class LEDNETWFInstance:
                 self._bluetooth_device,
                 self.bluetooth_device_name,
                 self._disconnected,
-                #cached_services=self._cached_services, # NOTE: removed this and added the next 
                 use_services_cache=True,
                 ble_device_callback=lambda: self._bluetooth_device,
             )

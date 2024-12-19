@@ -10,7 +10,7 @@ from homeassistant.components.light import (
     EFFECT_OFF
 )
 
-SUPPORTED_MODELS = [0x00, 0x53]
+SUPPORTED_MODELS = [0x00, 0x53, 0x55]
 
 EFFECTS_LIST_0x53 = [
     "Gold Ring",
@@ -167,8 +167,8 @@ class Model0x53(DefaultModelAbstraction):
                     # White mode
                     self.color_temperature_kelvin = self.min_color_temp + self.manu_data[21] * (self.max_color_temp - self.min_color_temp) / 100
                     self.brightness               = int(self.manu_data[17] * 255 // 100) # This one is in range 0-FF
-                    LOGGER.debug(f"From manu data white brightness: {self.brightness}")
                     self.color_mode               = ColorMode.COLOR_TEMP
+                    LOGGER.debug(f"From manu data white brightness: {self.brightness}")
                 else:
                     LOGGER.error(f"Unknown colour mode: {self.manu_data[16]}. Assuming RGB")
                     raise NotImplementedError("Unknown colour mode")
@@ -287,7 +287,6 @@ class Model0x53(DefaultModelAbstraction):
         return led_settings_packet
     
     def notification_handler(self, data):
-        LOGGER.debug(f"ZZZ Notification handler called in model 0x53")
         notification_data = data.decode("utf-8", errors="ignore")
         last_quote = notification_data.rfind('"')
         if last_quote > 0:
@@ -342,3 +341,13 @@ class Model0x53(DefaultModelAbstraction):
             self.chip_type   = const.LedTypes_RingLight.from_value(payload[3])
             self.color_order = const.ColorOrdering.from_value(payload[4])
 
+# TODO:
+
+# # Fix for turn of circle effect of HSV MODE(controller skips turn off animation if state is not changed since last turn on)
+# Disabling for now, needs to be moved in to the 0x53 code as it is specific to that model
+# if self._instance.brightness == 255:
+#     temp_brightness = 254
+# else:
+#     temp_brightness = self._instance.brightness + 1
+# if self._instance.color_mode is ColorMode.HS and ATTR_HS_COLOR not in kwargs:
+#     await self._instance.set_hs_color(self._instance.hs_color, temp_brightness)
