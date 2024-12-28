@@ -18,6 +18,7 @@ from bluetooth_sensor_state_data import BluetoothData
 from home_assistant_bluetooth import BluetoothServiceInfo
 import importlib
 import pkgutil
+import sys
 
 from .const import (
     DOMAIN,
@@ -36,12 +37,35 @@ LOGGER = logging.getLogger(__name__)
 SUPPORTED_MODELS = []
 
 package = __package__
-for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/models"]):
+filename = __file__
+
+# LOGGER.debug(f"Package: {package}")
+LOGGER.debug(f"File: {__file__}")
+my_name = filename[filename.rfind('/')+1:]
+models_path = f"{filename.replace(my_name, 'models')}"
+LOGGER.debug(f"Models path: {models_path}")
+
+# old Working vvvv
+# for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/models"]):
+# # for _, module_name, _ in pkgutil.iter_modules([models_path]):
+#     LOGGER.debug(f"Module name: {module_name}")
+#     if module_name.startswith('model_0x'):
+#         module = importlib.import_module(f'.models.{module_name}', package)
+#         LOGGER.debug(f"Importing module: {models_path}/{module_name}")
+#         # module = importlib.import_module(f'{models_path}/{module_name}')
+#         if hasattr(module, "SUPPORTED_MODELS"):
+#             LOGGER.debug(f"Supported models: {getattr(module, 'SUPPORTED_MODELS')}")
+#             SUPPORTED_MODELS.extend(getattr(module, "SUPPORTED_MODELS"))
+# old Working ^^^^
+
+for _, module_name, _ in pkgutil.iter_modules([models_path]):
+    LOGGER.debug(f"Module name: {module_name}")
     if module_name.startswith('model_0x'):
-        module = importlib.import_module(f'.models.{module_name}', package)
-        if hasattr(module, "SUPPORTED_MODELS"):
-            LOGGER.debug(f"Supported models: {getattr(module, 'SUPPORTED_MODELS')}")
-            SUPPORTED_MODELS.extend(getattr(module, "SUPPORTED_MODELS"))
+        m = importlib.import_module(f'{package}.models.{module_name}')
+        if hasattr(m, "SUPPORTED_MODELS"):
+            LOGGER.debug(f"Supported models: {getattr(m, 'SUPPORTED_MODELS')}")
+            SUPPORTED_MODELS.extend(getattr(m, "SUPPORTED_MODELS"))
+
 LOGGER.debug(f"All supported modules: {SUPPORTED_MODELS}")
 
 class DeviceData(BluetoothData):
@@ -216,7 +240,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             await self._instance.update()
             LOGGER.debug(f"Sending initial packets")
             await self._instance.send_initial_packets()
-            await self._instance._write_packet(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
+            await self._instance._write(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
             # await asyncio.sleep(1)
             for n in range(3):
                 LOGGER.debug(f"Turning on and off: {n}")

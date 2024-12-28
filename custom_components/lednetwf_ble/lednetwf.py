@@ -38,17 +38,38 @@ WrapFuncType = TypeVar("WrapFuncType", bound=Callable[..., Any])
 
 # Iterate through all modules in the current package
 package = __package__
-for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/models"]):
+filename = __file__
+# LOGGER.debug(f"Package: {package}")
+LOGGER.debug(f"File: {__file__}")
+my_name = filename[filename.rfind('/')+1:]
+models_path = f"{filename.replace(my_name, 'models')}"
+LOGGER.debug(f"Models path: {models_path}")
+
+# for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/models"]):
+#     LOGGER.debug(f"Module name: {module_name}")
+#     if module_name.startswith('model_0x'):
+#         module = importlib.import_module(f'.models.{module_name}', package)
+#         # module = importlib.import_module(f'{models_path}/{module_name}.py')
+#         LOGGER.debug(f"Module: {module}")
+#         LOGGER.debug(f"Dir: {dir(module)}")
+#         class_name = f'Model{module_name.split("_")[1]}'
+#         if hasattr(module, class_name):
+#             globals()[class_name] = getattr(module, class_name)
+#         if hasattr(module, "SUPPORTED_MODELS"):
+#             LOGGER.debug(f"Supported models: {getattr(module, 'SUPPORTED_MODELS')}")
+#             SUPPORTED_MODELS[class_name] = getattr(module, "SUPPORTED_MODELS")
+
+
+for _, module_name, _ in pkgutil.iter_modules([models_path]):
+    LOGGER.debug(f"Module name: {module_name}")
     if module_name.startswith('model_0x'):
-        module = importlib.import_module(f'.models.{module_name}', package)
-        LOGGER.debug(f"Module: {module}")
-        LOGGER.debug(f"Dir: {dir(module)}")
+        m = importlib.import_module(f'{package}.models.{module_name}')
         class_name = f'Model{module_name.split("_")[1]}'
-        if hasattr(module, class_name):
-            globals()[class_name] = getattr(module, class_name)
-        if hasattr(module, "SUPPORTED_MODELS"):
-            LOGGER.debug(f"Supported models: {getattr(module, 'SUPPORTED_MODELS')}")
-            SUPPORTED_MODELS[class_name] = getattr(module, "SUPPORTED_MODELS")
+        if hasattr(m, class_name):
+            globals()[class_name] = getattr(m, class_name)
+        if hasattr(m, "SUPPORTED_MODELS"):
+            LOGGER.debug(f"Supported models: {getattr(m, 'SUPPORTED_MODELS')}")
+            SUPPORTED_MODELS[class_name] = getattr(m, "SUPPORTED_MODELS")
 
 LOGGER.debug(f"All supported modules: {SUPPORTED_MODELS}")
 

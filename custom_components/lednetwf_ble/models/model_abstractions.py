@@ -50,7 +50,7 @@ class DefaultModelAbstraction:
             self.is_on             = True if self.manu_data[14] == 0x23 else False
         else:
             LOGGER.debug("No manu data")
-            self.manu_data         = chr(0) * 25 # Mock manu_data to prevent truth testing errors in the future
+            self.manu_data         = bytearray(25)
             self.fw_major          = 0x00
             self.fw_minor          = "Unknown version"
             self.led_count         = None
@@ -87,7 +87,6 @@ class DefaultModelAbstraction:
     def set_color_temp_kelvin(self):
         return NotImplementedError("This method should be implemented by the subclass")
     def notification_handler(self):
-        LOGGER.debug("ZZZ Notification handler not implemented")
         raise NotImplementedError("This method should be implemented by the subclass")
     def rgb_to_hsv(self,rgb):
         # Home Assistant expects HS in the range 0-360, 0-100

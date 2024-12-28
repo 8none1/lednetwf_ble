@@ -42,6 +42,8 @@ class Model0x56(DefaultModelAbstraction):
         self.icon = "mdi:led-strip-variant"
         self.effect_list = EFFECT_LIST_0x56
 
+        if isinstance(self.manu_data, str):
+            self.manu_data = [ord(c) for c in self.manu_data]
         LOGGER.debug(f"Manu data: {[hex(x) for x in self.manu_data]}")
         LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
         LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
@@ -57,10 +59,10 @@ class Model0x56(DefaultModelAbstraction):
             if self.manu_data[16] != 0xf0:
                 # We're not in a colour mode, so set the effect
                 self.effect_speed = self.manu_data[17]
-                if 0x02 <= self.manu_data[16] <= 0x0a:
+                if 0x01 <= self.manu_data[16] <= 0x0a:
                     self.effect = EFFECT_ID_TO_NAME_0x56[self.manu_data[16] << 8]
                 else:
-                    self._effect = EFFECT_OFF
+                    self.effect = EFFECT_OFF
         elif self.manu_data[15] == 0x62:
             # Music reactive mode. 
             self._color_mode = ColorMode.BRIGHTNESS
@@ -89,7 +91,7 @@ class Model0x56(DefaultModelAbstraction):
         self.color_mode = ColorMode.HS
         self.hs_color   = hs_color
         self.brightness = brightness
-        self.effect     = EFFECT_OFF
+        #self.effect     = EFFECT_OFF # The effect is NOT actually off when setting a colour. Static effect 1 is close to effect off, but it's still an effect.
         rgb_color = self.hsv_to_rgb((hs_color[0], hs_color[1], self.brightness))
         LOGGER.debug(f"Setting RGB colour: {rgb_color}")
         background_col = [0,0,0] # Consider adding support for this in the future?  For now, set black
@@ -209,7 +211,7 @@ class Model0x56(DefaultModelAbstraction):
             return None
         payload = bytearray.fromhex(payload)
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{byte:02X}' for byte in payload])}")
-        # return
+
         if payload[0] == 0x81:
             # Status request response
             power           = payload[2]
@@ -225,23 +227,29 @@ class Model0x56(DefaultModelAbstraction):
                     hsv_color = super().rgb_to_hsv(rgb_color)
                     self.hs_color = tuple(hsv_color[0:2])
                     self.brightness = int(hsv_color[2])
+                    LOGGER.debug("Light is in colour mode")
                     LOGGER.debug(f"RGB colour: {rgb_color}")
                     LOGGER.debug(f"HS colour: {self.hs_color}")
                     LOGGER.debug(f"Brightness: {self.brightness}")
                     self.effect = EFFECT_OFF
                     self.color_mode = ColorMode.HS
                     self.color_temperature_kelvin = None
-                elif selected_effect == 0x01:
-                    self.color_mode = ColorMode.HS
-                    self.effect = EFFECT_OFF
-                    hs_color = self.rgb_to_hsv(payload[6:9])
-                    self.hs_color = hs_color[0:2]
-                    self.brightness = hs_color[2]
-                elif 0x02 <= selected_effect <= 0x0a:
+                # elif selected_effect == 0x01: # We don't really need this any more, deal with it below instead
+                #     self.color_mode = ColorMode.HS
+                #     # self.effect = EFFECT_OFF
+                #     self.effect = EFFECT_ID_TO_NAME_0x56[selected_effect << 8] # Effect 1 is still an effect
+                #     hs_color = self.rgb_to_hsv(payload[6:9])
+                #     self.hs_color = hs_color[0:2]
+                #     self.brightness = hs_color[2]
+                elif 0x01 <= selected_effect <= 0x0a:
                     self.color_mode = ColorMode.HS
                     self.effect = EFFECT_ID_TO_NAME_0x56[selected_effect << 8]
                     self.effect_speed = payload[5]
-                    # TODO: What about colours and brightness?
+                    hs_color = self.rgb_to_hsv(payload[6:9])
+                    rgb_color = tuple(int(b) for b in payload[6:9])
+                    LOGGER.debug(f"RGB Color: {rgb_color}, HS colour: {hs_color}, Brightness: {hs_color[2]}")
+                    self.hs_color = hs_color[0:2]
+                    self.brightness = hs_color[2]
             elif mode == 0x62:
                 # Music reactive mode
                 # TODO: Brightness?
