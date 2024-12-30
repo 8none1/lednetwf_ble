@@ -269,7 +269,9 @@ class Model0x56(DefaultModelAbstraction):
         elif payload[1] == 0x63:
             LOGGER.debug(f"LED settings response received")
             self.led_count = int.from_bytes(bytes([payload[2], payload[3]]), byteorder='big') * payload[5]
-            self.chip_type = const.LedTypes_StripLight.from_value(payload[6])
-            self.color_order = const.ColorOrdering.from_value(payload[7])
+            # self.chip_type = const.LedTypes_StripLight.from_value(payload[6])
+            self.chip_type = const.LedTypes_StripLight(payload[6]).name
+            # self.color_order = const.ColorOrdering.from_value(payload[7])
+            self.color_order = const.ColorOrdering(payload[7]).name
 
 

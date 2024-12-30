@@ -24,7 +24,7 @@ class DefaultModelAbstraction:
         self.chip_type                     = None
         self.color_order                   = None
         self.brightness                    = None
-        self.hs_color                      = None
+        self.hs_color                      = [0, 100]  # Default to red instead of None to avoid exceptions when enabling effects before selecting a colour
         self.effect                        = EFFECT_OFF
         self.effect_speed                  = 50
         self.color_mode                    = ColorMode.UNKNOWN
@@ -40,7 +40,8 @@ class DefaultModelAbstraction:
         self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12 21 f0 86")
 
     def process_manu_data(self, manu_data):
-        LOGGER.debug(f"Manu data: {manu_data}")
+        manu_data_str = ' '.join(f'0x{byte:02X}' for byte in manu_data[next(iter(manu_data))])
+        LOGGER.debug(f"Manu data: {manu_data_str}")
         if manu_data:
             manu_data_id           = next(iter(manu_data))
             self.manu_data         = bytearray(manu_data[manu_data_id])
@@ -96,6 +97,7 @@ class DefaultModelAbstraction:
         LOGGER.debug(f"HSV: {hsv}")
         # Home Assistant expects RGB in the range 0-255
         r,g,b = colorsys.hsv_to_rgb(hsv[0]/360.0, hsv[1]/100.0, hsv[2]/255.0)
+
         LOGGER.debug(f"RGB: {r, g, b}")
         return [int(r*255), int(g*255), int(b*255)]        
 

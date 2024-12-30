@@ -164,6 +164,7 @@ class LEDNETWFInstance:
         LOGGER.debug(f"Service info: {service_info}")
         LOGGER.debug(f"Service info keys: {service_info.keys()}")
         model_class_name = find_model_for_value(self._model)
+        LOGGER.debug(f"Model class name: {model_class_name}")
         model_class = globals()[model_class_name]
         LOGGER.debug(f"Model class via lookup: {model_class}")
         self._model_interface = model_class(service_info['manufacturer_data'])
@@ -174,6 +175,10 @@ class LEDNETWFInstance:
         self._expected_disconnect   = False
         self._packet_counter        = 0
         self._read_uuid             = None
+        self._model_interface.chip_type = self._options.get('chip_type')
+        self._model_interface.color_order = self._options.get('color_order')
+        LOGGER.debug(f"Chip type: {self._model_interface.chip_type}")
+        LOGGER.debug(f"Color order: {self._model_interface.color_order}")
     
     async def _write(self, data: bytearray):
         """Send command to device and read response."""
@@ -355,6 +360,7 @@ class LEDNETWFInstance:
             
             self._client = client
             self._reset_disconnect_timer()
+            LOGGER.debug(f"Trying to start notifications for {self._name}")
             await self._client.start_notify(self._read_uuid, self._notification_handler)
             
     def _resolve_characteristics(self, services: BleakGATTServiceCollection) -> bool:

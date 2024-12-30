@@ -338,8 +338,9 @@ class Model0x53(DefaultModelAbstraction):
         elif payload[0] == 0x63:
             LOGGER.debug(f"LED settings response received")
             self.led_count   = payload[2]
-            self.chip_type   = const.LedTypes_RingLight.from_value(payload[3])
-            self.color_order = const.ColorOrdering.from_value(payload[4])
+            self.chip_type   = const.LedTypes_RingLight(payload[3]).name
+            self.color_order = const.ColorOrdering(payload[4]).name
+            LOGGER.debug(f"LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}")
 
 # TODO:
 

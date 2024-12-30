@@ -188,14 +188,19 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             LOGGER.debug(f"self._instance._model_interface.chip_type: {self._instance._model_interface.chip_type}")
             LOGGER.debug(f"self._instance._model_interface.color_order: {self._instance._model_interface.color_order}")
             LOGGER.debug(f"self._instance._model_interface.led_count: {self._instance._model_interface.led_count}")
-            led_count   = getattr(self._instance._model_interface, 'led_count', 64) #May be Unsafe, leave blank ?
-            led_type    = getattr(self._instance._model_interface.chip_type, 'name', "Unknown")
-            color_order = getattr(self._instance._model_interface.color_order, 'name ', "RGB")
+            # led_count   = getattr(self._instance._model_interface, 'led_count', 64) #May be Unsafe, leave blank ?
+            # led_type    = getattr(self._instance._model_interface.chip_type, 'name', "Unknown")
+            # color_order = getattr(self._instance._model_interface.color_order, 'name ', "RGB")
+            led_count   = getattr(self._instance._model_interface, 'led_count',    64) #May be Unsafe, leave blank ?
+            led_type    = getattr(self._instance._model_interface, 'chip_type',   None)
+            if led_type is None:  led_type = "WS2812B"
+            color_order = getattr(self._instance._model_interface, 'color_order', None)
+            if color_order is None:  color_order = "GRB"
             LOGGER.debug(f"Async step validate: LED Count: {led_count}, LED Type: {led_type}, Color Order: {color_order}")   
             # model_num   = getattr(self._instance, '_model', 0x53) #May be unsafe, leave blank ?
             data        = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120, CONF_MODEL: self.model}
             options     = {CONF_LEDCOUNT: led_count, CONF_LEDTYPE: led_type, CONF_COLORORDER: color_order}
-
+            LOGGER.debug(f"Data: {data}, Options: {options}")
             # TODO: deal with "none" better from old devices which haven't got config data yet. Also update the function in const to not error on none.
 
             if "flicker" in user_input:
@@ -232,7 +237,11 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             #     data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120, CONF_MODEL: self.device_data.model()}
             #     LOGGER.debug(f"Device data exists: {data}")
             # data = {CONF_MAC: self.mac, CONF_NAME: self.name, CONF_DELAY: 120, CONF_MODEL: self.device_data.get_model()}
-            data = {CONF_MAC: self.device_data.address(), CONF_NAME: self.device_data.human_readable_name(), CONF_DELAY: 120, CONF_MODEL: self.device_data.get_model()}
+            data = {CONF_MAC: self.device_data.address(),
+                    CONF_NAME: self.device_data.human_readable_name(),
+                    CONF_DELAY: 120,
+                    CONF_MODEL: self.device_data.get_model()
+                }
             LOGGER.debug(f"Device data is None, creating new data to pass up: {data}")
             self._instance = LEDNETWFInstance(self.mac, self.hass, data)
         try:
