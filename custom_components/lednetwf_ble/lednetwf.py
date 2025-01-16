@@ -310,6 +310,9 @@ class LEDNETWFInstance:
     async def set_led_settings(self, options: dict):
         led_settings_packet = self._model_interface.set_led_settings(options)
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
+        if led_settings_packet is None:
+            LOGGER.error("LED settings packet is None")
+            return
         await self._write(led_settings_packet)
         await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
         await self.turn_off()

@@ -10,9 +10,9 @@ from homeassistant.components.light import (
     EFFECT_OFF
 )
 
-SUPPORTED_MODELS = [0x5B] 
+SUPPORTED_MODELS = [0x5B]
 
-class Model0x5B(DefaultModelAbstraction):
+class Model0x5b(DefaultModelAbstraction):
     # CCT only strip
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x5B init")
@@ -50,9 +50,9 @@ class Model0x5B(DefaultModelAbstraction):
                     self.brightness               = int(self.manu_data[17] * 255 // 100) # This one is in range 0-FF
                     self.color_mode               = ColorMode.COLOR_TEMP
                     LOGGER.debug(f"From manu data white brightness: {self.brightness}")
-                else:
-                    LOGGER.error(f"Unknown colour mode: {self.manu_data[16]}. Assuming RGB")
-                    raise NotImplementedError("Unknown colour mode")
+                # else:
+                #     LOGGER.error(f"Unknown colour mode: {self.manu_data[16]}. Assuming RGB")
+                #     raise NotImplementedError("Unknown colour mode")
             # elif self.manu_data[15] == 0x25:
             #     # Effect mode
             #     LOGGER.debug(f"Effect mode detected. self.manu_data: {self.manu_data}")

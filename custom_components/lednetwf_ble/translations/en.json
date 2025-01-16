@@ -50,7 +50,7 @@
                     "ledcount": "Number of LEDs",
                     "name": "Name",
                     "ledtype": "LED type",
-                    "colororder": "Color order"                    
+                    "colororder": "Color order"
                 },
                 "title": "LEDnetWF"
             }
