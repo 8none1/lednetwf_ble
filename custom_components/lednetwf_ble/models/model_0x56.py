@@ -5,7 +5,7 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 import colorsys
-from homeassistant.components.light import (
+from homeassistant.components.light import ( # type: ignore
     ColorMode,
     EFFECT_OFF
 )
