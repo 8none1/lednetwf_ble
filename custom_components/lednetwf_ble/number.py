@@ -30,7 +30,7 @@ class LEDNETWFSpeedSlider(NumberEntity):
         #self._attr_translation_key = attr_name # Can't get this to work
         self._attr_name            = attr_name
         self._attr_unique_id       = self._instance.mac
-        self._effect_speed         = self._instance._effect_speed
+        self._effect_speed         = self._instance._model_interface.effect_speed
 
     @property
     def available(self):

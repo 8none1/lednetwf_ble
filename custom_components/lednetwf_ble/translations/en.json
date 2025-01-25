@@ -6,14 +6,14 @@
                     "mac": "Bluetooth MAC address",
                     "name": "Name"
                 },
-                "title": "Pick a LEDnetWF light"
+                "title": "Select LEDnetWF light"
             },
             "validate": {
                 "data": {
-                    "retry": "Retry validate connection?",
+                    "retry": "Retry?",
                     "flicker": "Did the light blink?"
                 },
-                "title": "Validate LEDnetWF connection"
+                "title": "Validate connection"
             },
             "manual": {
                 "data": {
@@ -45,12 +45,12 @@
             },
             "init" : {
                 "data": {
-                    "reset": "Reset color when led turn on",
-                    "delay": "Disconnect delay (0 equal never disconnect)",
+                    "reset": "Reset color when led turns on",
+                    "delay": "Disconnect delay (0 = never disconnect)",
                     "ledcount": "Number of LEDs",
                     "name": "Name",
                     "ledtype": "LED type",
-                    "colororder": "Color order"                    
+                    "colororder": "Color order"
                 },
                 "title": "LEDnetWF"
             }
