@@ -40,9 +40,9 @@ class DefaultModelAbstraction:
         self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12 21 f0 86")
 
     def process_manu_data(self, manu_data):
-        manu_data_str = ' '.join(f'0x{byte:02X}' for byte in manu_data[next(iter(manu_data))])
-        LOGGER.debug(f"Manu data: {manu_data_str}")
         if manu_data:
+            manu_data_str = ' '.join(f'0x{byte:02X}' for byte in manu_data[next(iter(manu_data))])
+            LOGGER.debug(f"Manu data: {manu_data_str}")
             manu_data_id           = next(iter(manu_data))
             self.manu_data         = bytearray(manu_data[manu_data_id])
             self.fw_major          = self.manu_data[0]
