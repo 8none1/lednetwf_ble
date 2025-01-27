@@ -3,7 +3,7 @@
 # Some devices support HS colours, some only support RGB so we need to create an abstraction layer too
 
 import colorsys
-from homeassistant.components.light import (
+from homeassistant.components.light import ( # type: ignore
     ColorMode,
     EFFECT_OFF,
     LightEntityFeature
