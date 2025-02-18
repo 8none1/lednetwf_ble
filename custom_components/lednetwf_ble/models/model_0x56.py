@@ -66,7 +66,7 @@ class Model0x56(DefaultModelAbstraction):
         elif self.manu_data[15] == 0x62:
             # Music reactive mode. 
             self._color_mode = ColorMode.BRIGHTNESS
-            effect = manu_data[16]
+            effect = self.manu_data[16]
             scaled_effect = (effect + 0x32) << 8
             self.effect = EFFECT_ID_TO_NAME_0x56[scaled_effect]
         elif self.manu_data[15] == 0x25:
