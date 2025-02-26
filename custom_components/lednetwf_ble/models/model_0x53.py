@@ -10,7 +10,7 @@ from homeassistant.components.light import (
     EFFECT_OFF
 )
 
-SUPPORTED_MODELS = [0x00, 0x53, 0x55] # Probably 0x55 is not supported here, but in 0x54 instead
+SUPPORTED_MODELS = [0x00, 0x53]
 
 EFFECTS_LIST_0x53 = [
     "Gold Ring",

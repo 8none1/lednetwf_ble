@@ -12,7 +12,7 @@ from homeassistant.components.light import (
     EFFECT_OFF
 )
 
-SUPPORTED_MODELS = [0x54, 0x62]
+SUPPORTED_MODELS = [0x54, 0x55, 0x62]
 
 # This device only supports three colour orders, so override the defaults with our own
 # In order to maintain compatibility with the rest of the code, we'll use some of the same values for unsupported colour orders
