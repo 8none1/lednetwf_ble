@@ -59,3 +59,9 @@ This integration is possible thanks to the work of this incredible people!
 - https://openclipart.org/detail/185270/light-bulb-icon for the original icon.
 
 Thanks!
+
+## Support
+
+In order to add support for more and newer lights I really need to get my hands on them.  That costs money.  Not a lot of money, but some money none the less.  If you would like to support the development of this integration and support for newer devices in the future you can consider a small contribution to the costs via buymeacoffee.  There is no obligation to do this and you are free to use this software with no payments at all.  Any money raised will go exclusively towards purchasing new lights to try and build integrations for.  There is no suggestion that contributing money will get your bug fixed or support added for your lights.
+
+https://coff.ee/8none1
