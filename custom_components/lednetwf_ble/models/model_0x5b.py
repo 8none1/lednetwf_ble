@@ -12,8 +12,19 @@ from homeassistant.components.light import (
 
 SUPPORTED_MODELS = [0x5B]
 
+# 0x5B Effect data
+EFFECT_MAP_0x5b = {}
+for e in range(37,58): # 0x25 onwards
+    EFFECT_MAP_0x5b[f"Effect {e-37}"] = e
+EFFECT_MAP_0x5b["_Effect Off"]         = 0
+# EFFECT_MAP_0x5b["Candle Mode"]        = 100
+# EFFECT_MAP_0x5b["Sound Reactive"]     = 200
+EFFECT_LIST_0x5b = sorted(EFFECT_MAP_0x5b)
+EFFECT_ID_TO_NAME_0x5b = {v: k for k, v in EFFECT_MAP_0x5b.items()}
+
+
 class Model0x5b(DefaultModelAbstraction):
-    # CCT only strip
+    # CCT only strip & Sunrise lamps
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x5B init")
         super().__init__(manu_data)
@@ -34,16 +45,20 @@ class Model0x5b(DefaultModelAbstraction):
             self.led_count = None
         else:
             if self.manu_data[15] == 0x61:
-                # if self.manu_data[16] == 0xf0:
-                #     # RGB mode
-                #     rgb_color       = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
-                #     self.hs_color   = tuple(super().rgb_to_hsv(rgb_color)[0:2])
-                #     self.brightness = super().rgb_to_hsv(rgb_color)[2]
-                #     self.color_mode = ColorMode.HS
+                if self.manu_data[16] == 0x23:
+                    # RGB mode - Could be a sun rise lamp
+                    rgb_color                  = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
+                    self.hs_color              = tuple(super().rgb_to_hsv(rgb_color)[0:2])
+                    self.brightness            = super().rgb_to_hsv(rgb_color)[2]
+                    self.color_mode            = ColorMode.HS
+                    self.supported_color_modes = {ColorMode.HS}
+                    self.effect_list           = EFFECT_LIST_0x5b
+                    self.effect                = EFFECT_OFF
+                    self.icon                  = "mdi:lightbulb"
                 #     #self.color_temperature_kelvin = self.min_color_temp
-                #     LOGGER.debug(f"From manu RGB colour: {rgb_color}")
-                #     LOGGER.debug(f"From manu HS colour: {self.hs_color}")
-                #     LOGGER.debug(f"From manu RGB Brightness: {self.brightness}")
+                    LOGGER.debug(f"From manu RGB colour: {rgb_color}")
+                    LOGGER.debug(f"From manu HS colour: {self.hs_color}")
+                    LOGGER.debug(f"From manu RGB Brightness: {self.brightness}")
                 if self.manu_data[16] == 0x0f:
                     # White mode
                     self.color_temperature_kelvin = self.min_color_temp + self.manu_data[21] * (self.max_color_temp - self.min_color_temp) / 100
@@ -92,6 +107,39 @@ class Model0x5b(DefaultModelAbstraction):
         color_temp_kelvin_packet[13] = color_temp_pct
         color_temp_kelvin_packet[14] = self.get_brightness_percent()
         return color_temp_kelvin_packet
+    
+    def set_color(self, hs_color, brightness):
+        # Returns the byte array to set the RGB colour
+        self.color_mode = ColorMode.HS
+        self.hs_color   = hs_color
+        self.brightness = brightness
+        self.effect     = EFFECT_OFF
+        rgb_color = self.hsv_to_rgb((hs_color[0], hs_color[1], self.brightness))
+        LOGGER.debug(f"Setting RGB colour: {rgb_color}")
+        rgb_packet = bytearray.fromhex("00 05 80 00 00 08 09 0b 31 ff 00 00 00 00 0f 3f")
+        rgb_packet[9:12] = rgb_color
+        rgb_packet[15]    = sum(rgb_packet[8:15]) & 0xFF # Checksum
+        LOGGER.debug(f"Set RGB. RGB {self.get_rgb_color()} Brightness {self.brightness}")
+        return rgb_packet
+    
+    def set_effect(self, effect, brightness):
+            LOGGER.debug(f"Setting effect: {effect}")
+            if effect not in EFFECT_LIST_0x5b:
+                raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x5b")
+            self.effect     =  effect
+            self.brightness   = brightness
+            effect_id         = EFFECT_MAP_0x5b.get(effect)
+            effect_packet     = bytearray.fromhex("00 15 80 00 00 05 06 0b 38 25 01 64 c2")
+            self.color_mode   = ColorMode.BRIGHTNESS # 2024.2 Allows setting color mode for changing effects brightness.  Effects above here support RGB, so only set here.
+            effect_packet[9]  = effect_id
+            # Convert speed from percentage (0-100) to a value between 0x1f and 0x01
+            # 0x01 = 100% and 0x1f = 1%
+            speed = round(0x1f - (self.effect_speed - 1) * (0x1f - 0x01) / (100 - 1))
+            effect_packet[10] = speed
+            effect_packet[11] = self.get_brightness_percent()
+            effect_packet[12] = sum(effect_packet[8:11]) & 0xFF
+            LOGGER.debug(f"Effect packet: {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+            return effect_packet
 
     def set_brightness(self, brightness):
         if brightness == self.brightness:
@@ -102,6 +150,8 @@ class Model0x5b(DefaultModelAbstraction):
             self.brightness = min(255, max(0, brightness))
         if self.color_mode == ColorMode.COLOR_TEMP:
             return self.set_color_temp_kelvin(self.color_temperature_kelvin, brightness)
+        elif self.color_mode == ColorMode.HS:
+            return self.set_color(self.hs_color, brightness)
         else:
             LOGGER.error(f"Unknown colour mode: {self.color_mode}")
             return
@@ -152,7 +202,20 @@ class Model0x5b(DefaultModelAbstraction):
             self.led_count  = payload[12]
             self.is_on      = True if power == 0x23 else False
 
-            # if mode == 0x61:
+            if mode == 0x61:
+                if selected_effect == 0x23:
+                    # Light is in RGB mode
+                    rgb_color = (payload[6], payload[7], payload[8])
+                    hsv_color = super().rgb_to_hsv(rgb_color)
+                    self.hs_color = tuple(hsv_color[0:2])
+                    self.brightness = int(hsv_color[2]) # self.brightness = int(hsv_color[2] * 255 // 100)
+                    LOGGER.debug(f"RGB colour: {rgb_color}")
+                    LOGGER.debug(f"HS colour: {self.hs_color}")
+                    LOGGER.debug(f"Brightness: {self.brightness}")
+                    self.effect = EFFECT_OFF
+                    self.color_mode = ColorMode.HS
+                    self.color_temperature_kelvin = None
+                
             #     if selected_effect == 0xf0:
             #         # Light is in colour mode
             #         rgb_color = (payload[6], payload[7], payload[8])
