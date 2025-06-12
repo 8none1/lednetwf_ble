@@ -16,8 +16,9 @@ SUPPORTED_MODELS = [0x5B]
 EFFECT_MAP_0x5b = {}
 for e in range(37,58): # 0x25 onwards
     EFFECT_MAP_0x5b[f"Effect {e-37}"] = e
-EFFECT_MAP_0x5b["_Effect Off"]         = 0
-# EFFECT_MAP_0x5b["Candle Mode"]        = 100
+EFFECT_MAP_0x5b["_Effect Off"]        = 0
+EFFECT_MAP_0x5b["RGB Jump"]           = 0x63
+EFFECT_MAP_0x5b["Candle Mode"]        = 100
 # EFFECT_MAP_0x5b["Sound Reactive"]     = 200
 EFFECT_LIST_0x5b = sorted(EFFECT_MAP_0x5b)
 EFFECT_ID_TO_NAME_0x5b = {v: k for k, v in EFFECT_MAP_0x5b.items()}
@@ -39,28 +40,31 @@ class Model0x5b(DefaultModelAbstraction):
         if manu_data is None:
             LOGGER.debug("Manu data is None, using defaults")
             self.color_mode = ColorMode.COLOR_TEMP
-            self.hs_color = None
+            self.hs_color   = None
             self.brightness = 255
-            self.effect = EFFECT_OFF
-            self.led_count = None
+            self.effect     = EFFECT_OFF
+            self.led_count  = None
         else:
             if self.manu_data[15] == 0x61:
+                # Solid colour mode
                 if self.manu_data[16] == 0x23:
-                    # RGB mode - Could be a sun rise lamp
-                    rgb_color                  = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
-                    self.hs_color              = tuple(super().rgb_to_hsv(rgb_color)[0:2])
-                    self.brightness            = super().rgb_to_hsv(rgb_color)[2]
-                    self.color_mode            = ColorMode.HS
-                    self.supported_color_modes = {ColorMode.HS}
-                    self.effect_list           = EFFECT_LIST_0x5b
-                    self.effect                = EFFECT_OFF
-                    self.icon                  = "mdi:lightbulb"
-                #     #self.color_temperature_kelvin = self.min_color_temp
+                    # RGB mode - Could be a sun rise lamp?
+                    rgb_color                    = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
+                    self.hs_color                = tuple(super().rgb_to_hsv(rgb_color)[0:2])
+                    self.brightness              = super().rgb_to_hsv(rgb_color)[2]
+                    self.color_mode              = ColorMode.HS
+                    self.supported_color_modes   = {ColorMode.HS}
+                    self.effect_list             = EFFECT_LIST_0x5b
+                    self.effect                  = EFFECT_OFF
+                    self.icon                    = "mdi:lightbulb"
+                    self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 05 80 00 00 02 03 07 22 22")
+                    self.led_count               = 1
+                    # self.color_temperature_kelvin = self.min_color_temp
                     LOGGER.debug(f"From manu RGB colour: {rgb_color}")
                     LOGGER.debug(f"From manu HS colour: {self.hs_color}")
                     LOGGER.debug(f"From manu RGB Brightness: {self.brightness}")
                 if self.manu_data[16] == 0x0f:
-                    # White mode
+                    # White mode - seems to be a CCT strip
                     self.color_temperature_kelvin = self.min_color_temp + self.manu_data[21] * (self.max_color_temp - self.min_color_temp) / 100
                     self.brightness               = int(self.manu_data[17] * 255 // 100) # This one is in range 0-FF
                     self.color_mode               = ColorMode.COLOR_TEMP
@@ -68,20 +72,21 @@ class Model0x5b(DefaultModelAbstraction):
                 # else:
                 #     LOGGER.error(f"Unknown colour mode: {self.manu_data[16]}. Assuming RGB")
                 #     raise NotImplementedError("Unknown colour mode")
-            # elif self.manu_data[15] == 0x25:
-            #     # Effect mode
-            #     LOGGER.debug(f"Effect mode detected. self.manu_data: {self.manu_data}")
-            #     effect = self.manu_data[16]
-            #     if effect < len(EFFECTS_LIST_0x53):
-            #         self.effect = EFFECTS_LIST_0x53[effect - 1]
-            #     elif effect == 0xFF:
-            #         self.effect = EFFECTS_LIST_0x53[-1]
-            #     else:
-            #         LOGGER.error(f"Unknown effect: {effect}")
-            #         raise NotImplementedError("Unknown effect")
-            #     self.effect_speed = self.manu_data[19]
-            #     self.brightness   = int(self.manu_data[18] * 255 // 100)
-            #     self.color_mode   = ColorMode.BRIGHTNESS
+            elif 0x25 <= self.manu_data[15] <= 0x3a or self.manu_data[15] == 0x63:
+                # Effect mode of RGB device
+                effect = self.manu_data[15]
+                self.effect = EFFECT_ID_TO_NAME_0x5b[effect]
+                self.supported_color_modes   = {ColorMode.HS, ColorMode.BRIGHTNESS}
+                self.effect_list             = EFFECT_LIST_0x5b
+                self.effect                  = EFFECT_OFF
+                self.icon                    = "mdi:lightbulb"
+                self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 05 80 00 00 02 03 07 22 22")
+                self.led_count               = 1
+                self.color_mode              = ColorMode.BRIGHTNESS
+                # self.effect_speed = self.manu_data[17]
+                # self.brightness   = int(self.manu_data[18] * 255 // 100)
+                self.is_on        = True if self.manu_data[14] == 0x23 else False
+
         # LOGGER.debug(f"Effect: {self.effect}")
         # LOGGER.debug(f"Effect speed: {self.effect_speed}")
         LOGGER.debug(f"Brightness: {self.brightness}")
@@ -129,16 +134,31 @@ class Model0x5b(DefaultModelAbstraction):
             self.effect     =  effect
             self.brightness   = brightness
             effect_id         = EFFECT_MAP_0x5b.get(effect)
-            effect_packet     = bytearray.fromhex("00 15 80 00 00 05 06 0b 38 25 01 64 c2")
-            self.color_mode   = ColorMode.BRIGHTNESS # 2024.2 Allows setting color mode for changing effects brightness.  Effects above here support RGB, so only set here.
-            effect_packet[9]  = effect_id
-            # Convert speed from percentage (0-100) to a value between 0x1f and 0x01
-            # 0x01 = 100% and 0x1f = 1%
-            speed = round(0x1f - (self.effect_speed - 1) * (0x1f - 0x01) / (100 - 1))
-            effect_packet[10] = speed
-            effect_packet[11] = self.get_brightness_percent()
-            effect_packet[12] = sum(effect_packet[8:11]) & 0xFF
-            LOGGER.debug(f"Effect packet: {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+
+            if effect_id == 0: # Effect off
+                self.set_color(self.hs_color, self.brightness)
+                return None
+            if 100 <= effect_id <= 200: # Candle mode
+                effect_packet = bytearray.fromhex("00 04 80 00 00 09 0a 0b 39 d1 ff 00 00 18 2e 03 52")
+                effect_packet[10:13] = self.get_rgb_color()
+                effect_packet[13]    = round(0x1f - (self.effect_speed - 1) * (0x1f - 0x01) / (100 - 1))
+                effect_packet[14]    = self.get_brightness_percent()
+                effect_packet[16]    = sum(effect_packet[8:16]) & 0xFF
+                LOGGER.debug(f"Candle effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+                # return effect_packet
+
+            else:
+                effect_packet     = bytearray.fromhex("00 15 80 00 00 05 06 0b 38 25 01 64 c2")
+                self.color_mode   = ColorMode.BRIGHTNESS # 2024.2 Allows setting color mode for changing effects brightness.  Effects above here support RGB, so only set here.
+                effect_packet[9]  = effect_id
+                # Convert speed from percentage (0-100) to a value between 0x1f and 0x01
+                # 0x01 = 100% and 0x1f = 1%
+                speed = round(0x1f - (self.effect_speed - 1) * (0x1f - 0x01) / (100 - 1))
+                effect_packet[10] = speed
+                effect_packet[11] = self.get_brightness_percent()
+                effect_packet[12] = sum(effect_packet[8:11]) & 0xFF
+                LOGGER.debug(f"Effect packet: {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+
             return effect_packet
 
     def set_brightness(self, brightness):
