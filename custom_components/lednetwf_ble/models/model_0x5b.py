@@ -59,6 +59,7 @@ class Model0x5b(DefaultModelAbstraction):
                     self.icon                    = "mdi:lightbulb"
                     self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 05 80 00 00 02 03 07 22 22")
                     self.led_count               = 1
+                    LOGGER.debug(f"Setting led count to 1 for RGB mode")
                     # self.color_temperature_kelvin = self.min_color_temp
                     LOGGER.debug(f"From manu RGB colour: {rgb_color}")
                     LOGGER.debug(f"From manu HS colour: {self.hs_color}")
@@ -75,15 +76,17 @@ class Model0x5b(DefaultModelAbstraction):
             elif 0x25 <= self.manu_data[15] <= 0x3a or self.manu_data[15] == 0x63:
                 # Effect mode of RGB device
                 effect = self.manu_data[15]
-                self.effect = EFFECT_ID_TO_NAME_0x5b[effect]
+                speed  = self.manu_data[17]
+                # Convert from device speed (0x1f = 1%, 0x01 = 100%) to percentage (0-100)
+                self.effect_speed = round((0x1f - speed) * (100 - 1) / (0x1f - 0x01) + 1)
+                LOGGER.debug(f"Manu effect speed: {self.effect_speed}")
+                self.effect                  = EFFECT_ID_TO_NAME_0x5b[effect]
                 self.supported_color_modes   = {ColorMode.HS, ColorMode.BRIGHTNESS}
                 self.effect_list             = EFFECT_LIST_0x5b
-                self.effect                  = EFFECT_OFF
                 self.icon                    = "mdi:lightbulb"
                 self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 05 80 00 00 02 03 07 22 22")
                 self.led_count               = 1
                 self.color_mode              = ColorMode.BRIGHTNESS
-                # self.effect_speed = self.manu_data[17]
                 # self.brightness   = int(self.manu_data[18] * 255 // 100)
                 self.is_on        = True if self.manu_data[14] == 0x23 else False
 
@@ -129,11 +132,12 @@ class Model0x5b(DefaultModelAbstraction):
     
     def set_effect(self, effect, brightness):
             LOGGER.debug(f"Setting effect: {effect}")
+            LOGGER.debug(f"Setting effect brightness: {brightness}")
             if effect not in EFFECT_LIST_0x5b:
                 raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x5b")
-            self.effect     =  effect
-            self.brightness   = brightness
-            effect_id         = EFFECT_MAP_0x5b.get(effect)
+            self.effect     = effect
+            self.brightness = 255 if brightness is None else brightness
+            effect_id       = EFFECT_MAP_0x5b.get(effect)
 
             if effect_id == 0: # Effect off
                 self.set_color(self.hs_color, self.brightness)
@@ -203,26 +207,36 @@ class Model0x5b(DefaultModelAbstraction):
     
     def notification_handler(self, data):
         notification_data = data.decode("utf-8", errors="ignore")
+        LOGGER.debug(f"N: Notification data: {notification_data}")
         last_quote = notification_data.rfind('"')
         if last_quote > 0:
             first_quote = notification_data.rfind('"', 0, last_quote)
             if first_quote > 0:
                 payload = notification_data[first_quote+1:last_quote]
+                if any(c not in "0123456789abcdefABCDEF" for c in payload):
+                    return None
             else:
                 return None
         else:
             return None
-        payload = bytearray.fromhex(payload)
+        LOGGER.debug(f"N: Notification Payload after processing: {payload}")
+        try:
+            payload = bytearray.fromhex(payload)
+        except ValueError as e:
+            LOGGER.error(f"Error decoding notification data: {e}")
+            return None
+        
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{byte:02X}' for byte in payload])}")
         if payload[0] == 0x81:
             # Status request response
             power           = payload[2]
             mode            = payload[3]
             selected_effect = payload[4]
-            self.led_count  = payload[12]
+            # self.led_count  = payload[12] # These devices don't send LED count in the same place I think
             self.is_on      = True if power == 0x23 else False
 
             if mode == 0x61:
+                # Solid colour mode
                 if selected_effect == 0x23:
                     # Light is in RGB mode
                     rgb_color = (payload[6], payload[7], payload[8])
@@ -235,7 +249,15 @@ class Model0x5b(DefaultModelAbstraction):
                     self.effect = EFFECT_OFF
                     self.color_mode = ColorMode.HS
                     self.color_temperature_kelvin = None
-                
+            elif 0x25 <= mode <= 0x3a or mode == 0x63:
+                # Effect mode of RGB device
+                speed  = payload[5]
+                # Convert from device speed (0x1f = 1%, 0x01 = 100%) to percentage (0-100)
+                self.effect_speed = round((0x1f - speed) * (100 - 1) / (0x1f - 0x01) + 1)
+                LOGGER.debug(f"Effect speed: {self.effect_speed}")
+                self.effect = EFFECT_ID_TO_NAME_0x5b[mode]
+                LOGGER.debug(f"Effect: {self.effect}")
+
             #     if selected_effect == 0xf0:
             #         # Light is in colour mode
             #         rgb_color = (payload[6], payload[7], payload[8])

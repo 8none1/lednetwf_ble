@@ -188,9 +188,6 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             LOGGER.debug(f"self._instance._model_interface.chip_type: {self._instance._model_interface.chip_type}")
             LOGGER.debug(f"self._instance._model_interface.color_order: {self._instance._model_interface.color_order}")
             LOGGER.debug(f"self._instance._model_interface.led_count: {self._instance._model_interface.led_count}")
-            # led_count   = getattr(self._instance._model_interface, 'led_count', 64) #May be Unsafe, leave blank ?
-            # led_type    = getattr(self._instance._model_interface.chip_type, 'name', "Unknown")
-            # color_order = getattr(self._instance._model_interface.color_order, 'name ', "RGB")
             led_count   = getattr(self._instance._model_interface, 'led_count',    64) #May be Unsafe, leave blank ?
             led_type    = getattr(self._instance._model_interface, 'chip_type',   None)
             if led_type is None:  led_type = "WS2812B"
@@ -265,7 +262,8 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return error
         finally:
             LOGGER.debug(f"Finally, stopping instance")
-            await self._instance.stop()
+            # Let's not stop the instance and see if it's data is still available.
+            # await self._instance.stop()
 
     @staticmethod
     @callback

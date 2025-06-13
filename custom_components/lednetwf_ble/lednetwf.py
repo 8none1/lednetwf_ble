@@ -160,9 +160,13 @@ class LEDNETWFInstance:
             raise ConfigEntryNotReady(
                 f"You need to add bluetooth integration (https://www.home-assistant.io/integrations/bluetooth) or couldn't find a nearby device with address: {self._mac}"
             )
-        service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
+        service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict() # It looks like there is a race in Home Assistant where this contains the service info of a different device
         LOGGER.debug(f"Service info: {service_info}")
         LOGGER.debug(f"Service info keys: {service_info.keys()}")
+        if service_info is not None and 'address' in service_info:
+            if service_info['address'] != self._mac:
+                LOGGER.error(f"Service info address {service_info['address']} does not match expected MAC {self._mac}. This shouldn't happen, but it does. Try again later.")
+                return False
         model_class_name = find_model_for_value(self._model)
         LOGGER.debug(f"Model class name: {model_class_name}")
         model_class = globals()[model_class_name]
