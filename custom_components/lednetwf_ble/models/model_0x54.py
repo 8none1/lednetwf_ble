@@ -176,8 +176,9 @@ class Model0x54(DefaultModelAbstraction):
             LOGGER.error("LED colour order is None and shouldn't be.  Not setting LED settings.")
             return
         else:
-            self.color_order       = getattr(ColorOrdering, color_order).value
-            
+            #self.color_order       = getattr(ColorOrdering, color_order).value
+            self.color_order       = const.ColorOrdering.from_value(color_order).value
+        
         LOGGER.debug(f"Setting LED settings: Colour order: {self.color_order}")
         led_settings_packet     = bytearray.fromhex("00 04 80 00 00 05 06 0b 62 00 01 0f 72")
         led_settings_packet[10] = self.color_order

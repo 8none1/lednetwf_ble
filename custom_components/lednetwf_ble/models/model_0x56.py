@@ -181,8 +181,10 @@ class Model0x56(DefaultModelAbstraction):
             LOGGER.error("LED count, chip type or colour order is None and shouldn't be.  Not setting LED settings.")
             return
         else:
-            self.chip_type         = getattr(const.LedTypes_StripLight, chip_type).value
-            self.color_order       = getattr(const.ColorOrdering, color_order).value
+            # self.chip_type         = getattr(const.LedTypes_StripLight, chip_type).value 
+            # self.color_order       = getattr(const.ColorOrdering, color_order).value
+            self.chip_type         = const.LedTypes_StripLight.from_value(chip_type).value
+            self.color_order       = const.ColorOrdering.from_value(color_order).value
             self.led_count         = led_count
         LOGGER.debug(f"Setting LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}")
         led_settings_packet     = bytearray.fromhex("00 00 80 00 00 0b 0c 0b 62 00 64 00 03 01 00 64 03 f0 21")

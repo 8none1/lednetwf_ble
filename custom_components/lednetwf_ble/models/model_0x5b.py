@@ -182,7 +182,7 @@ class Model0x5b(DefaultModelAbstraction):
     
     def set_led_settings(self, options: dict):
         LOGGER.debug(f"Setting LED settings: {options}")
-        # Don't know how to handle this yet
+        # Don't know how to handle this device's settings yet, so returning None
         return None
         # led_count   = options.get(const.CONF_LEDCOUNT)
         # chip_type   = options.get(const.CONF_LEDTYPE)
