@@ -14,6 +14,7 @@ from homeassistant.components.bluetooth import (
 from homeassistant.const import CONF_MAC
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.device_registry import format_mac
 import homeassistant.helpers.config_validation as cv
 from bluetooth_data_tools import human_readable_name
 
@@ -49,6 +50,7 @@ class DeviceData:
     def __init__(self, discovery: BluetoothServiceInfoBleak):
         self._discovery = discovery
         self.address = discovery.address
+        self.unique_id = format_mac(self.address)
         self.logical_name = discovery.name
         self.rssi = discovery.rssi
         manu_data = next(iter(discovery.manufacturer_data.values()), None)
@@ -73,17 +75,27 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self):
-        self._devices: dict[str, DeviceData] = {}
+        self._discovered_devices: dict[str, DeviceData] = {}
         self._selected: DeviceData | None = None
         self._instance: LEDNETWFInstance | None = None
         self._initial_discovery: BluetoothServiceInfoBleak | None = None
 
     async def async_step_bluetooth(self, discovery_info: BluetoothServiceInfoBleak) -> FlowResult:
         _LOGGER.debug("[BT] Received Bluetooth discovery for %s", discovery_info.address)
+        # await self.async_set_unique_id(discovery_info.address.lower())
+        # self._abort_if_unique_id_configured()
         self._initial_discovery = discovery_info
         device = DeviceData(discovery_info)
-        self.context["title_placeholders"] = {"name": "LEDnetWF Device"}
+        await self.async_set_unique_id(device.unique_id)
+        self.context["title_placeholders"] = {"name": device.human_name()}
+
+        if device.is_supported():
+            if device.unique_id not in self._discovered_devices:
+                self._discovered_devices[device.unique_id] = device
+                _LOGGER.debug("[BT] Added to discovered cache: %s", device.unique_id)
+
         return await self.async_step_user()
+
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         _LOGGER.debug("[USER] Entered async_step_user with input: %s", user_input)
@@ -91,28 +103,46 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         configured_ids = self._get_configured_ids()
         _LOGGER.debug("[USER] Already configured device IDs: %s", configured_ids)
 
-        self._devices.clear()
-
+        # Refresh discovery cache
         for discovery in async_discovered_service_info(self.hass):
-            if discovery.address in configured_ids:
-                _LOGGER.debug("[USER] Skipping configured address: %s", discovery.address)
-                continue
+            mac = format_mac(discovery.address)
 
-            if discovery.address in self._devices:
-                _LOGGER.debug("[USER] Skipping duplicate address already seen: %s", discovery.address)
+            if mac in configured_ids or mac in self._discovered_devices:
                 continue
 
             try:
                 device = DeviceData(discovery)
                 if device.is_supported():
-                    self._devices[discovery.address] = device
+                    self._discovered_devices[mac] = device
                     _LOGGER.debug("[USER] Added device: %s (%s)", device.display_name(), device.fw_major)
             except Exception as e:
-                _LOGGER.warning("[USER] Failed to parse discovery %s: %s", discovery.address, e)
+                _LOGGER.warning("[USER] Failed to parse discovery %s: %s", mac, e)
+
+        # Limit UI to only the device that triggered the flow
+        if self._initial_discovery:
+            selected_mac = format_mac(self._initial_discovery.address)
+            selected_device = self._discovered_devices.get(selected_mac)
+
+            if not selected_device or selected_mac in configured_ids:
+                _LOGGER.warning("[USER] Initial discovery device missing or already configured: %s", selected_mac)
+                return self.async_abort(reason="device_disappeared")
+
+            mac_dict = {selected_mac: selected_device.display_name()}
+        else:
+            # Fallback: show all devices if not launched via bluetooth
+            mac_dict = {
+                addr: dev.display_name()
+                for addr, dev in sorted(self._discovered_devices.items(), key=lambda item: item[1].rssi or -999, reverse=True)
+                if addr not in configured_ids
+            }
+
+        if not mac_dict:
+            _LOGGER.warning("[USER] No supported unconfigured devices found")
+            return self.async_abort(reason="no_devices_found")
 
         if user_input:
             mac = user_input[CONF_MAC]
-            self._selected = self._devices.get(mac)
+            self._selected = self._discovered_devices.get(mac)
             if self._selected:
                 _LOGGER.debug("[USER] Selected device: %s", self._selected.display_name())
                 return await self.async_step_validate()
@@ -120,19 +150,60 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.warning("[USER] Selected MAC not in device list: %s", mac)
                 return self.async_abort(reason="device_disappeared")
 
-        if not self._devices:
-            _LOGGER.warning("[USER] No supported unconfigured devices found")
-            return self.async_abort(reason="no_devices_found")
-
-        mac_dict = {
-            addr: dev.display_name()
-            for addr, dev in sorted(self._devices.items(), key=lambda item: item[1].rssi or -999, reverse=True)
-        }
-
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({vol.Required(CONF_MAC): vol.In(mac_dict)}),
         )
+
+    # async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    #     _LOGGER.debug("[USER] Entered async_step_user with input: %s", user_input)
+
+    #     configured_ids = self._get_configured_ids()
+    #     _LOGGER.debug("[USER] Already configured device IDs: %s", configured_ids)
+
+    #     for discovery in async_discovered_service_info(self.hass):
+    #         mac = format_mac(discovery.address)
+
+    #         if mac in configured_ids:
+    #             _LOGGER.debug("[USER] Skipping configured address: %s", mac)
+    #             continue
+
+    #         if mac in self._discovered_devices:
+    #             _LOGGER.debug("[USER] Skipping previously discovered address: %s", mac)
+    #             continue
+
+    #         try:
+    #             device = DeviceData(discovery)
+    #             if device.is_supported():
+    #                 self._discovered_devices[mac] = device
+    #                 _LOGGER.debug("[USER] Added device: %s (%s)", device.display_name(), device.fw_major)
+    #         except Exception as e:
+    #             _LOGGER.warning("[USER] Failed to parse discovery %s: %s", mac, e)
+
+    #     if user_input:
+    #         mac = user_input[CONF_MAC]
+    #         self._selected = self._discovered_devices.get(mac)
+    #         if self._selected:
+    #             _LOGGER.debug("[USER] Selected device: %s", self._selected.display_name())
+    #             return await self.async_step_validate()
+    #         else:
+    #             _LOGGER.warning("[USER] Selected MAC not in device list: %s", mac)
+    #             return self.async_abort(reason="device_disappeared")
+
+    #     mac_dict = {
+    #         addr: dev.display_name()
+    #         for addr, dev in sorted(self._discovered_devices.items(), key=lambda item: item[1].rssi or -999, reverse=True)
+    #         if addr not in configured_ids
+    #     }
+
+    #     if not mac_dict:
+    #         _LOGGER.warning("[USER] No supported unconfigured devices found")
+    #         return self.async_abort(reason="no_devices_found")
+
+    #     return self.async_show_form(
+    #         step_id="user",
+    #         data_schema=vol.Schema({vol.Required(CONF_MAC): vol.In(mac_dict)}),
+    #     )
 
     def _get_configured_ids(self) -> set[str]:
         return {entry.unique_id for entry in self.hass.config_entries.async_entries(DOMAIN)}
@@ -147,8 +218,8 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if not self._instance:
             _LOGGER.debug("[VALIDATE] Instantiating device before prompt")
             data = {
-                CONF_MAC: self._selected.address,
-                CONF_NAME: self._selected.human_name(),
+                CONF_MAC:   self._selected.address,
+                CONF_NAME:  self._selected.human_name(),
                 CONF_DELAY: 120,
                 CONF_MODEL: self._selected.fw_major,
             }
@@ -159,7 +230,6 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input:
             if user_input.get("flicker"):
-                await self.async_set_unique_id(self._selected.address)
                 self._abort_if_unique_id_configured()
                 return self._create_entry()
 
@@ -233,11 +303,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         _LOGGER.debug("[OPTIONS] Options before update: %s", self._options)
 
         if user_input:
-            """new_led_type    = user_input.get(CONF_LEDTYPE)
-            new_led_type    = LedTypes_StripLight[new_led_type].value if model == 0x56 else LedTypes_RingLight[new_led_type].value
-            """
-            chip = led_types[user_input[CONF_LEDTYPE]]# .value
-            order = ColorOrdering[user_input[CONF_COLORORDER]]# .value
+            chip = led_types[user_input[CONF_LEDTYPE]]
+            order = ColorOrdering[user_input[CONF_COLORORDER]]
             self._options.update({
                 CONF_DELAY: user_input.get(CONF_DELAY, 120),
                 CONF_LEDCOUNT: user_input[CONF_LEDCOUNT],
