@@ -1,66 +1,76 @@
 {
-    "config": {
-        "step": {
-            "user": {
-                "data": {
-                    "mac": "Bluetooth MAC address",
-                    "name": "Name"
-                },
-                "title": "Select LEDnetWF light"
-            },
-            "validate": {
-                "data": {
-                    "retry": "Retry?",
-                    "flicker": "Did the light blink?"
-                },
-                "title": "Validate connection"
-            },
-            "manual": {
-                "data": {
-                    "mac": "Bluetooth MAC address",
-                    "name": "Name"
-                },
-                "title": "Enter bluetooth MAC address"
-            }
-        },
-        "error": {
-            "connect": "Unable to connect to LEDnetWF"
-        },
-        "abort": {
-            "cannot_validate": "Unable to validate LEDnetWF light",
-            "cannot_connect": "Unable to connect to LEDnetWF"
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select LEDnetWF light",
+        "data": {
+          "mac": "Bluetooth MAC address",
+          "name": "Name"
         }
+      },
+      "validate": {
+        "title": "Validate connection",
+        "data": {
+          "retry": "Retry?",
+          "flicker": "Did the light blink?"
+        }
+      },
+      "manual": {
+        "title": "Enter bluetooth MAC address",
+        "data": {
+          "mac": "Bluetooth MAC address",
+          "name": "Name"
+        }
+      }
     },
-    "options": {
-        "step": {
-            "user": {
-                "data": {
-                    "reset": "Reset color when led turn on",
-                    "delay": "Disconnect delay (0 = never disconnect)",
-                    "ledcount": "Number of LEDs",
-                    "name": "Name",
-                    "ledtype": "LED type",
-                    "colororder": "Color order"
-                }
-            },
-            "init" : {
-                "data": {
-                    "reset": "Reset color when led turns on",
-                    "delay": "Disconnect delay (0 = never disconnect)",
-                    "ledcount": "Number of LEDs",
-                    "name": "Name",
-                    "ledtype": "LED type",
-                    "colororder": "Color order"
-                },
-                "title": "LEDnetWF"
-            }
-        }
+    "error": {
+      "connect": "Unable to connect to LEDnetWF",
+      "toggle_failed": "Failed to blink the light. Check signal strength or power.",
+      "device_disappeared": "The selected device is no longer available.",
+      "not_supported": "This device model is not supported by the integration.",
+      "no_selection": "No device was selected.",
+      "already_configured": "This device has already been configured.",
+      "no_devices_found": "No supported LEDnetWF lights were found nearby."
     },
-    "entity": {
-        "number" : {
-            "effect_speed": {
-                "name": "Effect speed"
-            }
-        }
+    "abort": {
+      "cannot_validate": "Unable to validate LEDnetWF light",
+      "cannot_connect": "Unable to connect to LEDnetWF",
+      "already_configured": "This device is already configured",
+      "device_disappeared": "The selected device was not found again",
+      "unsupported_device": "The selected device is not supported",
+      "no_devices_found": "No unconfigured LEDnetWF lights found"
     }
+  },
+  "options": {
+    "step": {
+      "user": {
+        "data": {
+          "reset": "Reset",
+          "delay": "Disconnect delay (0 = never disconnect)",
+          "ledcount": "Number of LEDs",
+          "name": "Name",
+          "ledtype": "LED type",
+          "colororder": "Color order"
+        }
+      },
+      "init": {
+        "title": "LEDnetWF",
+        "data": {
+          "reset": "Reset",
+          "delay": "Disconnect delay (0 = never disconnect)",
+          "ledcount": "Number of LEDs",
+          "name": "Name",
+          "ledtype": "LED type",
+          "colororder": "Color order"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "effect_speed": {
+        "name": "Effect speed"
+      }
+    }
+  }
 }
