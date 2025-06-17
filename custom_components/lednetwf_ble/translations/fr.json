@@ -1,0 +1,76 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sélectionner une lumière LEDnetWF",
+        "data": {
+          "mac": "Adresse MAC Bluetooth",
+          "name": "Nom"
+        }
+      },
+      "validate": {
+        "title": "Valider la connexion",
+        "data": {
+          "retry": "Réessayer la validation ?",
+          "flicker": "La lumière a-t-elle clignoté ?"
+        }
+      },
+      "manual": {
+        "title": "Saisir l'adresse MAC Bluetooth",
+        "data": {
+          "mac": "Adresse MAC Bluetooth",
+          "name": "Nom"
+        }
+      }
+    },
+    "error": {
+      "connect": "Impossible de se connecter à LEDnetWF",
+      "toggle_failed": "Échec du clignotement de la lumière. Vérifiez le signal ou l'alimentation.",
+      "device_disappeared": "L'appareil sélectionné n'est plus disponible.",
+      "not_supported": "Ce modèle n'est pas pris en charge par cette intégration.",
+      "no_selection": "Aucun appareil n'a été sélectionné.",
+      "already_configured": "Cet appareil est déjà configuré.",
+      "no_devices_found": "Aucune lumière LEDnetWF compatible trouvée à proximité."
+    },
+    "abort": {
+      "cannot_validate": "Impossible de valider la lumière LEDnetWF",
+      "cannot_connect": "Impossible de se connecter à LEDnetWF",
+      "already_configured": "Cet appareil est déjà configuré",
+      "device_disappeared": "L'appareil sélectionné est introuvable",
+      "unsupported_device": "L'appareil sélectionné n'est pas pris en charge",
+      "no_devices_found": "Aucune lumière LEDnetWF non configurée trouvée"
+    }
+  },
+  "options": {
+    "step": {
+      "user": {
+        "data": {
+          "reset": "Réinitialiser la couleur à l'allumage",
+          "delay": "Délai de déconnexion (0 = jamais déconnecter)",
+          "ledcount": "Nombre de LEDs",
+          "name": "Nom",
+          "ledtype": "Type de LED",
+          "colororder": "Ordre des couleurs"
+        }
+      },
+      "init": {
+        "title": "LEDnetWF",
+        "data": {
+          "reset": "Réinitialiser la couleur à l'allumage",
+          "delay": "Délai de déconnexion (0 = jamais déconnecter)",
+          "ledcount": "Nombre de LEDs",
+          "name": "Nom",
+          "ledtype": "Type de LED",
+          "colororder": "Ordre des couleurs"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "effect_speed": {
+        "name": "Vitesse de l'effet"
+      }
+    }
+  }
+}

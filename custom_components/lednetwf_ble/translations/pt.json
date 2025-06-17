@@ -1,66 +1,76 @@
 {
-    "config": {
-        "step": {
-            "user": {
-                "data": {
-                    "mac": "Endereço MAC Bluetooth",
-                    "name": "Nome"
-                },
-                "title": "Escolher uma luz LEDnetWF"
-            },
-            "validate": {
-                "data": {
-                    "retry": "Tentar validar a ligação novamente?",
-                    "flicker": "A luz piscou?"
-                },
-                "title": "Validar ligação LEDnetWF"
-            },
-            "manual": {
-                "data": {
-                    "mac": "Endereço MAC Bluetooth",
-                    "name": "Nome"
-                },
-                "title": "Introduzir endereço MAC Bluetooth"
-            }
-        },
-        "error": {
-            "connect": "Não foi possível ligar ao LEDnetWF"
-        },
-        "abort": {
-            "cannot_validate": "Não foi possível validar a luz LEDnetWF",
-            "cannot_connect": "Não foi possível ligar ao LEDnetWF"
+  "config": {
+    "step": {
+      "user": {
+        "title": "Escolher uma luz LEDnetWF",
+        "data": {
+          "mac": "Endereço MAC Bluetooth",
+          "name": "Nome"
         }
+      },
+      "validate": {
+        "title": "Validar ligação LEDnetWF",
+        "data": {
+          "retry": "Tentar validar a ligação novamente?",
+          "flicker": "A luz piscou?"
+        }
+      },
+      "manual": {
+        "title": "Introduzir endereço MAC Bluetooth",
+        "data": {
+          "mac": "Endereço MAC Bluetooth",
+          "name": "Nome"
+        }
+      }
     },
-    "options": {
-        "step": {
-            "user": {
-                "data": {
-                    "reset": "Reiniciar a cor quando o LED for ligado",
-                    "delay": "Atraso de desconexão (0 = nunca desligar)",
-                    "ledcount": "Número de LEDs",
-                    "name": "Nome",
-                    "ledtype": "Tipo de LED",
-                    "colororder": "Ordem das cores"
-                }
-            },
-            "init": {
-                "data": {
-                    "reset": "Reiniciar a cor quando o LED for ligado",
-                    "delay": "Atraso de desconexão (0 equivale a nunca desligar)",
-                    "ledcount": "Número de LEDs",
-                    "name": "Nome",
-                    "ledtype": "Tipo de LED",
-                    "colororder": "Ordem das cores"
-                },
-                "title": "LEDnetWF"
-            }
-        }
+    "error": {
+      "connect": "Não foi possível ligar ao LEDnetWF",
+      "toggle_failed": "Falha ao piscar a luz. Verifique o sinal ou a alimentação.",
+      "device_disappeared": "O dispositivo selecionado já não está disponível.",
+      "not_supported": "Este modelo não é suportado por esta integração.",
+      "no_selection": "Nenhum dispositivo foi selecionado.",
+      "already_configured": "Este dispositivo já está configurado.",
+      "no_devices_found": "Não foram encontradas luzes LEDnetWF compatíveis nas proximidades."
     },
-    "entity": {
-        "number": {
-            "effect_speed": {
-                "name": "Velocidade do efeito"
-            }
-        }
+    "abort": {
+      "cannot_validate": "Não foi possível validar a luz LEDnetWF",
+      "cannot_connect": "Não foi possível ligar ao LEDnetWF",
+      "already_configured": "Este dispositivo já está configurado",
+      "device_disappeared": "O dispositivo selecionado já não foi encontrado",
+      "unsupported_device": "O dispositivo selecionado não é suportado",
+      "no_devices_found": "Não foram encontradas luzes LEDnetWF por configurar"
     }
+  },
+  "options": {
+    "step": {
+      "user": {
+        "data": {
+          "reset": "Reiniciar a cor quando o LED for ligado",
+          "delay": "Atraso de desconexão (0 = nunca desligar)",
+          "ledcount": "Número de LEDs",
+          "name": "Nome",
+          "ledtype": "Tipo de LED",
+          "colororder": "Ordem das cores"
+        }
+      },
+      "init": {
+        "title": "LEDnetWF",
+        "data": {
+          "reset": "Reiniciar a cor quando o LED for ligado",
+          "delay": "Atraso de desconexão (0 equivale a nunca desligar)",
+          "ledcount": "Número de LEDs",
+          "name": "Nome",
+          "ledtype": "Tipo de LED",
+          "colororder": "Ordem das cores"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "effect_speed": {
+        "name": "Velocidade do efeito"
+      }
+    }
+  }
 }
