@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Sélectionner une lumière LEDnetWF",
+        "title": "Sélectionner la lumière LEDnetWF",
         "data": {
           "mac": "Adresse MAC Bluetooth",
           "name": "Nom"
@@ -11,12 +11,12 @@
       "validate": {
         "title": "Valider la connexion",
         "data": {
-          "retry": "Réessayer la validation ?",
+          "retry": "Réessayer ?",
           "flicker": "La lumière a-t-elle clignoté ?"
         }
       },
       "manual": {
-        "title": "Saisir l'adresse MAC Bluetooth",
+        "title": "Entrer l'adresse MAC Bluetooth",
         "data": {
           "mac": "Adresse MAC Bluetooth",
           "name": "Nom"
@@ -25,18 +25,20 @@
     },
     "error": {
       "connect": "Impossible de se connecter à LEDnetWF",
-      "toggle_failed": "Échec du clignotement de la lumière. Vérifiez le signal ou l'alimentation.",
+      "toggle_failed": "Échec du clignotement. Vérifiez le signal ou l'alimentation.",
       "device_disappeared": "L'appareil sélectionné n'est plus disponible.",
-      "not_supported": "Ce modèle n'est pas pris en charge par cette intégration.",
-      "no_selection": "Aucun appareil n'a été sélectionné.",
+      "not_supported": "Ce modèle d'appareil n'est pas pris en charge par l'intégration.",
+      "no_selection": "Aucun appareil sélectionné.",
       "already_configured": "Cet appareil est déjà configuré.",
-      "no_devices_found": "Aucune lumière LEDnetWF compatible trouvée à proximité."
+      "no_devices_found": "Aucune lumière LEDnetWF compatible trouvée à proximité.",
+      "cannot_connect": "Impossible de se connecter à l'appareil. Assurez-vous qu'il est allumé et à proximité.",
+      "unknown": "Une erreur inattendue s'est produite. Veuillez réessayer."
     },
     "abort": {
       "cannot_validate": "Impossible de valider la lumière LEDnetWF",
       "cannot_connect": "Impossible de se connecter à LEDnetWF",
       "already_configured": "Cet appareil est déjà configuré",
-      "device_disappeared": "L'appareil sélectionné est introuvable",
+      "device_disappeared": "L'appareil sélectionné n'a pas été retrouvé",
       "unsupported_device": "L'appareil sélectionné n'est pas pris en charge",
       "no_devices_found": "Aucune lumière LEDnetWF non configurée trouvée"
     }
@@ -45,8 +47,8 @@
     "step": {
       "user": {
         "data": {
-          "reset": "Réinitialiser la couleur à l'allumage",
-          "delay": "Délai de déconnexion (0 = jamais déconnecter)",
+          "reset": "Réinitialiser",
+          "delay": "Délai de déconnexion (0 = jamais)",
           "ledcount": "Nombre de LEDs",
           "name": "Nom",
           "ledtype": "Type de LED",
@@ -56,8 +58,8 @@
       "init": {
         "title": "LEDnetWF",
         "data": {
-          "reset": "Réinitialiser la couleur à l'allumage",
-          "delay": "Délai de déconnexion (0 = jamais déconnecter)",
+          "reset": "Réinitialiser",
+          "delay": "Délai de déconnexion (0 = jamais)",
           "ledcount": "Nombre de LEDs",
           "name": "Nom",
           "ledtype": "Type de LED",

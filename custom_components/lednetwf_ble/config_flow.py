@@ -17,6 +17,8 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.device_registry import format_mac
 import homeassistant.helpers.config_validation as cv
 from bluetooth_data_tools import human_readable_name
+from bleak_retry_connector import BleakNotFoundError
+from asyncio import TimeoutError
 
 from .const import (
     DOMAIN,
@@ -155,58 +157,55 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_MAC): vol.In(mac_dict)}),
         )
 
-    # async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-    #     _LOGGER.debug("[USER] Entered async_step_user with input: %s", user_input)
-
-    #     configured_ids = self._get_configured_ids()
-    #     _LOGGER.debug("[USER] Already configured device IDs: %s", configured_ids)
-
-    #     for discovery in async_discovered_service_info(self.hass):
-    #         mac = format_mac(discovery.address)
-
-    #         if mac in configured_ids:
-    #             _LOGGER.debug("[USER] Skipping configured address: %s", mac)
-    #             continue
-
-    #         if mac in self._discovered_devices:
-    #             _LOGGER.debug("[USER] Skipping previously discovered address: %s", mac)
-    #             continue
-
-    #         try:
-    #             device = DeviceData(discovery)
-    #             if device.is_supported():
-    #                 self._discovered_devices[mac] = device
-    #                 _LOGGER.debug("[USER] Added device: %s (%s)", device.display_name(), device.fw_major)
-    #         except Exception as e:
-    #             _LOGGER.warning("[USER] Failed to parse discovery %s: %s", mac, e)
-
-    #     if user_input:
-    #         mac = user_input[CONF_MAC]
-    #         self._selected = self._discovered_devices.get(mac)
-    #         if self._selected:
-    #             _LOGGER.debug("[USER] Selected device: %s", self._selected.display_name())
-    #             return await self.async_step_validate()
-    #         else:
-    #             _LOGGER.warning("[USER] Selected MAC not in device list: %s", mac)
-    #             return self.async_abort(reason="device_disappeared")
-
-    #     mac_dict = {
-    #         addr: dev.display_name()
-    #         for addr, dev in sorted(self._discovered_devices.items(), key=lambda item: item[1].rssi or -999, reverse=True)
-    #         if addr not in configured_ids
-    #     }
-
-    #     if not mac_dict:
-    #         _LOGGER.warning("[USER] No supported unconfigured devices found")
-    #         return self.async_abort(reason="no_devices_found")
-
-    #     return self.async_show_form(
-    #         step_id="user",
-    #         data_schema=vol.Schema({vol.Required(CONF_MAC): vol.In(mac_dict)}),
-    #     )
-
     def _get_configured_ids(self) -> set[str]:
         return {entry.unique_id for entry in self.hass.config_entries.async_entries(DOMAIN)}
+
+    # async def async_step_validate(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    #     _LOGGER.debug("[VALIDATE] Entered async_step_validate with input: %s", user_input)
+
+    #     if self._selected is None:
+    #         _LOGGER.error("[VALIDATE] No device selected at validation step")
+    #         return self.async_abort(reason="no_selection")
+
+    #     if not self._instance:
+    #         _LOGGER.debug("[VALIDATE] Instantiating device before prompt")
+    #         data = {
+    #             CONF_MAC:   self._selected.address,
+    #             CONF_NAME:  self._selected.human_name(),
+    #             CONF_DELAY: 120,
+    #             CONF_MODEL: self._selected.fw_major,
+    #         }
+    #         self._instance = LEDNETWFInstance(self._selected.address, self.hass, data)
+    #         await self._instance.update()
+    #         await self._instance.send_initial_packets()
+    #         await self._instance._write(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
+
+    #     if user_input:
+    #         if user_input.get("flicker"):
+    #             self._abort_if_unique_id_configured()
+    #             return self._create_entry()
+
+    #     try:
+    #         for _ in range(3):
+    #             await self._instance.turn_on()
+    #             await asyncio.sleep(1)
+    #             await self._instance.turn_off()
+    #             await asyncio.sleep(1)
+    #     except Exception as e:
+    #         _LOGGER.error("[TOGGLE] Toggle failed: %s", e, exc_info=True)
+    #         return self.async_show_form(
+    #             step_id="validate",
+    #             data_schema=vol.Schema({vol.Required("retry"): bool}),
+    #             errors={"base": "connect"},
+    #         )
+
+    #     return self.async_show_form(
+    #         step_id="validate",
+    #         data_schema=vol.Schema({vol.Required("flicker"): bool}),
+    #         description_placeholders={"device": self._selected.display_name()},
+    #     )
+
+
 
     async def async_step_validate(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         _LOGGER.debug("[VALIDATE] Entered async_step_validate with input: %s", user_input)
@@ -215,36 +214,45 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.error("[VALIDATE] No device selected at validation step")
             return self.async_abort(reason="no_selection")
 
-        if not self._instance:
-            _LOGGER.debug("[VALIDATE] Instantiating device before prompt")
-            data = {
-                CONF_MAC:   self._selected.address,
-                CONF_NAME:  self._selected.human_name(),
-                CONF_DELAY: 120,
-                CONF_MODEL: self._selected.fw_major,
-            }
-            self._instance = LEDNETWFInstance(self._selected.address, self.hass, data)
-            await self._instance.update()
-            await self._instance.send_initial_packets()
-            await self._instance._write(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
-
-        if user_input:
-            if user_input.get("flicker"):
-                self._abort_if_unique_id_configured()
-                return self._create_entry()
-
         try:
+            if not self._instance:
+                _LOGGER.debug("[VALIDATE] Instantiating device before prompt")
+                data = {
+                    CONF_MAC:   self._selected.address,
+                    CONF_NAME:  self._selected.human_name(),
+                    CONF_DELAY: 120,
+                    CONF_MODEL: self._selected.fw_major,
+                }
+                self._instance = LEDNETWFInstance(self._selected.address, self.hass, data)
+                await self._instance.update()
+                await self._instance.send_initial_packets()
+                await self._instance._write(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
+
+            if user_input:
+                if user_input.get("flicker"):
+                    self._abort_if_unique_id_configured()
+                    return self._create_entry()
+
             for _ in range(3):
                 await self._instance.turn_on()
                 await asyncio.sleep(1)
                 await self._instance.turn_off()
                 await asyncio.sleep(1)
-        except Exception as e:
-            _LOGGER.error("[TOGGLE] Toggle failed: %s", e, exc_info=True)
+
+        except (TimeoutError, BleakNotFoundError) as e:
+            _LOGGER.error("[VALIDATE] Connection failed: %s", e, exc_info=True)
             return self.async_show_form(
                 step_id="validate",
                 data_schema=vol.Schema({vol.Required("retry"): bool}),
-                errors={"base": "connect"},
+                errors={"base": "cannot_connect"},
+            )
+
+        except Exception as e:
+            _LOGGER.error("[VALIDATE] Unexpected error: %s", e, exc_info=True)
+            return self.async_show_form(
+                step_id="validate",
+                data_schema=vol.Schema({vol.Required("retry"): bool}),
+                errors={"base": "unknown"},
             )
 
         return self.async_show_form(
@@ -252,6 +260,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required("flicker"): bool}),
             description_placeholders={"device": self._selected.display_name()},
         )
+
 
     def _create_entry(self) -> FlowResult:
         led_count = getattr(self._instance._model_interface, 'led_count', 64)

@@ -30,7 +30,9 @@
       "not_supported": "This device model is not supported by the integration.",
       "no_selection": "No device was selected.",
       "already_configured": "This device has already been configured.",
-      "no_devices_found": "No supported LEDnetWF lights were found nearby."
+      "no_devices_found": "No supported LEDnetWF lights were found nearby.",
+      "cannot_connect": "Could not connect to the device. Make sure it's powered on and nearby.",
+      "unknown": "An unexpected error occurred. Please try again."
     },
     "abort": {
       "cannot_validate": "Unable to validate LEDnetWF light",

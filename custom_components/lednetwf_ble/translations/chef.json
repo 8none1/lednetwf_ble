@@ -1,0 +1,78 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Selectee zee LEDnetWF leemp",
+        "data": {
+          "mac": "Bluetoot MAC-ee address-a",
+          "name": "Nemee"
+        }
+      },
+      "validate": {
+        "title": "Velideet cunnecshun",
+        "data": {
+          "retry": "Tryee egein, bork bork?",
+          "flicker": "De leemp-a deed de blinkety blink?"
+        }
+      },
+      "manual": {
+        "title": "Enter zee MAC-ee ooff bluetoot",
+        "data": {
+          "mac": "Bluetoot MAC-ee address-a",
+          "name": "Nemee"
+        }
+      }
+    },
+    "error": {
+      "connect": "Cunnecoon tuu LEDnetWF-a feiled. Bork!",
+      "toggle_failed": "Blinkety blink-a nu verk. Meck suree it's oon und nerby.",
+      "device_disappeared": "De selec-ted-a devicce-a goone poof!",
+      "not_supported": "Zeees model-a nu supportud. Bork bork.",
+      "no_selection": "Nu devicce-a selactud. Oopsy doopsy.",
+      "already_configured": "Zees devicce-a is alreedy eenstelled, bork bork.",
+      "no_devices_found": "Nu leemps-a foond nearby. Try wavin' a drumstick.",
+      "cannot_connect": "Cunnecoon faileed. Is it on? Is it happy? Try agin!",
+      "unknown": "Ooooh, somethin’ veerd heppuned. Try agin, okee dokee!"
+    },
+    "abort": {
+      "cannot_validate": "Nu cood velideet leemp-a. Bork!",
+      "cannot_connect": "Nu cunnect tu LEDnetWF. Very disuppointeng.",
+      "already_configured": "Zees devicce-a is alreedy set up-a.",
+      "device_disappeared": "Zee leemp-a runned ewey! Bork bork.",
+      "unsupported_device": "Dees devicce-a nu verk weeth dis integrashun.",
+      "no_devices_found": "No leemp-a fonnd. Meck shure dees ting ees oon!"
+    }
+  },
+  "options": {
+    "step": {
+      "user": {
+        "data": {
+          "reset": "Reset-a de leemp",
+          "delay": "Time-a before-a discoonect (0 = never ever)",
+          "ledcount": "Hoo meny leetle leeds?",
+          "name": "Nemee",
+          "ledtype": "Type-a ooff leemp-a",
+          "colororder": "Colors in whut order, huh?"
+        }
+      },
+      "init": {
+        "title": "LEDnetWF-a",
+        "data": {
+          "reset": "Reset-a de leemp",
+          "delay": "Time-a before-a discoonect (0 = never ever)",
+          "ledcount": "Hoo meny leetle leeds?",
+          "name": "Nemee",
+          "ledtype": "Type-a ooff leemp-a",
+          "colororder": "Colors in whut order, huh?"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "effect_speed": {
+        "name": "Speeed-a ooff sparklies"
+      }
+    }
+  }
+}
