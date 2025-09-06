@@ -116,7 +116,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 device = DeviceData(discovery)
                 if device.is_supported():
                     self._discovered_devices[mac] = device
-                    _LOGGER.debug("[USER] Added device: %s (%s)", device.display_name(), device.fw_major)
+                    _LOGGER.debug("[USER] Added device: %s (%s)", device.display_name(), f"0x{device.fw_major:02X}")
             except Exception as e:
                 _LOGGER.warning("[USER] Failed to parse discovery %s: %s", mac, e)
 
@@ -301,7 +301,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_user(self, user_input=None):
         model = self._data.get(CONF_MODEL)
-        led_types = LedTypes_StripLight if model == 0x56 else LedTypes_RingLight
+        # TODO: Look up the strip light models more dynamically, not hard coded
+        led_types = LedTypes_StripLight if model in (0x56, 0x80) else LedTypes_RingLight
         led_types_list = list(led_types)
 
         if not led_types_list:

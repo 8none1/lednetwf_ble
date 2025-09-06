@@ -21,7 +21,10 @@ import logging
 
 from .const import (
     CONF_DELAY,
-    CONF_MODEL
+    CONF_MODEL,
+    CONF_LEDCOUNT,
+    CONF_LEDTYPE,
+    CONF_COLORORDER
 )
 
 LOGGER                        = logging.getLogger(__name__)
@@ -68,10 +71,12 @@ for _, module_name, _ in pkgutil.iter_modules([models_path]):
         if hasattr(m, class_name):
             globals()[class_name] = getattr(m, class_name)
         if hasattr(m, "SUPPORTED_MODELS"):
-            LOGGER.debug(f"Supported models: {getattr(m, 'SUPPORTED_MODELS')}")
+            supported_models_hex = [f"0x{model:02X}" for model in getattr(m, 'SUPPORTED_MODELS')]
+            LOGGER.debug(f"Supported models: {supported_models_hex}")
             SUPPORTED_MODELS[class_name] = getattr(m, "SUPPORTED_MODELS")
 
-LOGGER.debug(f"All supported modules: {SUPPORTED_MODELS}")
+all_models_hex = {class_name: [f"0x{model:02X}" for model in models] for class_name, models in SUPPORTED_MODELS.items()}
+LOGGER.debug(f"All supported modules: {all_models_hex}")
 
 def find_model_for_value(value):
     for model_name, models in SUPPORTED_MODELS.items():
@@ -160,7 +165,7 @@ class LEDNETWFInstance:
             raise ConfigEntryNotReady(
                 f"You need to add bluetooth integration (https://www.home-assistant.io/integrations/bluetooth) or couldn't find a nearby device with address: {self._mac}"
             )
-        service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict() # It looks like there is a race in Home Assistant where this contains the service info of a different device
+        service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
         # LOGGER.debug(f"Service info: {service_info}")
         # LOGGER.debug(f"Service info keys: {service_info.keys()}")
         if service_info is not None and 'address' in service_info:
@@ -179,8 +184,10 @@ class LEDNETWFInstance:
         self._expected_disconnect   = False
         self._packet_counter        = 0
         self._read_uuid             = None
-        self._model_interface.chip_type = self._options.get('chip_type')
-        self._model_interface.color_order = self._options.get('color_order')
+        # self._model_interface.chip_type = self._options.get('chip_type')
+        self._model_interface.chip_type = self._options.get(CONF_LEDTYPE)
+        # self._model_interface.color_order = self._options.get('color_order')
+        self._model_interface.color_order = self._options.get(CONF_COLORORDER)
         LOGGER.debug(f"Chip type: {self._model_interface.chip_type}")
         LOGGER.debug(f"Color order: {self._model_interface.color_order}")
     
