@@ -46,6 +46,8 @@
   "options": {
     "step": {
       "user": {
+        "title": "Device Configuration",
+        "description": "It is recommended to make configuration changes via the app. This functionality is included for convenience and is not complete.",
         "data": {
           "reset": "Reset",
           "delay": "Disconnect delay (0 = never disconnect)",
@@ -57,6 +59,7 @@
       },
       "init": {
         "title": "LEDnetWF",
+        "description": "Hello!",
         "data": {
           "reset": "Reset",
           "delay": "Disconnect delay (0 = never disconnect)",

@@ -273,9 +273,9 @@ class Model0x53(DefaultModelAbstraction):
             LOGGER.error("LED count, chip type or colour order is None and shouldn't be.  Not setting LED settings.")
             return
         else:
-            self.chip_type         = const.LedTypes_RingLight.from_value(chip_type).value
+            self.chip_type         = const.LedTypes_RingLight.from_name(chip_type).value
             #self.chip_type         = getattr(const.LedTypes_RingLight, chip_type).value
-            self.color_order       = const.ColorOrdering.from_value(color_order).value
+            self.color_order       = const.ColorOrdering.from_name(color_order).value
             self.led_count         = led_count
         LOGGER.debug(f"Setting LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}")
         led_settings_packet     = bytearray.fromhex("00 00 80 00 00 06 07 0a 62 00 0e 01 00 71")
@@ -343,13 +343,3 @@ class Model0x53(DefaultModelAbstraction):
             self.color_order = const.ColorOrdering(payload[4]).name
             LOGGER.debug(f"LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}")
 
-# TODO:
-
-# # Fix for turn of circle effect of HSV MODE(controller skips turn off animation if state is not changed since last turn on)
-# Disabling for now, needs to be moved in to the 0x53 code as it is specific to that model
-# if self._instance.brightness == 255:
-#     temp_brightness = 254
-# else:
-#     temp_brightness = self._instance.brightness + 1
-# if self._instance.color_mode is ColorMode.HS and ATTR_HS_COLOR not in kwargs:
-#     await self._instance.set_hs_color(self._instance.hs_color, temp_brightness)

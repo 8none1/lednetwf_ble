@@ -160,53 +160,6 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     def _get_configured_ids(self) -> set[str]:
         return {entry.unique_id for entry in self.hass.config_entries.async_entries(DOMAIN)}
 
-    # async def async_step_validate(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-    #     _LOGGER.debug("[VALIDATE] Entered async_step_validate with input: %s", user_input)
-
-    #     if self._selected is None:
-    #         _LOGGER.error("[VALIDATE] No device selected at validation step")
-    #         return self.async_abort(reason="no_selection")
-
-    #     if not self._instance:
-    #         _LOGGER.debug("[VALIDATE] Instantiating device before prompt")
-    #         data = {
-    #             CONF_MAC:   self._selected.address,
-    #             CONF_NAME:  self._selected.human_name(),
-    #             CONF_DELAY: 120,
-    #             CONF_MODEL: self._selected.fw_major,
-    #         }
-    #         self._instance = LEDNETWFInstance(self._selected.address, self.hass, data)
-    #         await self._instance.update()
-    #         await self._instance.send_initial_packets()
-    #         await self._instance._write(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
-
-    #     if user_input:
-    #         if user_input.get("flicker"):
-    #             self._abort_if_unique_id_configured()
-    #             return self._create_entry()
-
-    #     try:
-    #         for _ in range(3):
-    #             await self._instance.turn_on()
-    #             await asyncio.sleep(1)
-    #             await self._instance.turn_off()
-    #             await asyncio.sleep(1)
-    #     except Exception as e:
-    #         _LOGGER.error("[TOGGLE] Toggle failed: %s", e, exc_info=True)
-    #         return self.async_show_form(
-    #             step_id="validate",
-    #             data_schema=vol.Schema({vol.Required("retry"): bool}),
-    #             errors={"base": "connect"},
-    #         )
-
-    #     return self.async_show_form(
-    #         step_id="validate",
-    #         data_schema=vol.Schema({vol.Required("flicker"): bool}),
-    #         description_placeholders={"device": self._selected.display_name()},
-    #     )
-
-
-
     async def async_step_validate(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         _LOGGER.debug("[VALIDATE] Entered async_step_validate with input: %s", user_input)
 
@@ -227,6 +180,12 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 await self._instance.update()
                 await self._instance.send_initial_packets()
                 await self._instance._write(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
+                _LOGGER.debug("[VALIDATE] Device instantiated and initial packets sent")
+                _LOGGER.debug("[VALIDATE] Device model interface: %s", self._instance._model_interface)
+                _LOGGER.debug("[VALIDATE] LED Count: %s, Chip Type: %s, Color Order: %s",
+                              getattr(self._instance._model_interface, 'led_count', 'Unknown'),
+                              getattr(self._instance._model_interface, 'chip_type', 'Unknown'),
+                              getattr(self._instance._model_interface, 'color_order', 'Unknown'))
 
             if user_input:
                 if user_input.get("flicker"):
@@ -238,6 +197,11 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 await asyncio.sleep(1)
                 await self._instance.turn_off()
                 await asyncio.sleep(1)
+            
+            _LOGGER.debug("[VALIDATE AFTER FLASH] LED Count: %s, Chip Type: %s, Color Order: %s",
+                getattr(self._instance._model_interface, 'led_count', 'Unknown'),
+                getattr(self._instance._model_interface, 'chip_type', 'Unknown'),
+                getattr(self._instance._model_interface, 'color_order', 'Unknown'))
 
         except (TimeoutError, BleakNotFoundError) as e:
             _LOGGER.error("[VALIDATE] Connection failed: %s", e, exc_info=True)
@@ -263,9 +227,13 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
 
     def _create_entry(self) -> FlowResult:
+        # Let's see if those stored values are available
         led_count = getattr(self._instance._model_interface, 'led_count', 64)
-        chip_type = getattr(self._instance._model_interface, 'chip_type', "WS2812B")
-        color_order = getattr(self._instance._model_interface, 'color_order', "GRB")
+        if getattr(self._instance, "_model", None) in (0x56, 0x80):
+            chip_type = LedTypes_RingLight.WS2812B
+        else:
+            chip_type = LedTypes_StripLight.WS2812B
+        color_order = getattr(self._instance._model_interface, 'color_order', ColorOrdering.GRB) #"GRB")
 
         _LOGGER.debug("[CREATE] LED Count: %s, Chip Type: %s, Color Order: %s", led_count, chip_type, color_order)
 

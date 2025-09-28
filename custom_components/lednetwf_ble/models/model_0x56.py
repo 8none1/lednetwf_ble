@@ -50,12 +50,12 @@ class Model0x56(DefaultModelAbstraction):
         LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
         LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
 
-        if self.fw_major is 0x80:
+        if self.fw_major == 0x80:
             # TODO: Is this the same packet for 0x56 devices or only 0x80?  Find an 0x56 and test it
             self.INITIAL_PACKET             = bytearray.fromhex("00 01 80 00 00 0c 0d 0b 10 14 19 09 05 0d 2b 38 05 00 0f cf")
             self.GET_DEVICE_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 02 03 17 22 22")
             self.GET_LED_SETTINGS_PACKET    = bytearray.fromhex("00 05 80 00 00 05 06 0a 63 12 21 0f a5")
-            self.SEGMENTS = None
+            self.SEGMENTS = 1
 
         if self.manu_data[15] == 0x61:
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
@@ -94,7 +94,44 @@ class Model0x56(DefaultModelAbstraction):
         LOGGER.debug(f"Is on:            {self.is_on}")
         LOGGER.debug(f"Colour mode:      {self.color_mode}")
         LOGGER.debug(f"HS colour:        {self.hs_color}")
-
+    
+    def update_color_state(self, rgb_color):
+        hsv_color = super().rgb_to_hsv(rgb_color)
+        self.hs_color = tuple(hsv_color[0:2])
+        self.brightness = int(hsv_color[2])
+    
+    def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None):
+        LOGGER.debug(f"Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255}")
+        if mode == 0x61:
+            if selected_effect == 0xf0:
+                self.update_color_state(rgb_color)
+                LOGGER.debug("Light is in colour mode")
+                LOGGER.debug(f"RGB colour: {rgb_color}")
+                LOGGER.debug(f"HS colour: {self.hs_color}")
+                LOGGER.debug(f"Brightness: {self.brightness}")
+                self.effect = EFFECT_OFF
+                self.color_mode = ColorMode.HS
+                self.color_temperature_kelvin = None
+            elif 0x01 <= selected_effect <= 0x0a:
+                self.color_mode = ColorMode.HS
+                self.effect = EFFECT_ID_TO_NAME_0x56[selected_effect << 8]
+                self.effect_speed = effect_speed
+                self.update_color_state(rgb_color)
+        elif mode == 0x62:
+            # Music reactive mode
+            # TODO: Brightness?
+            scaled_effect = (selected_effect + 0x32) << 8
+            try:
+                self.effect = EFFECT_ID_TO_NAME_0x56[scaled_effect]
+            except KeyError:
+                self.effect = "Unknown"
+        elif mode == 0x25:
+            # Effects mode
+            self.effect = EFFECT_ID_TO_NAME_0x56[selected_effect]
+            self.effect_speed = effect_speed
+            self.color_mode = ColorMode.BRIGHTNESS
+            self.brightness = int(brightness * 255 // 100)
+    
     def set_color(self, hs_color, brightness):
         # Returns the byte array to set the RGB colour
         self.color_mode = ColorMode.HS
@@ -190,27 +227,29 @@ class Model0x56(DefaultModelAbstraction):
             LOGGER.error("LED count, chip type or colour order is None and shouldn't be.  Not setting LED settings.")
             return
         else:
-            # self.chip_type         = getattr(const.LedTypes_StripLight, chip_type).value 
-            # self.color_order       = getattr(const.ColorOrdering, color_order).value
-            self.chip_type         = const.LedTypes_StripLight.from_value(chip_type).value
-            self.color_order       = const.ColorOrdering.from_value(color_order).value
+            self.chip_type         = chip_type
+            self.color_order       = color_order
             self.led_count         = led_count
-        LOGGER.debug(f"Setting LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}")
+        LOGGER.debug(f"Setting LED values: Count {led_count}, Type {self.chip_type.value}, Order {self.color_order.value}, Segments {getattr(self, 'SEGMENTS', 'Unknown')}")
         led_settings_packet     = bytearray.fromhex("00 00 80 00 00 0b 0c 0b 62 00 64 00 03 01 00 64 03 f0 21")
         led_count_bytes         = bytearray(led_count.to_bytes(2, byteorder='big'))
         led_settings_packet[9:11] = led_count_bytes
-        led_settings_packet[11:13] = [0, 1]  # We're only supporting a single segment
-        led_settings_packet[13] = self.chip_type
-        led_settings_packet[14] = self.color_order
+        # TODO: We need to support segments properly # Will - delete this if working
+        # Next we should read the segment count and set it, but not allowing changing
+        #led_settings_packet[11:13] = [0, 1]  # We're only supporting a single segment
+        led_settings_packet[12] = getattr(self, "SEGMENTS", 1)
+        led_settings_packet[13] = self.chip_type.value
+        led_settings_packet[14] = self.color_order.value
         led_settings_packet[15] = self.led_count & 0xFF
-        led_settings_packet[16] = 1 # 1 music mode segment, can support more in the app.
+        led_settings_packet[16] = getattr(self, "SEGMENTS", 1)
         led_settings_packet[17] = sum(led_settings_packet[9:18]) & 0xFF
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
         # REMEMBER: The calling function must also call stop() on the device to apply the settings
         return led_settings_packet
     
     def notification_handler(self, data):
-        if self.fw_major is 0x80:
+        LOGGER.debug(f"Notification received. fw_major: 0x{self.fw_major:02x}, data: {' '.join([f'{byte:02X}' for byte in data])}")
+        if self.fw_major == 0x80:
             # This device doesn't send the JSON like message.  It's all hex.
             LOGGER.debug(f"N: Raw Response Payload: {' '.join([f'{byte:02X}' for byte in data])}")
             # Example response to "LED settings" request:
@@ -225,14 +264,31 @@ class Model0x56(DefaultModelAbstraction):
             # 0442 800000 0b 0c 15 00 63 00 13 00 03 01 00 13 03 90
             # 0001 020304 05 06 07 08 09 10 11 12 13 14 15 16 17 18
             if list(data[5:8]) == [0x0b, 0x0c, 0x15]:
+                # LED settings response
                 LOGGER.debug("Get LED settings response received")
                 self.led_count   = data[11]
-                self.chip_type   = const.LedTypes_StripLight(data[14]).name
-                self.color_order = const.ColorOrdering(data[15]).name
+                self.chip_type   = const.LedTypes_StripLight(data[14])
+                self.color_order = const.ColorOrdering(data[15])
                 self.SEGMENTS    = data[13]
                 LOGGER.debug(f"LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.SEGMENTS}")
+            elif list(data[5:7]) == [0x1b, 0x1c]: # Not sure if this is a reliable way to identify this packet
+                LOGGER.debug("Get device settings response received")
+                # Device settings response
+                # 0001 020304 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 - index
+                # 0424 800000 1b 1c 17 08 65 f0 bc ce 84 08 4d 87 dc 3b 89 3a e5 03 00 00 08 b9 01 00 80 00 a3 33 02 00
+                # 0417 800000 1b 1c 17 08 65 f0 bc ce 84 08 4d 87 dc 3b 89 3a e5 03 00 00 01 7e 01 00 80 00 a3 33 02 00
+            elif list(data[5:7]) == [0x0e, 0x0f]:
+                LOGGER.debug("Normal Status response received")
+                self.is_on = True if data[10] == 0x23 else False
+                mode_type    = data[11]
+                effect_num   = data[12]
+                effect_speed = data[13]
+                rgb_color    = (data[14], data[15], data[16])
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15])
+                LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
             else:
-                LOGGER.debug(f"Bytes 5,6,7 do not match: {[hex(b) for b in data[5:8]]}")
+                LOGGER.debug("Unknown response received")
+                return None
         else:
             notification_data = data.decode("utf-8", errors="ignore")
             last_quote = notification_data.rfind('"')
@@ -254,14 +310,13 @@ class Model0x56(DefaultModelAbstraction):
                 selected_effect = payload[4]
                 self.led_count  = payload[12]
                 self.is_on      = True if power == 0x23 else False
+                LOGGER.debug(f"Payload[0]=0x81: Power: {power}, Mode: {mode}, Selected effect: {selected_effect}, LED count: {self.led_count}")
 
                 if mode == 0x61:
                     if selected_effect == 0xf0:
                         # Light is in colour mode
                         rgb_color = (payload[6:9])
-                        hsv_color = super().rgb_to_hsv(rgb_color)
-                        self.hs_color = tuple(hsv_color[0:2])
-                        self.brightness = int(hsv_color[2])
+                        self.update_color_state(rgb_color)
                         LOGGER.debug("Light is in colour mode")
                         LOGGER.debug(f"RGB colour: {rgb_color}")
                         LOGGER.debug(f"HS colour: {self.hs_color}")
@@ -269,13 +324,6 @@ class Model0x56(DefaultModelAbstraction):
                         self.effect = EFFECT_OFF
                         self.color_mode = ColorMode.HS
                         self.color_temperature_kelvin = None
-                    # elif selected_effect == 0x01: # We don't really need this any more, deal with it below instead
-                    #     self.color_mode = ColorMode.HS
-                    #     # self.effect = EFFECT_OFF
-                    #     self.effect = EFFECT_ID_TO_NAME_0x56[selected_effect << 8] # Effect 1 is still an effect
-                    #     hs_color = self.rgb_to_hsv(payload[6:9])
-                    #     self.hs_color = hs_color[0:2]
-                    #     self.brightness = hs_color[2]
                     elif 0x01 <= selected_effect <= 0x0a:
                         self.color_mode = ColorMode.HS
                         self.effect = EFFECT_ID_TO_NAME_0x56[selected_effect << 8]
@@ -304,9 +352,8 @@ class Model0x56(DefaultModelAbstraction):
             elif payload[1] == 0x63:
                 LOGGER.debug(f"LED settings response received")
                 self.led_count = int.from_bytes(bytes([payload[2], payload[3]]), byteorder='big') * payload[5]
-                # self.chip_type = const.LedTypes_StripLight.from_value(payload[6])
-                self.chip_type = const.LedTypes_StripLight(payload[6]).name
-                # self.color_order = const.ColorOrdering.from_value(payload[7])
-                self.color_order = const.ColorOrdering(payload[7]).name
-
+                self.SEGMENTS  = payload[5]
+                self.chip_type = const.LedTypes_StripLight(payload[6])
+                self.color_order = const.ColorOrdering(payload[7])
+                LOGGER.debug(f"From settings response data: LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.SEGMENTS}")
 

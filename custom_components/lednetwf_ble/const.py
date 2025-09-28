@@ -28,6 +28,13 @@ class LedTypes_StripLight(Enum):
             if member.value == value:
                 return member
         raise ValueError(f"No member with value {value}")
+    
+    @classmethod
+    def from_name(cls, name):
+        for member in cls:
+            if member.name == name:
+                return member
+        raise ValueError(f"No member with name {name}")
 
 class LedTypes_RingLight(Enum):
     Unknown    = 0x00
@@ -44,6 +51,13 @@ class LedTypes_RingLight(Enum):
             if member.value == value:
                 return member
         raise ValueError(f"No member with value {value}")
+    
+    @classmethod
+    def from_name(cls, name):
+        for member in cls:
+            if member.name == name:
+                return member
+        raise ValueError(f"No member with name {name}")
 
 class ColorOrdering(Enum):
     RGB = 0x00
@@ -60,4 +74,9 @@ class ColorOrdering(Enum):
                 return member
         raise ValueError(f"No member with value {value}")
 
-
+    @classmethod
+    def from_name(cls, name):
+        for member in cls:
+            if member.name == name:
+                return member
+        raise ValueError(f"No member with name {name}")
