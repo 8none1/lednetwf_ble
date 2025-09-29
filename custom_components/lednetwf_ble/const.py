@@ -1,13 +1,15 @@
 from enum import Enum
 
-DOMAIN            = "lednetwf_ble"
-CONF_NAME         = "name"
-CONF_RESET        = "reset"
-CONF_DELAY        = "delay"
-CONF_LEDCOUNT     = "ledcount"
-CONF_LEDTYPE      = "ledtype"
-CONF_COLORORDER   = "colororder"
-CONF_MODEL        = "model"
+DOMAIN                    = "lednetwf_ble"
+CONF_NAME                 = "name"
+#CONF_RESET                = "reset"
+CONF_DELAY                = "delay"
+CONF_LEDCOUNT             = "ledcount"
+CONF_LEDTYPE              = "ledtype"
+CONF_COLORORDER           = "colororder"
+CONF_MODEL                = "model"
+CONF_SEGMENTS             = "segments"
+CONF_IGNORE_NOTIFICATIONS = "ignore_notifications"
 
 class LedTypes_StripLight(Enum):
     WS2812B    = 0x01

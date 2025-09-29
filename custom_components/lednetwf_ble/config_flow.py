@@ -28,6 +28,8 @@ from .const import (
     CONF_LEDTYPE,
     CONF_COLORORDER,
     CONF_MODEL,
+    CONF_SEGMENTS,
+    CONF_IGNORE_NOTIFICATIONS,
     LedTypes_StripLight,
     LedTypes_RingLight,
     ColorOrdering,
@@ -182,10 +184,11 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 await self._instance._write(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
                 _LOGGER.debug("[VALIDATE] Device instantiated and initial packets sent")
                 _LOGGER.debug("[VALIDATE] Device model interface: %s", self._instance._model_interface)
-                _LOGGER.debug("[VALIDATE] LED Count: %s, Chip Type: %s, Color Order: %s",
+                _LOGGER.debug("[VALIDATE] LED Count: %s, Chip Type: %s, Color Order: %s, Segments: %s",
                               getattr(self._instance._model_interface, 'led_count', 'Unknown'),
                               getattr(self._instance._model_interface, 'chip_type', 'Unknown'),
-                              getattr(self._instance._model_interface, 'color_order', 'Unknown'))
+                              getattr(self._instance._model_interface, 'color_order', 'Unknown'),
+                              getattr(self._instance._model_interface, 'segments', 'Unknown'))
 
             if user_input:
                 if user_input.get("flicker"):
@@ -198,10 +201,11 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 await self._instance.turn_off()
                 await asyncio.sleep(1)
             
-            _LOGGER.debug("[VALIDATE AFTER FLASH] LED Count: %s, Chip Type: %s, Color Order: %s",
+            _LOGGER.debug("[VALIDATE AFTER FLASH] LED Count: %s, Chip Type: %s, Color Order: %s, Segments: %s",
                 getattr(self._instance._model_interface, 'led_count', 'Unknown'),
                 getattr(self._instance._model_interface, 'chip_type', 'Unknown'),
-                getattr(self._instance._model_interface, 'color_order', 'Unknown'))
+                getattr(self._instance._model_interface, 'color_order', 'Unknown'),
+                getattr(self._instance._model_interface, 'segments', 'Unknown'))
 
         except (TimeoutError, BleakNotFoundError) as e:
             _LOGGER.error("[VALIDATE] Connection failed: %s", e, exc_info=True)
@@ -233,9 +237,10 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             chip_type = LedTypes_RingLight.WS2812B
         else:
             chip_type = LedTypes_StripLight.WS2812B
-        color_order = getattr(self._instance._model_interface, 'color_order', ColorOrdering.GRB) #"GRB")
+        color_order   = getattr(self._instance._model_interface, 'color_order', ColorOrdering.GRB) #"GRB")
+        segments      = getattr(self._instance._model_interface, 'segments', 1)
 
-        _LOGGER.debug("[CREATE] LED Count: %s, Chip Type: %s, Color Order: %s", led_count, chip_type, color_order)
+        _LOGGER.debug("[CREATE] LED Count: %s, Chip Type: %s, Color Order: %s, Segments: %s", led_count, chip_type, color_order, segments)
 
         data = {
             CONF_MAC: self._selected.address,
@@ -247,6 +252,7 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_LEDCOUNT: led_count,
             CONF_LEDTYPE: chip_type,
             CONF_COLORORDER: color_order,
+            CONF_SEGMENTS: segments,
         }
 
         _LOGGER.debug("[CREATE] Creating config entry with data: %s and options: %s", data, options)
@@ -288,6 +294,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_LEDCOUNT: user_input[CONF_LEDCOUNT],
                 CONF_LEDTYPE: chip,
                 CONF_COLORORDER: order,
+                CONF_SEGMENTS: user_input.get(CONF_SEGMENTS, 1),
+                CONF_IGNORE_NOTIFICATIONS: user_input.get(CONF_IGNORE_NOTIFICATIONS, False),
             })
             _LOGGER.debug("[OPTIONS] Updated options: %s", self._options)
             return self.async_create_entry(title=self._data[CONF_NAME], data=self._options)
@@ -307,5 +315,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_LEDCOUNT, default=self._options.get(CONF_LEDCOUNT, 64)): cv.positive_int,
             vol.Optional(CONF_LEDTYPE, default=chip_default_name): vol.In([t.name for t in led_types]),
             vol.Optional(CONF_COLORORDER, default=order_default_name): vol.In([o.name for o in ColorOrdering]),
+            vol.Optional(CONF_SEGMENTS, default=self._options.get(CONF_SEGMENTS, 1)): cv.positive_int,
+            vol.Optional(CONF_IGNORE_NOTIFICATIONS, default=self._options.get(CONF_IGNORE_NOTIFICATIONS, False)): bool,
         })
         return self.async_show_form(step_id="user", data_schema=schema)

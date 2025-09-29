@@ -24,7 +24,9 @@ from .const import (
     CONF_MODEL,
     CONF_LEDCOUNT,
     CONF_LEDTYPE,
-    CONF_COLORORDER
+    CONF_COLORORDER,
+    CONF_SEGMENTS,
+    CONF_IGNORE_NOTIFICATIONS
 )
 
 LOGGER                        = logging.getLogger(__name__)
@@ -138,6 +140,10 @@ class LEDNETWFInstance:
         LOGGER.debug(f"Data: {data}")
         self._name    = self._data.get('name')
         self._model   = self._data.get(CONF_MODEL)
+        self._ignore_notifications = self._data.get(CONF_IGNORE_NOTIFICATIONS, options.get(CONF_IGNORE_NOTIFICATIONS, False))
+        LOGGER.debug(f"Ignore notifications: {self._ignore_notifications}")
+        self._segments = self._data.get(CONF_SEGMENTS, options.get(CONF_SEGMENTS, 1))
+        LOGGER.debug(f"Segments: {self._segments}")
         self._options = options
         self._hass    = hass
         self._mac     = mac
@@ -161,6 +167,7 @@ class LEDNETWFInstance:
         model_class = globals()[model_class_name]
         LOGGER.debug(f"Model class via lookup: {model_class}")
         self._model_interface = model_class(service_info['manufacturer_data'])
+        self._model_interface._parent_instance = self
         self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._client: BleakClientWithServiceCache | None = None
         self._disconnect_timer: asyncio.TimerHandle | None = None

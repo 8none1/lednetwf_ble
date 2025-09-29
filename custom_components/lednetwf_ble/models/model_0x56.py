@@ -27,18 +27,14 @@ for e in range(1,11):
 for e in range(1+0x32, 16+0x32):
     EFFECT_MAP_0x56[f"Sound Reactive {e-0x32}"] = e << 8
 
-#EFFECT_MAP_0x56["_Sound Reactive"] = 0xFFFF # This is going to be a special case
 EFFECT_LIST_0x56 = sorted(EFFECT_MAP_0x56)
-
 EFFECT_ID_TO_NAME_0x56 = {v: k for k, v in EFFECT_MAP_0x56.items()}
-
 
 class Model0x56(DefaultModelAbstraction):
     # Strip light
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x56 init")
         super().__init__(manu_data)
-        # self.SUPPORTED_VERSIONS    = [0x56, 0x80] # Doesnt do anything any more
         self.supported_color_modes = {ColorMode.HS} # Actually, it supports RGB, but this will allow us to separate colours from brightness
         self.icon = "mdi:led-strip-variant"
         self.effect_list = EFFECT_LIST_0x56
@@ -46,16 +42,15 @@ class Model0x56(DefaultModelAbstraction):
 
         if isinstance(self.manu_data, str):
             self.manu_data = [ord(c) for c in self.manu_data]
-        LOGGER.debug(f"Manu data: {[hex(x) for x in self.manu_data]}")
-        LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
-        LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
+        # LOGGER.debug(f"Manu data: {[hex(x) for x in self.manu_data]}")
+        # LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
+        # LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
 
         if self.fw_major == 0x80:
             # TODO: Is this the same packet for 0x56 devices or only 0x80?  Find an 0x56 and test it
             self.INITIAL_PACKET             = bytearray.fromhex("00 01 80 00 00 0c 0d 0b 10 14 19 09 05 0d 2b 38 05 00 0f cf")
             self.GET_DEVICE_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 02 03 17 22 22")
             self.GET_LED_SETTINGS_PACKET    = bytearray.fromhex("00 05 80 00 00 05 06 0a 63 12 21 0f a5")
-            self.SEGMENTS = 1
 
         if self.manu_data[15] == 0x61:
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
@@ -95,6 +90,20 @@ class Model0x56(DefaultModelAbstraction):
         LOGGER.debug(f"Colour mode:      {self.color_mode}")
         LOGGER.debug(f"HS colour:        {self.hs_color}")
     
+        @property
+        def segments(self):
+            """Get segments from parent instance."""
+            if hasattr(self, '_parent_instance') and hasattr(self._parent_instance, '_segments'):
+                return self._parent_instance._segments
+            return None
+        
+        @segments.setter
+        def segments(self, value):
+            LOGGER.debug(f"Setting segments to {value}")
+            """Set segments in parent instance."""
+            if hasattr(self, '_parent_instance'):
+                self._parent_instance._segments = value    
+
     def update_color_state(self, rgb_color):
         hsv_color = super().rgb_to_hsv(rgb_color)
         self.hs_color = tuple(hsv_color[0:2])
@@ -130,7 +139,7 @@ class Model0x56(DefaultModelAbstraction):
             self.effect = EFFECT_ID_TO_NAME_0x56[selected_effect]
             self.effect_speed = effect_speed
             self.color_mode = ColorMode.BRIGHTNESS
-            self.brightness = int(brightness * 255 // 100)
+            #self.brightness = int(brightness * 255 // 100)
     
     def set_color(self, hs_color, brightness):
         # Returns the byte array to set the RGB colour
@@ -223,6 +232,8 @@ class Model0x56(DefaultModelAbstraction):
         chip_type   = options.get(const.CONF_LEDTYPE)
         color_order = options.get(const.CONF_COLORORDER)
         self._delay = options.get(const.CONF_DELAY, 120)
+        segments    = options.get(const.CONF_SEGMENTS, 1)
+
         if led_count is None or chip_type is None or color_order is None:
             LOGGER.error("LED count, chip type or colour order is None and shouldn't be.  Not setting LED settings.")
             return
@@ -230,18 +241,19 @@ class Model0x56(DefaultModelAbstraction):
             self.chip_type         = chip_type
             self.color_order       = color_order
             self.led_count         = led_count
-        LOGGER.debug(f"Setting LED values: Count {led_count}, Type {self.chip_type.value}, Order {self.color_order.value}, Segments {getattr(self, 'SEGMENTS', 'Unknown')}")
+            self.segments          = segments
+        LOGGER.debug(f"Setting LED values: Count {led_count}, Type {self.chip_type.value}, Order {self.color_order.value}, Segments {getattr(self, 'segments', 'Unknown')}")
         led_settings_packet     = bytearray.fromhex("00 00 80 00 00 0b 0c 0b 62 00 64 00 03 01 00 64 03 f0 21")
         led_count_bytes         = bytearray(led_count.to_bytes(2, byteorder='big'))
         led_settings_packet[9:11] = led_count_bytes
-        # TODO: We need to support segments properly # Will - delete this if working
-        # Next we should read the segment count and set it, but not allowing changing
-        #led_settings_packet[11:13] = [0, 1]  # We're only supporting a single segment
-        led_settings_packet[12] = getattr(self, "SEGMENTS", 1)
+        # TODO: We need to support segments properly
+        # I think we have to create a new config element to hold segments - OR...
+        # Just don't support it.  Make the changes in the app and not in HA.  Seems reasonable to me :shrug:
+        led_settings_packet[12] = self.segments
         led_settings_packet[13] = self.chip_type.value
         led_settings_packet[14] = self.color_order.value
         led_settings_packet[15] = self.led_count & 0xFF
-        led_settings_packet[16] = getattr(self, "SEGMENTS", 1)
+        led_settings_packet[16] = self.segments
         led_settings_packet[17] = sum(led_settings_packet[9:18]) & 0xFF
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
         # REMEMBER: The calling function must also call stop() on the device to apply the settings
@@ -269,8 +281,9 @@ class Model0x56(DefaultModelAbstraction):
                 self.led_count   = data[11]
                 self.chip_type   = const.LedTypes_StripLight(data[14])
                 self.color_order = const.ColorOrdering(data[15])
-                self.SEGMENTS    = data[13]
-                LOGGER.debug(f"LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.SEGMENTS}")
+                if hasattr(self, '_parent_instance'):
+                    self.segments = data[13]
+                LOGGER.debug(f"LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.segments}")
             elif list(data[5:7]) == [0x1b, 0x1c]: # Not sure if this is a reliable way to identify this packet
                 LOGGER.debug("Get device settings response received")
                 # Device settings response
@@ -284,7 +297,7 @@ class Model0x56(DefaultModelAbstraction):
                 effect_num   = data[12]
                 effect_speed = data[13]
                 rgb_color    = (data[14], data[15], data[16])
-                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15])
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15]) # TODO: In "25" mode, brighgtness is byte 14
                 LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
             else:
                 LOGGER.debug("Unknown response received")
@@ -352,7 +365,7 @@ class Model0x56(DefaultModelAbstraction):
             elif payload[1] == 0x63:
                 LOGGER.debug(f"LED settings response received")
                 self.led_count = int.from_bytes(bytes([payload[2], payload[3]]), byteorder='big') * payload[5]
-                self.SEGMENTS  = payload[5]
+                self.segments = payload[5]
                 self.chip_type = const.LedTypes_StripLight(payload[6])
                 self.color_order = const.ColorOrdering(payload[7])
                 LOGGER.debug(f"From settings response data: LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.SEGMENTS}")
