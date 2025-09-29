@@ -1,0 +1,83 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Seleccionar luz LEDnetWF",
+        "data": {
+          "mac": "Dirección MAC Bluetooth",
+          "name": "Nombre"
+        }
+      },
+      "validate": {
+        "title": "Validar conexión",
+        "data": {
+          "retry": "¿Reintentar?",
+          "flicker": "¿Parpadeó la luz?"
+        }
+      },
+      "manual": {
+        "title": "Introducir dirección MAC Bluetooth",
+        "data": {
+          "mac": "Dirección MAC Bluetooth",
+          "name": "Nombre"
+        }
+      }
+    },
+    "error": {
+      "connect": "No se puede conectar a LEDnetWF",
+      "toggle_failed": "Error al hacer parpadear la luz. Verifique la intensidad de señal o la alimentación.",
+      "device_disappeared": "El dispositivo seleccionado ya no está disponible.",
+      "not_supported": "Este modelo de dispositivo no es compatible con la integración.",
+      "no_selection": "No se seleccionó ningún dispositivo.",
+      "already_configured": "Este dispositivo ya ha sido configurado.",
+      "no_devices_found": "No se encontraron luces LEDnetWF compatibles cerca.",
+      "cannot_connect": "No se pudo conectar al dispositivo. Asegúrese de que esté encendido y cerca.",
+      "unknown": "Ocurrió un error inesperado. Por favor, inténtelo de nuevo."
+    },
+    "abort": {
+      "cannot_validate": "No se puede validar la luz LEDnetWF",
+      "cannot_connect": "No se puede conectar a LEDnetWF",
+      "already_configured": "Este dispositivo ya está configurado",
+      "device_disappeared": "El dispositivo seleccionado no se encontró de nuevo",
+      "unsupported_device": "El dispositivo seleccionado no es compatible",
+      "no_devices_found": "No se encontraron luces LEDnetWF sin configurar"
+    }
+  },
+  "options": {
+    "step": {
+      "user": {
+        "title": "Configuración del dispositivo",
+        "description": "Se recomienda realizar cambios de configuración a través de la aplicación. Esta funcionalidad se incluye por conveniencia y no está completa.",
+        "data": {
+          "delay": "Retraso de desconexión (0 = nunca desconectar)",
+          "ledcount": "Número de LEDs",
+          "name": "Nombre",
+          "ledtype": "Tipo de LED",
+          "colororder": "Orden de colores",
+          "segments": "Número de segmentos",
+          "ignore_notifications": "Ignorar notificaciones de cambio de estado"
+        }
+      },
+      "init": {
+        "title": "LEDnetWF",
+        "description": "Esto probablemente nunca debería verse.",
+        "data": {
+          "delay": "Retraso de desconexión (0 = nunca desconectar)",
+          "ledcount": "Número de LEDs",
+          "name": "Nombre",
+          "ledtype": "Tipo de LED",
+          "colororder": "Orden de colores",
+          "segments": "Número de segmentos",
+          "ignore_notifications": "Ignorar notificaciones de cambio de estado"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "effect_speed": {
+        "name": "Velocidad del efecto"
+      }
+    }
+  }
+}

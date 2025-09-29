@@ -46,24 +46,29 @@
   "options": {
     "step": {
       "user": {
+        "title": "Configuração do dispositivo",
+        "description": "É recomendado fazer alterações de configuração através do aplicativo. Esta funcionalidade está incluída por conveniência e não está completa.",
         "data": {
-          "reset": "Redefinir",
           "delay": "Atraso para desconectar (0 = nunca desconectar)",
           "ledcount": "Número de LEDs",
           "name": "Nome",
           "ledtype": "Tipo de LED",
-          "colororder": "Ordem das cores"
+          "colororder": "Ordem das cores",
+          "segments": "Número de segmentos",
+          "ignore_notifications": "Ignorar notificações de mudança de estado"
         }
       },
       "init": {
         "title": "LEDnetWF",
+        "description": "Isso provavelmente nunca deveria ser visto.",
         "data": {
-          "reset": "Redefinir",
           "delay": "Atraso para desconectar (0 = nunca desconectar)",
           "ledcount": "Número de LEDs",
           "name": "Nome",
           "ledtype": "Tipo de LED",
-          "colororder": "Ordem das cores"
+          "colororder": "Ordem das cores",
+          "segments": "Número de segmentos",
+          "ignore_notifications": "Ignorar notificações de mudança de estado"
         }
       }
     }
