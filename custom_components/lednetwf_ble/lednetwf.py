@@ -198,6 +198,9 @@ class LEDNETWFInstance:
     
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
         LOGGER.debug(f"Notification handler {self.bluetooth_device_name}: {' '.join([f'{byte:02X}' for byte in data])}")
+        if self._ignore_notifications:
+            LOGGER.debug("Ignoring notification as per configuration")
+            return
         self._model_interface.notification_handler(data)
         self.local_callback()
     
