@@ -283,7 +283,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             _LOGGER.error("[OPTIONS] No LED types defined for model: %s", model)
             return self.async_abort(reason="unsupported_model")
 
-        _LOGGER.debug("[OPTIONS] Current model: %s", model)
+        _LOGGER.debug(f"[OPTIONS] Current model: 0x{model:02X}")
         _LOGGER.debug("[OPTIONS] Options before update: %s", self._options)
 
         if user_input:

@@ -118,11 +118,11 @@ class LEDNETWFLight(LightEntity):
         """Return device info."""
         return DeviceInfo(
             identifiers={
-                (DOMAIN, self._instance.mac)
+            (DOMAIN, self._instance.mac)
             },
             name=self.name,
             connections={(device_registry.CONNECTION_NETWORK_MAC, self._instance.mac)},
-            model=self._instance.model_number,
+            model=f"0x{self._instance.model_number:02x}",
             sw_version=self.firmware_version
         )
 

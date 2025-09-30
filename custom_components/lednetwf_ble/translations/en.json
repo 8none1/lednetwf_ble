@@ -49,7 +49,7 @@
         "title": "Device Configuration",
         "description": "It is recommended to make configuration changes via the app. This functionality is included for convenience and is not complete.",
         "data": {
-          "delay": "Disconnect delay (0 = never disconnect)",
+          "delay": "Disconnect delay",
           "ledcount": "Number of LEDs",
           "name": "Name",
           "ledtype": "LED type",
@@ -62,7 +62,7 @@
         "title": "LEDnetWF",
         "description": "This probably should never be seen.",
         "data": {
-          "delay": "Disconnect delay (0 = never disconnect)",
+          "delay": "Disconnect delay)",
           "ledcount": "Number of LEDs",
           "name": "Name",
           "ledtype": "LED type",

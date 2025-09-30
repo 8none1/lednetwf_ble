@@ -263,18 +263,17 @@ class Model0x56(DefaultModelAbstraction):
         LOGGER.debug(f"Notification received. fw_major: 0x{self.fw_major:02x}, data: {' '.join([f'{byte:02X}' for byte in data])}")
         if self.fw_major == 0x80:
             # This device doesn't send the JSON like message.  It's all hex.
-            LOGGER.debug(f"N: Raw Response Payload: {' '.join([f'{byte:02X}' for byte in data])}")
             # Example response to "LED settings" request:
                 #  num  leds =--------------vv-------------vv
             # led colour order -------------||----------vv ||
             # yes, is led type -------------||-------vv || ||
-            # segment ----------------------||----vv || || ||
+            # segment ----------------------||----vv || || || vv
             # 0404 800000 0b 0c 15 00 63 00 0f 00 01 02 00 0f 01 85
             # 0409 800000 0b 0c 15 00 63 00 0f 00 01 01 00 0f 01 84
             # 040e 800000 0b 0c 15 00 63 00 0f 00 01 02 00 0f 01 85
             # 0413 800000 0b 0c 15 00 63 00 0f 00 01 03 00 0f 01 86
             # 0442 800000 0b 0c 15 00 63 00 13 00 03 01 00 13 03 90
-            # 0001 020304 05 06 07 08 09 10 11 12 13 14 15 16 17 18
+            # 0001 020304 05 06 07 08 09 10 11 12 13 14 15 16 17 18 - index
             if list(data[5:8]) == [0x0b, 0x0c, 0x15]:
                 # LED settings response
                 LOGGER.debug("Get LED settings response received")
@@ -284,12 +283,8 @@ class Model0x56(DefaultModelAbstraction):
                 if hasattr(self, '_parent_instance'):
                     self.segments = data[13]
                 LOGGER.debug(f"LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.segments}")
-            elif list(data[5:7]) == [0x1b, 0x1c]: # Not sure if this is a reliable way to identify this packet
-                LOGGER.debug("Get device settings response received")
-                # Device settings response
-                # 0001 020304 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 - index
-                # 0424 800000 1b 1c 17 08 65 f0 bc ce 84 08 4d 87 dc 3b 89 3a e5 03 00 00 08 b9 01 00 80 00 a3 33 02 00
-                # 0417 800000 1b 1c 17 08 65 f0 bc ce 84 08 4d 87 dc 3b 89 3a e5 03 00 00 01 7e 01 00 80 00 a3 33 02 00
+            # elif list(data[5:7]) == [0x1b, 0x1c]: # Not sure if this is a reliable way to identify this packet
+            #     LOGGER.debug("Get device settings response received")
             elif list(data[5:7]) == [0x0e, 0x0f]:
                 LOGGER.debug("Normal Status response received")
                 self.is_on = True if data[10] == 0x23 else False
@@ -368,5 +363,4 @@ class Model0x56(DefaultModelAbstraction):
                 self.segments = payload[5]
                 self.chip_type = const.LedTypes_StripLight(payload[6])
                 self.color_order = const.ColorOrdering(payload[7])
-                LOGGER.debug(f"From settings response data: LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.SEGMENTS}")
-
+                LOGGER.debug(f"From settings response data: LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.segments}")

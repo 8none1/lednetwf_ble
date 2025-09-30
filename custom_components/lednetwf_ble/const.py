@@ -2,7 +2,6 @@ from enum import Enum
 
 DOMAIN                    = "lednetwf_ble"
 CONF_NAME                 = "name"
-#CONF_RESET                = "reset"
 CONF_DELAY                = "delay"
 CONF_LEDCOUNT             = "ledcount"
 CONF_LEDTYPE              = "ledtype"

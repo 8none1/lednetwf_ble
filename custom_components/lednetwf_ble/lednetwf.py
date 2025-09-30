@@ -156,8 +156,6 @@ class LEDNETWFInstance:
                 f"You need to add bluetooth integration (https://www.home-assistant.io/integrations/bluetooth) or couldn't find a nearby device with address: {self._mac}"
             )
         service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
-        # LOGGER.debug(f"Service info: {service_info}")
-        # LOGGER.debug(f"Service info keys: {service_info.keys()}")
         if service_info is not None and 'address' in service_info:
             if service_info['address'] != self._mac:
                 LOGGER.error(f"Service info address {service_info['address']} does not match expected MAC {self._mac}. This shouldn't happen, but it does. Try again later.")
@@ -217,10 +215,6 @@ class LEDNETWFInstance:
     @property
     def mac(self):
         return self._bluetooth_device.address
-
-    # @property
-    # def reset(self):
-    #     return self._reset
 
     @property
     def bluetooth_device_name(self):
@@ -316,9 +310,9 @@ class LEDNETWFInstance:
             LOGGER.error("LED settings packet is None")
             return
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
+        await self.turn_off()
         await self._write(led_settings_packet)
         await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
-        await self.turn_off()
         await self.stop()
 
     @retry_bluetooth_connection_error
