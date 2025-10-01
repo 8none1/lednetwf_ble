@@ -62,7 +62,7 @@
         "title": "LEDnetWF",
         "description": "This probably should never be seen.",
         "data": {
-          "delay": "Disconnect delay)",
+          "delay": "Disconnect delay (0 = never disconnect)",
           "ledcount": "Number of LEDs",
           "name": "Name",
           "ledtype": "LED type",
