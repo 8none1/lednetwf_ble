@@ -5,7 +5,7 @@ from homeassistant.core import HomeAssistant, Event
 from homeassistant.const import CONF_MAC, EVENT_HOMEASSISTANT_STOP
 from homeassistant.const import Platform
 
-from .const import DOMAIN, CONF_DELAY
+from .const import DOMAIN, CONF_DELAY, CONF_IGNORE_NOTIFICATIONS
 from .lednetwf import LEDNETWFInstance
 import logging
 
@@ -47,6 +47,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
-    instance = hass.data[DOMAIN][entry.entry_id]
+    #instance = hass.data[DOMAIN][entry.entry_id]
+    instance: LEDNETWFInstance = hass.data[DOMAIN][entry.entry_id]
+    instance._ignore_notifications = entry.options.get(CONF_IGNORE_NOTIFICATIONS, False)
     await instance.set_led_settings(entry.options)
     await hass.config_entries.async_reload(entry.entry_id)

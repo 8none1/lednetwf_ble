@@ -1,0 +1,83 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LEDnetWF-Licht auswählen",
+        "data": {
+          "mac": "Bluetooth-MAC-Adresse",
+          "name": "Name"
+        }
+      },
+      "validate": {
+        "title": "Verbindung validieren",
+        "data": {
+          "retry": "Wiederholen?",
+          "flicker": "Hat das Licht geblinkt?"
+        }
+      },
+      "manual": {
+        "title": "Bluetooth-MAC-Adresse eingeben",
+        "data": {
+          "mac": "Bluetooth-MAC-Adresse",
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "connect": "Verbindung zu LEDnetWF nicht möglich",
+      "toggle_failed": "Licht blinken fehlgeschlagen. Signalstärke oder Stromversorgung prüfen.",
+      "device_disappeared": "Das ausgewählte Gerät ist nicht mehr verfügbar.",
+      "not_supported": "Dieses Gerätemodell wird von der Integration nicht unterstützt.",
+      "no_selection": "Kein Gerät wurde ausgewählt.",
+      "already_configured": "Dieses Gerät wurde bereits konfiguriert.",
+      "no_devices_found": "Keine unterstützten LEDnetWF-Lichter in der Nähe gefunden.",
+      "cannot_connect": "Verbindung zum Gerät nicht möglich. Stellen Sie sicher, dass es eingeschaltet und in der Nähe ist.",
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut."
+    },
+    "abort": {
+      "cannot_validate": "LEDnetWF-Licht kann nicht validiert werden",
+      "cannot_connect": "Verbindung zu LEDnetWF nicht möglich",
+      "already_configured": "Dieses Gerät ist bereits konfiguriert",
+      "device_disappeared": "Das ausgewählte Gerät wurde nicht wieder gefunden",
+      "unsupported_device": "Das ausgewählte Gerät wird nicht unterstützt",
+      "no_devices_found": "Keine unkonfigurierten LEDnetWF-Lichter gefunden"
+    }
+  },
+  "options": {
+    "step": {
+      "user": {
+        "title": "Gerätekonfiguration",
+        "description": "Es wird empfohlen, Konfigurationsänderungen über die App vorzunehmen. Diese Funktionalität ist der Bequemlichkeit halber enthalten und nicht vollständig.",
+        "data": {
+          "delay": "Trennungsverzögerung (0 = niemals trennen)",
+          "ledcount": "Anzahl der LEDs",
+          "name": "Name",
+          "ledtype": "LED-Typ",
+          "colororder": "Farbreihenfolge",
+          "segments": "Anzahl der Segmente",
+          "ignore_notifications": "Statusänderungs-Benachrichtigungen ignorieren"
+        }
+      },
+      "init": {
+        "title": "LEDnetWF",
+        "description": "Dies sollte wahrscheinlich niemals zu sehen sein.",
+        "data": {
+          "delay": "Trennungsverzögerung (0 = niemals trennen)",
+          "ledcount": "Anzahl der LEDs",
+          "name": "Name",
+          "ledtype": "LED-Typ",
+          "colororder": "Farbreihenfolge",
+          "segments": "Anzahl der Segmente",
+          "ignore_notifications": "Statusänderungs-Benachrichtigungen ignorieren"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "effect_speed": {
+        "name": "Effektgeschwindigkeit"
+      }
+    }
+  }
+}

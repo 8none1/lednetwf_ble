@@ -36,8 +36,8 @@ class DefaultModelAbstraction:
         self.supported_features            = LightEntityFeature.EFFECT
         self.WRITE_CHARACTERISTIC_UUIDS    = ["0000ff01-0000-1000-8000-00805f9b34fb"]
         self.NOTIFY_CHARACTERISTIC_UUIDS   = ["0000ff02-0000-1000-8000-00805f9b34fb"]
-        self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 04 05 0a 81 8a 8b 96")
-        self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12 21 f0 86")
+        self.INITIAL_PACKET                = bytearray.fromhex("00 01 80 00 00 04 05 0a 81 8a 8b 96")
+        self.GET_LED_SETTINGS_PACKET       = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12 21 f0 86")
 
     def process_manu_data(self, manu_data):
         if manu_data:

@@ -67,7 +67,7 @@ class Model0x54(DefaultModelAbstraction):
             self.hs_color = tuple(super().rgb_to_hsv(rgb_color))[0:2]
             self.brightness = (super().rgb_to_hsv(rgb_color)[2])
             self.color_mode = ColorMode.HS
-            self.is_on = True
+            self.is_on = True if self.manu_data[14] == 0x23 else False
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
@@ -176,12 +176,17 @@ class Model0x54(DefaultModelAbstraction):
             LOGGER.error("LED colour order is None and shouldn't be.  Not setting LED settings.")
             return
         else:
-            #self.color_order       = getattr(ColorOrdering, color_order).value
-            self.color_order       = const.ColorOrdering.from_value(color_order).value
+            # Convert from const.ColorOrdering to local ColorOrdering if needed
+            if hasattr(color_order, 'name'):
+                # It's an enum member, get the name and map to local enum
+                local_color_order = ColorOrdering[color_order.name]
+                self.color_order = local_color_order
+            else:
+                self.color_order = color_order
         
         LOGGER.debug(f"Setting LED settings: Colour order: {self.color_order}")
         led_settings_packet     = bytearray.fromhex("00 04 80 00 00 05 06 0b 62 00 01 0f 72")
-        led_settings_packet[10] = self.color_order
+        led_settings_packet[10] = self.color_order.value
         led_settings_packet[12] = sum(led_settings_packet[8:12]) & 0xFF
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
         # REMEMBER: The calling function must also call stop() on the device to apply the settings
@@ -198,7 +203,16 @@ class Model0x54(DefaultModelAbstraction):
                 return None
         else:
             return None
-        payload = bytearray.fromhex(payload)
+        if not all(c in "0123456789abcdefABCDEF" for c in payload):
+            LOGGER.warning(f"Invalid hex characters in payload: {payload}")
+            return None
+        
+        try:
+            payload = bytearray.fromhex(payload)
+        except ValueError as e:
+            LOGGER.error(f"Failed to parse hex payload '{payload}': {e}")
+            return None
+        #payload = bytearray.fromhex(payload)
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{i}:{byte:02X}' for i, byte in enumerate(payload)])}")
         # return
         if payload[0] == 0x81:
@@ -211,12 +225,12 @@ class Model0x54(DefaultModelAbstraction):
             if mode == 0x61:
                 if selected_effect == 0x23:
                     # Light is in colour mode
-                    rgb_color = (payload[6:9])
+                    rgb_color = (payload[6], payload[7], payload[8])
                     hsv_color = super().rgb_to_hsv(rgb_color)
                     self.hs_color = tuple(hsv_color[0:2])
                     #self.brightness = int(hsv_color[2] * 255 // 100)
                     self.brightness = int(hsv_color[2]) # It's coming back here already scaled to 0-255.  Why are we doing it again above?
-                    # Maybe this bug has alwyas been here and the brightness has never worked properly?
+                    # Maybe this bug has always been here and the brightness has never worked properly?
                     # Yes looks like it has.  Fixed here, and in 0x53.
                     # TODO: Fix the others
                     LOGGER.debug(f"RGB colour: {rgb_color}")

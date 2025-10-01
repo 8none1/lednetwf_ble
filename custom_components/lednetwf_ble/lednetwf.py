@@ -21,7 +21,12 @@ import logging
 
 from .const import (
     CONF_DELAY,
-    CONF_MODEL
+    CONF_MODEL,
+    CONF_LEDCOUNT,
+    CONF_LEDTYPE,
+    CONF_COLORORDER,
+    CONF_SEGMENTS,
+    CONF_IGNORE_NOTIFICATIONS
 )
 
 LOGGER                        = logging.getLogger(__name__)
@@ -39,26 +44,10 @@ WrapFuncType = TypeVar("WrapFuncType", bound=Callable[..., Any])
 # Iterate through all modules in the current package
 package = __package__
 filename = __file__
-# LOGGER.debug(f"Package: {package}")
 LOGGER.debug(f"File: {__file__}")
 my_name = filename[filename.rfind('/')+1:]
 models_path = f"{filename.replace(my_name, 'models')}"
 LOGGER.debug(f"Models path: {models_path}")
-
-# for _, module_name, _ in pkgutil.iter_modules([f"{package.replace('.', '/')}/models"]):
-#     LOGGER.debug(f"Module name: {module_name}")
-#     if module_name.startswith('model_0x'):
-#         module = importlib.import_module(f'.models.{module_name}', package)
-#         # module = importlib.import_module(f'{models_path}/{module_name}.py')
-#         LOGGER.debug(f"Module: {module}")
-#         LOGGER.debug(f"Dir: {dir(module)}")
-#         class_name = f'Model{module_name.split("_")[1]}'
-#         if hasattr(module, class_name):
-#             globals()[class_name] = getattr(module, class_name)
-#         if hasattr(module, "SUPPORTED_MODELS"):
-#             LOGGER.debug(f"Supported models: {getattr(module, 'SUPPORTED_MODELS')}")
-#             SUPPORTED_MODELS[class_name] = getattr(module, "SUPPORTED_MODELS")
-
 
 for _, module_name, _ in pkgutil.iter_modules([models_path]):
     LOGGER.debug(f"Module name: {module_name}")
@@ -68,10 +57,12 @@ for _, module_name, _ in pkgutil.iter_modules([models_path]):
         if hasattr(m, class_name):
             globals()[class_name] = getattr(m, class_name)
         if hasattr(m, "SUPPORTED_MODELS"):
-            LOGGER.debug(f"Supported models: {getattr(m, 'SUPPORTED_MODELS')}")
+            supported_models_hex = [f"0x{model:02X}" for model in getattr(m, 'SUPPORTED_MODELS')]
+            LOGGER.debug(f"Supported models: {supported_models_hex}")
             SUPPORTED_MODELS[class_name] = getattr(m, "SUPPORTED_MODELS")
 
-LOGGER.debug(f"All supported modules: {SUPPORTED_MODELS}")
+all_models_hex = {class_name: [f"0x{model:02X}" for model in models] for class_name, models in SUPPORTED_MODELS.items()}
+LOGGER.debug(f"All supported modules: {all_models_hex}")
 
 def find_model_for_value(value):
     for model_name, models in SUPPORTED_MODELS.items():
@@ -149,6 +140,10 @@ class LEDNETWFInstance:
         LOGGER.debug(f"Data: {data}")
         self._name    = self._data.get('name')
         self._model   = self._data.get(CONF_MODEL)
+        self._ignore_notifications = self._data.get(CONF_IGNORE_NOTIFICATIONS, options.get(CONF_IGNORE_NOTIFICATIONS, False))
+        LOGGER.debug(f"Ignore notifications: {self._ignore_notifications}")
+        self._segments = self._data.get(CONF_SEGMENTS, options.get(CONF_SEGMENTS, 1))
+        LOGGER.debug(f"Segments: {self._segments}")
         self._options = options
         self._hass    = hass
         self._mac     = mac
@@ -160,9 +155,7 @@ class LEDNETWFInstance:
             raise ConfigEntryNotReady(
                 f"You need to add bluetooth integration (https://www.home-assistant.io/integrations/bluetooth) or couldn't find a nearby device with address: {self._mac}"
             )
-        service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict() # It looks like there is a race in Home Assistant where this contains the service info of a different device
-        # LOGGER.debug(f"Service info: {service_info}")
-        # LOGGER.debug(f"Service info keys: {service_info.keys()}")
+        service_info  = bluetooth.async_last_service_info(self._hass, self._mac).as_dict()
         if service_info is not None and 'address' in service_info:
             if service_info['address'] != self._mac:
                 LOGGER.error(f"Service info address {service_info['address']} does not match expected MAC {self._mac}. This shouldn't happen, but it does. Try again later.")
@@ -172,6 +165,7 @@ class LEDNETWFInstance:
         model_class = globals()[model_class_name]
         LOGGER.debug(f"Model class via lookup: {model_class}")
         self._model_interface = model_class(service_info['manufacturer_data'])
+        self._model_interface._parent_instance = self
         self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._client: BleakClientWithServiceCache | None = None
         self._disconnect_timer: asyncio.TimerHandle | None = None
@@ -179,8 +173,8 @@ class LEDNETWFInstance:
         self._expected_disconnect   = False
         self._packet_counter        = 0
         self._read_uuid             = None
-        self._model_interface.chip_type = self._options.get('chip_type')
-        self._model_interface.color_order = self._options.get('color_order')
+        self._model_interface.chip_type = self._options.get(CONF_LEDTYPE)
+        self._model_interface.color_order = self._options.get(CONF_COLORORDER)
         LOGGER.debug(f"Chip type: {self._model_interface.chip_type}")
         LOGGER.debug(f"Color order: {self._model_interface.color_order}")
     
@@ -202,6 +196,9 @@ class LEDNETWFInstance:
     
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
         LOGGER.debug(f"Notification handler {self.bluetooth_device_name}: {' '.join([f'{byte:02X}' for byte in data])}")
+        if self._ignore_notifications:
+            LOGGER.debug("Ignoring notification as per configuration")
+            return
         self._model_interface.notification_handler(data)
         self.local_callback()
     
@@ -218,10 +215,6 @@ class LEDNETWFInstance:
     @property
     def mac(self):
         return self._bluetooth_device.address
-
-    # @property
-    # def reset(self):
-    #     return self._reset
 
     @property
     def bluetooth_device_name(self):
@@ -317,6 +310,7 @@ class LEDNETWFInstance:
             LOGGER.error("LED settings packet is None")
             return
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
+        await self.turn_off()
         await self._write(led_settings_packet)
         await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
         await self.turn_off()

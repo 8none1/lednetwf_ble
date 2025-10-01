@@ -46,24 +46,29 @@
   "options": {
     "step": {
       "user": {
+        "title": "Device Configuration",
+        "description": "It is recommended to make configuration changes via the app. This functionality is included for convenience and is not complete.",
         "data": {
-          "reset": "Reset",
-          "delay": "Disconnect delay (0 = never disconnect)",
+          "delay": "Disconnect delay",
           "ledcount": "Number of LEDs",
           "name": "Name",
           "ledtype": "LED type",
-          "colororder": "Color order"
+          "colororder": "Color order",
+          "segments": "Number of segments",
+          "ignore_notifications": "Ignore state change notifications"
         }
       },
       "init": {
         "title": "LEDnetWF",
+        "description": "This probably should never be seen.",
         "data": {
-          "reset": "Reset",
           "delay": "Disconnect delay (0 = never disconnect)",
           "ledcount": "Number of LEDs",
           "name": "Name",
           "ledtype": "LED type",
-          "colororder": "Color order"
+          "colororder": "Color order",
+          "segments": "Number of segments",
+          "ignore_notifications": "Ignore state change notifications"
         }
       }
     }

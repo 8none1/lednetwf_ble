@@ -1,13 +1,14 @@
 from enum import Enum
 
-DOMAIN            = "lednetwf_ble"
-CONF_NAME         = "name"
-CONF_RESET        = "reset"
-CONF_DELAY        = "delay"
-CONF_LEDCOUNT     = "ledcount"
-CONF_LEDTYPE      = "ledtype"
-CONF_COLORORDER   = "colororder"
-CONF_MODEL        = "model"
+DOMAIN                    = "lednetwf_ble"
+CONF_NAME                 = "name"
+CONF_DELAY                = "delay"
+CONF_LEDCOUNT             = "ledcount"
+CONF_LEDTYPE              = "ledtype"
+CONF_COLORORDER           = "colororder"
+CONF_MODEL                = "model"
+CONF_SEGMENTS             = "segments"
+CONF_IGNORE_NOTIFICATIONS = "ignore_notifications"
 
 class LedTypes_StripLight(Enum):
     WS2812B    = 0x01
@@ -28,6 +29,13 @@ class LedTypes_StripLight(Enum):
             if member.value == value:
                 return member
         raise ValueError(f"No member with value {value}")
+    
+    @classmethod
+    def from_name(cls, name):
+        for member in cls:
+            if member.name == name:
+                return member
+        raise ValueError(f"No member with name {name}")
 
 class LedTypes_RingLight(Enum):
     Unknown    = 0x00
@@ -44,6 +52,13 @@ class LedTypes_RingLight(Enum):
             if member.value == value:
                 return member
         raise ValueError(f"No member with value {value}")
+    
+    @classmethod
+    def from_name(cls, name):
+        for member in cls:
+            if member.name == name:
+                return member
+        raise ValueError(f"No member with name {name}")
 
 class ColorOrdering(Enum):
     RGB = 0x00
@@ -60,4 +75,9 @@ class ColorOrdering(Enum):
                 return member
         raise ValueError(f"No member with value {value}")
 
-
+    @classmethod
+    def from_name(cls, name):
+        for member in cls:
+            if member.name == name:
+                return member
+        raise ValueError(f"No member with name {name}")
