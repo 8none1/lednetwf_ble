@@ -243,18 +243,15 @@ class Model0x56(DefaultModelAbstraction):
             self.led_count         = led_count
             self.segments          = segments
         LOGGER.debug(f"Setting LED values: Count {led_count}, Type {self.chip_type.value}, Order {self.color_order.value}, Segments {getattr(self, 'segments', 'Unknown')}")
-        led_settings_packet     = bytearray.fromhex("00 00 80 00 00 0b 0c 0b 62 00 64 00 03 01 00 64 03 f0 21")
-        led_count_bytes         = bytearray(led_count.to_bytes(2, byteorder='big'))
+        led_settings_packet       = bytearray.fromhex("00 00 80 00 00 0b 0c 0b 62 00 64 00 03 01 00 64 03 f0 21")
+        led_count_bytes           = bytearray(led_count.to_bytes(2, byteorder='big'))
         led_settings_packet[9:11] = led_count_bytes
-        # TODO: We need to support segments properly
-        # I think we have to create a new config element to hold segments - OR...
-        # Just don't support it.  Make the changes in the app and not in HA.  Seems reasonable to me :shrug:
-        led_settings_packet[12] = self.segments
-        led_settings_packet[13] = self.chip_type.value
-        led_settings_packet[14] = self.color_order.value
-        led_settings_packet[15] = self.led_count & 0xFF
-        led_settings_packet[16] = self.segments
-        led_settings_packet[17] = sum(led_settings_packet[9:18]) & 0xFF
+        led_settings_packet[12]   = self.segments
+        led_settings_packet[13]   = self.chip_type.value
+        led_settings_packet[14]   = self.color_order.value
+        led_settings_packet[15]   = self.led_count & 0xFF
+        led_settings_packet[16]   = self.segments
+        led_settings_packet[17]   = sum(led_settings_packet[9:18]) & 0xFF
         LOGGER.debug(f"LED settings packet: {' '.join([f'{byte:02X}' for byte in led_settings_packet])}")
         # REMEMBER: The calling function must also call stop() on the device to apply the settings
         return led_settings_packet
@@ -323,15 +320,15 @@ class Model0x56(DefaultModelAbstraction):
                 if mode == 0x61:
                     if selected_effect == 0xf0:
                         # Light is in colour mode
-                        rgb_color = (payload[6:9])
+                        rgb_color                     = (payload[6:9])
+                        self.effect                   = EFFECT_OFF
+                        self.color_mode               = ColorMode.HS
+                        self.color_temperature_kelvin = None
                         self.update_color_state(rgb_color)
                         LOGGER.debug("Light is in colour mode")
                         LOGGER.debug(f"RGB colour: {rgb_color}")
                         LOGGER.debug(f"HS colour: {self.hs_color}")
                         LOGGER.debug(f"Brightness: {self.brightness}")
-                        self.effect = EFFECT_OFF
-                        self.color_mode = ColorMode.HS
-                        self.color_temperature_kelvin = None
                     elif 0x01 <= selected_effect <= 0x0a:
                         self.color_mode = ColorMode.HS
                         self.effect = EFFECT_ID_TO_NAME_0x56[selected_effect << 8]

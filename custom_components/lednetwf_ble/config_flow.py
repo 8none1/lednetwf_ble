@@ -277,22 +277,34 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         model = self._data.get(CONF_MODEL)
         # TODO: Look up the strip light models more dynamically, not hard coded
         led_types = LedTypes_StripLight if model in (0x56, 0x80) else LedTypes_RingLight
-        led_types_list = list(led_types)
+        # led_types_list = list(led_types)
 
-        if not led_types_list:
-            _LOGGER.error("[OPTIONS] No LED types defined for model: %s", model)
-            return self.async_abort(reason="unsupported_model")
+        # if not led_types_list:
+        #     _LOGGER.error("[OPTIONS] No LED types defined for model: %s", model)
+        #     return self.async_abort(reason="unsupported_model")
 
         _LOGGER.debug(f"[OPTIONS] Current model: 0x{model:02X}")
         _LOGGER.debug("[OPTIONS] Options before update: %s", self._options)
 
         if user_input:
+            _LOGGER.debug("[OPTIONS] Received user input: %s", user_input)
             chip = led_types[user_input[CONF_LEDTYPE]]
             order = ColorOrdering[user_input[CONF_COLORORDER]]
+            _LOGGER.debug("[OPTIONS] Resolved chip: %s, order: %s", chip, order)
+            # self._options.update({
+            #     CONF_DELAY: user_input.get(CONF_DELAY, 120),
+            #     CONF_LEDCOUNT: user_input[CONF_LEDCOUNT],
+            #     CONF_LEDTYPE: chip,
+            #     CONF_COLORORDER: order,
+            #     CONF_SEGMENTS: user_input.get(CONF_SEGMENTS, 1),
+            #     CONF_IGNORE_NOTIFICATIONS: user_input.get(CONF_IGNORE_NOTIFICATIONS, False),
+            # })
             self._options.update({
                 CONF_DELAY: user_input.get(CONF_DELAY, 120),
                 CONF_LEDCOUNT: user_input[CONF_LEDCOUNT],
+                # CONF_LEDTYPE: user_input[CONF_LEDTYPE],
                 CONF_LEDTYPE: chip,
+                # CONF_COLORORDER: user_input[CONF_COLORORDER],
                 CONF_COLORORDER: order,
                 CONF_SEGMENTS: user_input.get(CONF_SEGMENTS, 1),
                 CONF_IGNORE_NOTIFICATIONS: user_input.get(CONF_IGNORE_NOTIFICATIONS, False),
@@ -300,14 +312,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             _LOGGER.debug("[OPTIONS] Updated options: %s", self._options)
             return self.async_create_entry(title=self._data[CONF_NAME], data=self._options)
 
-        chip_default = self._options.get(CONF_LEDTYPE)
-        chip_default_name = next(
-            (t.name for t in led_types if t.value == chip_default),
-            led_types_list[0].name
-        )
-        order_default = self._options.get(CONF_COLORORDER, ColorOrdering.GRB.value)
-        order_default_name = next((o.name for o in ColorOrdering if o.value == order_default), ColorOrdering.GRB.name)
-
+        
+        # chip_default_name = next(
+        #     (t.name for t in led_types if t.value == chip_default),
+        #     led_types_list[0].name
+        # )
+        # chip_default = self._options.get(CONF_LEDTYPE, 1)
+        # order_default = self._options.get(CONF_COLORORDER, ColorOrdering.GRB.value)
+        # order_default = self._options.get(CONF_COLORORDER, 2)
+        # order_default_name = next((o.name for o in ColorOrdering if o.value == order_default), ColorOrdering.GRB.name)
+        current_chip = self._options.get(CONF_LEDTYPE)
+        current_order = self._options.get(CONF_COLORORDER)
+        chip_default_name = current_chip.name if hasattr(current_chip, 'name') else list(led_types)[0].name
+        order_default_name = current_order.name if hasattr(current_order, 'name') else ColorOrdering.GRB.name
         _LOGGER.debug("[OPTIONS] Resolved chip_default: %s, order_default: %s", chip_default_name, order_default_name)
 
         schema = vol.Schema({

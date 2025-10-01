@@ -67,7 +67,7 @@ class Model0x54(DefaultModelAbstraction):
             self.hs_color = tuple(super().rgb_to_hsv(rgb_color))[0:2]
             self.brightness = (super().rgb_to_hsv(rgb_color)[2])
             self.color_mode = ColorMode.HS
-            self.is_on = True
+            self.is_on = True if self.manu_data[14] == 0x23 else False
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")

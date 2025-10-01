@@ -313,6 +313,7 @@ class LEDNETWFInstance:
         await self.turn_off()
         await self._write(led_settings_packet)
         await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
+        await self.turn_off()
         await self.stop()
 
     @retry_bluetooth_connection_error
