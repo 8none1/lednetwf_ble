@@ -90,20 +90,20 @@ class Model0x56(DefaultModelAbstraction):
         LOGGER.debug(f"Colour mode:      {self.color_mode}")
         LOGGER.debug(f"HS colour:        {self.hs_color}")
     
-        @property
-        def segments(self):
-            """Get segments from parent instance."""
-            if hasattr(self, '_parent_instance') and hasattr(self._parent_instance, '_segments'):
-                return self._parent_instance._segments
-            return None
-        
-        @segments.setter
-        def segments(self, value):
-            LOGGER.debug(f"Setting segments to {value}")
-            """Set segments in parent instance."""
-            if hasattr(self, '_parent_instance'):
-                self._parent_instance._segments = value    
 
+    @property
+    def segments(self):
+        """Get segments from parent instance."""
+        if hasattr(self, '_parent_instance') and hasattr(self._parent_instance, '_segments'):
+            return self._parent_instance._segments
+        return None
+    
+    @segments.setter
+    def segments(self, value):
+        LOGGER.debug(f"Setting segments to {value}")
+        """Set segments in parent instance."""
+        if hasattr(self, '_parent_instance'):
+            self._parent_instance._segments = value    
     def update_color_state(self, rgb_color):
         hsv_color = super().rgb_to_hsv(rgb_color)
         self.hs_color = tuple(hsv_color[0:2])
