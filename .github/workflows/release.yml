@@ -42,11 +42,15 @@ jobs:
 
       - name: Commit updated manifest.json
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add custom_components/lednetwf_ble/manifest.json
-          git commit -m "Bump version to ${{ steps.vars.outputs.version }}"
-          git push origin HEAD:main
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            BRANCH="release-bump/v${{ steps.vars.outputs.version }}"
+            git checkout -b "$BRANCH"
+
+            git add custom_components/lednetwf_ble/manifest.json
+            git commit -m "Bump manifest.json to ${{ steps.vars.outputs.version }}"
+            git push origin "$BRANCH"
 
       - name: Create ZIP
         run: |
