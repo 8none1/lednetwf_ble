@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   workflow_dispatch:
-    inputs:
+`    inputs:
       version:
         description: "Release version (e.g. 1.2.3 or 1.2.3-beta1)"
         required: true
@@ -56,8 +56,8 @@ jobs:
         run: |
           mkdir -p dist/lednetwf
           cp -r custom_components/lednetwf_ble/* dist/lednetwf/
-          cd dist
-          zip -r lednetwf.zip lednetwf
+          cd dist/lednetwf
+          zip -r ../lednetwf.zip .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
