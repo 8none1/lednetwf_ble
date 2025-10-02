@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   workflow_dispatch:
-`    inputs:
+    inputs:
       version:
         description: "Release version (e.g. 1.2.3 or 1.2.3-beta1)"
         required: true
