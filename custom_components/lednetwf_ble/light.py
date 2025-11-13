@@ -51,7 +51,7 @@ class LEDNETWFLight(LightEntity):
         
     @property
     def available(self):
-        return self._instance.is_on != None
+        return self._instance.is_on is not None
 
     @property
     def brightness(self):
@@ -181,7 +181,12 @@ class LEDNETWFLight(LightEntity):
         elif ATTR_RGB_COLOR in kwargs:
             await self._instance.set_rgb_color(kwargs[ATTR_RGB_COLOR], on_brightness)
         elif ATTR_EFFECT in kwargs and kwargs[ATTR_EFFECT] != EFFECT_OFF:
-            await self._instance.set_effect(kwargs[ATTR_EFFECT], on_brightness)
+            effect = kwargs[ATTR_EFFECT]
+            # Don't try to set unknown effects
+            if effect.startswith("Unknown Effect"):
+                LOGGER.warning(f"Cannot set unknown effect: {effect}. Ignoring.")
+            else:
+                await self._instance.set_effect(effect, on_brightness)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -213,5 +218,5 @@ class LEDNETWFLight(LightEntity):
         #     self._color_mode = ColorMode.RGB
         elif self.color_temp_kelvin is not None:
             self._color_mode = ColorMode.COLOR_TEMP
-        self.available = self._instance.is_on != None
+        self.available = self._instance.is_on is not None
         self.async_write_ha_state()

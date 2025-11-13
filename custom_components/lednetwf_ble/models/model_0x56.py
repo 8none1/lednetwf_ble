@@ -164,9 +164,17 @@ class Model0x56(DefaultModelAbstraction):
 
     def set_effect(self, effect, brightness):
         # Returns the byte array to set the effect
-        LOGGER.debug(f"Setting effect: {effect}")      
+        LOGGER.debug(f"Setting effect: {effect}")
+        
+        # Handle unknown effects gracefully
+        if effect.startswith("Unknown Effect"):
+            LOGGER.warning(f"Attempt to set unknown effect: {effect}. Ignoring.")
+            return None
+        
         if effect not in EFFECT_LIST_0x56:
-            raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x53")
+            LOGGER.error(f"Effect '{effect}' not in EFFECT_LIST_0x56")
+            raise ValueError(f"Effect '{effect}' not in EFFECT_LIST_0x56")
+        
         self.effect = effect
         self.brightness = brightness
         #self.color_mode  = XXX ColorMode.BRIGHTNESS # Don't set this here, we might want to change the color of the effects?
