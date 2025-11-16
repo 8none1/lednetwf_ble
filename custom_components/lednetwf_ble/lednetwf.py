@@ -322,6 +322,8 @@ class LEDNETWFInstance:
         LOGGER.debug(f"{self._name}: Update in lednetwf called")
         try:
             await self._ensure_connected()
+            # Query the device to get the actual current state
+            await self.send_initial_packets()
         except Exception as error:
             LOGGER.debug(f"Error getting status: {error}")
             track = traceback.format_exc()
