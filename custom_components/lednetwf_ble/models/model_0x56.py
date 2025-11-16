@@ -299,6 +299,16 @@ class Model0x56(DefaultModelAbstraction):
                 rgb_color    = (data[14], data[15], data[16])
                 self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15]) # TODO: In "25" mode, brighgtness is byte 14
                 LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
+            elif list(data[5:7]) == [0x19, 0x1a]:
+                LOGGER.debug("Normal Status response received - Long type")
+                self.is_on = True if data[14] == 0x23 else False
+                mode_type    = data[15]
+                effect_num   = data[16]
+                effect_speed = data[17]
+                # for mode 0x66 (single color) & 0x67  (build-in effects)this does NOT contain the RGB colour! Also brightness does not seem to be in this reponse
+                rgb_color    = (data[18], data[19], data[20])  
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15]) # TODO: In "25" mode, brighgtness is byte 14
+                LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}, Mode: {mode_type}, Effect: {effect_num}, Speed: {effect_speed}")
             else:
                 LOGGER.debug("Unknown response received")
                 return None
