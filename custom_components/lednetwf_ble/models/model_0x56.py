@@ -60,6 +60,12 @@ class Model0x56(DefaultModelAbstraction):
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
+            # Parse background color from bytes 21-23
+            bg_rgb_color = (self.manu_data[21], self.manu_data[22], self.manu_data[23])
+            self.update_bg_color_state(bg_rgb_color)
+            LOGGER.debug(f"From manu Background RGB colour: {bg_rgb_color}")
+            LOGGER.debug(f"From manu Background HS colour: {self.bg_hs_color}")
+            LOGGER.debug(f"From manu Background Brightness: {self.bg_brightness}")
             if self.manu_data[16] != 0xf0:
                 # We're not in a colour mode, so set the effect
                 self.effect_speed = self.manu_data[17]
@@ -141,6 +147,22 @@ class Model0x56(DefaultModelAbstraction):
             self.color_mode = ColorMode.BRIGHTNESS
             #self.brightness = int(brightness * 255 // 100)
     
+    def set_bg_color(self, hs_color, brightness):
+        # Returns the byte array to set the background RGB colour
+        self.bg_hs_color = hs_color
+        self.bg_brightness = brightness
+        bg_rgb_color = self.hsv_to_rgb((hs_color[0], hs_color[1], self.bg_brightness))
+        LOGGER.debug(f"Setting background RGB colour: {bg_rgb_color}")
+        # Use the same packet format as set_color but with background color in the right position
+        rgb_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
+        rgb_packet[9]  = 0 # Mode "0" leaves the static current mode unchanged
+        rgb_packet[10:13] = self.get_rgb_color()  # Keep current foreground color
+        rgb_packet[13:16] = bg_rgb_color          # Set background color
+        rgb_packet[16]    = self.effect_speed
+        rgb_packet[20]    = sum(rgb_packet[8:19]) & 0xFF # Checksum
+        LOGGER.debug(f"Set background RGB. RGB {bg_rgb_color} Brightness {self.bg_brightness}")
+        return rgb_packet
+    
     def set_color(self, hs_color, brightness):
         # Returns the byte array to set the RGB colour
         self.color_mode = ColorMode.HS
@@ -149,7 +171,7 @@ class Model0x56(DefaultModelAbstraction):
         #self.effect     = EFFECT_OFF # The effect is NOT actually off when setting a colour. Static effect 1 is close to effect off, but it's still an effect.
         rgb_color = self.hsv_to_rgb((hs_color[0], hs_color[1], self.brightness))
         LOGGER.debug(f"Setting RGB colour: {rgb_color}")
-        background_col = [0,0,0] # Consider adding support for this in the future?  For now, set black
+        background_col = self.get_bg_rgb_color()  # Use actual background color from state
         rgb_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
         rgb_packet[9]  = 0 # Mode "0" leaves the static current mode unchanged.  If we want this to switch the device back to an actual static RGB mode change this to 1.
         # Leaving it as zero allows people to use the colour picker to change the colour of the static mode in realtime.  I'm not sure what I prefer.  If people want actual
@@ -297,6 +319,11 @@ class Model0x56(DefaultModelAbstraction):
                 effect_num   = data[12]
                 effect_speed = data[13]
                 rgb_color    = (data[14], data[15], data[16])
+                # Parse background color if available (bytes 17-19)
+                if len(data) >= 20:
+                    bg_rgb_color = (data[17], data[18], data[19])
+                    self.update_bg_color_state(bg_rgb_color)
+                    LOGGER.debug(f"Background RGB colour from status: {bg_rgb_color}")
                 self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15]) # TODO: In "25" mode, brighgtness is byte 14
                 LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
             elif list(data[5:7]) == [0x19, 0x1a]:
@@ -343,6 +370,11 @@ class Model0x56(DefaultModelAbstraction):
                         self.color_mode               = ColorMode.HS
                         self.color_temperature_kelvin = None
                         self.update_color_state(rgb_color)
+                        # Parse background color (bytes 9-11 in payload)
+                        if len(payload) >= 12:
+                            bg_rgb_color = tuple(int(b) for b in payload[9:12])
+                            self.update_bg_color_state(bg_rgb_color)
+                            LOGGER.debug(f"Background RGB colour: {bg_rgb_color}")
                         LOGGER.debug("Light is in colour mode")
                         LOGGER.debug(f"RGB colour: {rgb_color}")
                         LOGGER.debug(f"HS colour: {self.hs_color}")
@@ -353,6 +385,11 @@ class Model0x56(DefaultModelAbstraction):
                         self.effect_speed = payload[5]
                         hs_color = self.rgb_to_hsv(payload[6:9])
                         rgb_color = tuple(int(b) for b in payload[6:9])
+                        # Parse background color for static effects
+                        if len(payload) >= 12:
+                            bg_rgb_color = tuple(int(b) for b in payload[9:12])
+                            self.update_bg_color_state(bg_rgb_color)
+                            LOGGER.debug(f"Background RGB colour: {bg_rgb_color}")
                         LOGGER.debug(f"RGB Color: {rgb_color}, HS colour: {hs_color}, Brightness: {hs_color[2]}")
                         self.hs_color = hs_color[0:2]
                         self.brightness = hs_color[2]

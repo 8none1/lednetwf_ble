@@ -25,6 +25,8 @@ class DefaultModelAbstraction:
         self.color_order                   = None
         self.brightness                    = None
         self.hs_color                      = [0, 100]  # Default to red instead of None to avoid exceptions when enabling effects before selecting a colour
+        self.bg_hs_color                   = [0, 0]    # Background color - defaults to black
+        self.bg_brightness                 = 0         # Background brightness
         self.effect                        = EFFECT_OFF
         self.effect_speed                  = 50
         self.color_mode                    = ColorMode.UNKNOWN
@@ -73,6 +75,17 @@ class DefaultModelAbstraction:
     def get_rgb_color(self):
         # Return RGB colour in the range 0-255
         return self.hsv_to_rgb((self.hs_color[0], self.hs_color[1], self.brightness))
+    def get_bg_hs_color(self):
+        # Return background HS colour in the range 0-360, 0-100 (Home Assistant format)
+        return self.bg_hs_color
+    def get_bg_rgb_color(self):
+        # Return background RGB colour in the range 0-255
+        return self.hsv_to_rgb((self.bg_hs_color[0], self.bg_hs_color[1], self.bg_brightness))
+    def update_bg_color_state(self, rgb_color):
+        # Update background color state from RGB values
+        hsv_color = self.rgb_to_hsv(rgb_color)
+        self.bg_hs_color = tuple(hsv_color[0:2])
+        self.bg_brightness = int(hsv_color[2])
     def turn_on(self):
         self.is_on = True
         return bytearray.fromhex("00 01 80 00 00 0d 0e 0b 3b 23 00 00 00 00 00 00 00 32 00 00 90")

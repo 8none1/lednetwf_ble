@@ -253,6 +253,18 @@ class LEDNETWFInstance:
         return self._model_interface.get_rgb_color()
     
     @property
+    def bg_hs_color(self):
+        return self._model_interface.get_bg_hs_color()
+    
+    @property
+    def bg_rgb_color(self):
+        return self._model_interface.get_bg_rgb_color()
+    
+    @property
+    def bg_brightness(self):
+        return self._model_interface.bg_brightness
+    
+    @property
     def effect_list(self) -> list[str]:
         return self._model_interface.effect_list
 
@@ -281,6 +293,15 @@ class LEDNETWFInstance:
     async def set_hs_color(self, hs: Tuple[int, int], new_brightness: int):
         byte_pattern = self._model_interface.set_color(hs, new_brightness)
         await self._write(byte_pattern)
+    
+    @retry_bluetooth_connection_error
+    async def set_bg_hs_color(self, hs: Tuple[int, int], new_brightness: int):
+        # Only set background color if the model supports it
+        if hasattr(self._model_interface, 'set_bg_color'):
+            byte_pattern = self._model_interface.set_bg_color(hs, new_brightness)
+            await self._write(byte_pattern)
+        else:
+            LOGGER.warning(f"Model {self.model_number:02x} does not support background color")
     
     @retry_bluetooth_connection_error
     async def set_effect(self, effect: str, new_brightness: int):
