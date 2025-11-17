@@ -25,8 +25,8 @@ class DefaultModelAbstraction:
         self.color_order                   = None
         self.brightness                    = None
         self.hs_color                      = [0, 100]  # Default to red instead of None to avoid exceptions when enabling effects before selecting a colour
-        self.bg_hs_color                   = [0, 0]    # Background color - defaults to black
-        self.bg_brightness                 = 0         # Background brightness
+        self.bg_hs_color                   = [0, 0]    # Background color - defaults to white (hue 0, saturation 0 = white)
+        self.bg_brightness                 = 255       # Background brightness - default to full brightness
         self.effect                        = EFFECT_OFF
         self.effect_speed                  = 50
         self.color_mode                    = ColorMode.UNKNOWN

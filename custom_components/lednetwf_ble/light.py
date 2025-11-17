@@ -179,10 +179,12 @@ class LEDNETWFLight(LightEntity):
         if ATTR_BRIGHTNESS in kwargs and ATTR_EFFECT == EFFECT_OFF:
             self._instance._effect = EFFECT_OFF
         
+        # Set foreground color/effect
         if ATTR_COLOR_TEMP_KELVIN in kwargs:
             self._instance._color_mode = ColorMode.COLOR_TEMP
             await self._instance.set_color_temp_kelvin(kwargs[ATTR_COLOR_TEMP_KELVIN], on_brightness)
         elif ATTR_HS_COLOR in kwargs:
+            # set_hs_color -> set_color includes background color in the packet
             await self._instance.set_hs_color(kwargs[ATTR_HS_COLOR], on_brightness)
         elif ATTR_RGB_COLOR in kwargs:
             await self._instance.set_rgb_color(kwargs[ATTR_RGB_COLOR], on_brightness)
@@ -193,6 +195,7 @@ class LEDNETWFLight(LightEntity):
                 LOGGER.warning(f"Cannot set unknown effect: {effect}. Ignoring.")
             else:
                 await self._instance.set_effect(effect, on_brightness)
+        
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -238,8 +241,9 @@ class LEDNETWFBackgroundLight(LightEntity):
         self._instance = lednetwfinstance
         self._entry_id = entry_id
         self._attr_supported_color_modes = {ColorMode.HS}
-        self._attr_name = "Background"
+        self._attr_name = "Background"  # This will be the entity name suffix
         self._attr_unique_id = f"{self._instance.mac}_background"
+        self._device_name = name  # Store the device name for reference
         
     @property
     def available(self):
@@ -289,7 +293,7 @@ class LEDNETWFBackgroundLight(LightEntity):
             identifiers={
                 (DOMAIN, self._instance.mac)
             },
-            name=self._attr_name,
+            # Don't set name here - it will link to existing device with same identifiers
             connections={(device_registry.CONNECTION_NETWORK_MAC, self._instance.mac)},
             model=f"0x{self._instance.model_number:02x}",
             sw_version=self.firmware_version
@@ -315,11 +319,17 @@ class LEDNETWFBackgroundLight(LightEntity):
         if not self._instance.is_on:
             await self._instance.turn_on()
 
+        # Determine brightness - preserve current brightness if not explicitly set
         on_brightness = kwargs.get(ATTR_BRIGHTNESS)
-        if on_brightness is None and self._instance.bg_brightness is not None:
-            on_brightness = self._instance.bg_brightness
-        elif on_brightness is None:
-            on_brightness = 255
+        if on_brightness is None:
+            # If no brightness is specified, use current brightness if reasonable
+            # Threshold of 10 to avoid very dim colors when turning on
+            if self._instance.bg_brightness is not None and self._instance.bg_brightness >= 10:
+                on_brightness = self._instance.bg_brightness
+            else:
+                # Default to full brightness when turning on from off/very dim state
+                on_brightness = 255
+                LOGGER.debug(f"Background brightness was {self._instance.bg_brightness}, defaulting to 255")
 
         if ATTR_HS_COLOR in kwargs:
             await self._instance.set_bg_hs_color(kwargs[ATTR_HS_COLOR], on_brightness)
@@ -329,7 +339,7 @@ class LEDNETWFBackgroundLight(LightEntity):
             hs = color_RGB_to_hs(*kwargs[ATTR_RGB_COLOR])
             await self._instance.set_bg_hs_color(hs, on_brightness)
         else:
-            # Just brightness change
+            # Just turning on or brightness change - preserve color
             await self._instance.set_bg_hs_color(self._instance.bg_hs_color, on_brightness)
         
         self.async_write_ha_state()
