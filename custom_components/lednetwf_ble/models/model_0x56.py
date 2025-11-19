@@ -60,16 +60,8 @@ class Model0x56(DefaultModelAbstraction):
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
-            # Parse background color from bytes 21-23
-            bg_rgb_color = (self.manu_data[21], self.manu_data[22], self.manu_data[23])
-            # Only parse background color if it's not off/very dim, otherwise keep default
-            if max(bg_rgb_color) > 0: # was >= 10 
-                self.update_bg_color_state(bg_rgb_color)
-                LOGGER.debug(f"From manu Background RGB colour: {bg_rgb_color}")
-                LOGGER.debug(f"From manu Background HS colour: {self.bg_hs_color}")
-                LOGGER.debug(f"From manu Background Brightness: {self.bg_brightness}")
-            else:
-                LOGGER.debug(f"From manu Background RGB colour is dim/off: {bg_rgb_color}, keeping default (black/off)")
+            # Background color is NOT encoded in manufacturer data - use default from parent class
+            LOGGER.debug(f"Background color not in manu data, using default: HS {self.bg_hs_color}, brightness {self.bg_brightness}")
             if self.manu_data[16] != 0xf0:
                 # We're not in a colour mode, so set the effect
                 self.effect_speed = self.manu_data[17]
