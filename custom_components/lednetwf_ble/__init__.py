@@ -47,6 +47,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
+    LOGGER.debug(f"Update listener called for {entry.title}")
+    LOGGER.debug(f"Entry options: {entry.options}")
+    LOGGER.debug(f"Entry data: {entry.data}")
     #instance = hass.data[DOMAIN][entry.entry_id]
     instance: LEDNETWFInstance = hass.data[DOMAIN][entry.entry_id]
     instance._ignore_notifications = entry.options.get(CONF_IGNORE_NOTIFICATIONS, False)

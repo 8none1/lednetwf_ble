@@ -50,7 +50,14 @@ class DefaultModelAbstraction:
             self.fw_major          = self.manu_data[0]
             self.fw_minor          = f'{self.manu_data[8]:02X}{self.manu_data[9]:02X}.{self.manu_data[10]:02X}'
             self.led_count         = self.manu_data[24]
-            self.is_on             = True if self.manu_data[14] == 0x23 else False
+            # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
+            if self.manu_data[14] == 0x23:
+                self.is_on = True
+            elif self.manu_data[14] == 0x24:
+                self.is_on = False
+            else:
+                LOGGER.warning(f"Unknown power state in manu data: 0x{self.manu_data[14]:02X}, setting to None")
+                self.is_on = None
         else:
             LOGGER.debug("No manu data")
             self.manu_data         = bytearray(25)
@@ -59,7 +66,7 @@ class DefaultModelAbstraction:
             self.led_count         = None
             self.chip_type         = None
             self.color_order       = None
-            self.is_on             = False # Needs to be something which isn't None or the device won't be "available"
+            self.is_on             = None  # No data means unknown state
 
     def detect_model(self):
         raise NotImplementedError("This method should be implemented by the subclass")

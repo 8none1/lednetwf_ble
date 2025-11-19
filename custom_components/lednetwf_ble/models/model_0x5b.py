@@ -88,7 +88,13 @@ class Model0x5b(DefaultModelAbstraction):
                 self.led_count               = 1
                 self.color_mode              = ColorMode.BRIGHTNESS
                 # self.brightness   = int(self.manu_data[18] * 255 // 100)
-                self.is_on        = True if self.manu_data[14] == 0x23 else False
+                if self.manu_data[14] == 0x23:
+                    self.is_on = True
+                elif self.manu_data[14] == 0x24:
+                    self.is_on = False
+                else:
+                    LOGGER.warning(f'Unknown power state in effect mode: 0x{self.manu_data[14]:02X}, setting to None')
+                    self.is_on = None
 
         # LOGGER.debug(f"Effect: {self.effect}")
         # LOGGER.debug(f"Effect speed: {self.effect_speed}")
@@ -214,6 +220,7 @@ class Model0x5b(DefaultModelAbstraction):
             if first_quote > 0:
                 payload = notification_data[first_quote+1:last_quote]
                 if any(c not in "0123456789abcdefABCDEF" for c in payload):
+                    LOGGER.debug(f"Non-hex notification received (ignoring): {payload}")
                     return None
             else:
                 return None
@@ -222,8 +229,8 @@ class Model0x5b(DefaultModelAbstraction):
         LOGGER.debug(f"N: Notification Payload after processing: {payload}")
         try:
             payload = bytearray.fromhex(payload)
-        except ValueError as e:
-            LOGGER.error(f"Error decoding notification data: {e}")
+        except ValueError:
+            LOGGER.debug(f"Failed to parse hex payload (ignoring): {payload}")
             return None
         
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{byte:02X}' for byte in payload])}")
@@ -233,7 +240,13 @@ class Model0x5b(DefaultModelAbstraction):
             mode            = payload[3]
             selected_effect = payload[4]
             # self.led_count  = payload[12] # These devices don't send LED count in the same place I think
-            self.is_on      = True if power == 0x23 else False
+            if power == 0x23:
+                self.is_on = True
+            elif power == 0x24:
+                self.is_on = False
+            else:
+                LOGGER.warning(f'Unknown power state in notification: 0x{power:02X}, setting to None')
+                self.is_on = None
 
             if mode == 0x61:
                 # Solid colour mode

@@ -153,7 +153,11 @@ class Model0x53(DefaultModelAbstraction):
             self.led_count = None
         else:
             if self.manu_data[15] == 0x61:
-                if self.manu_data[16] == 0xf0:
+                #if self.manu_data[16] == 0xf0:
+                if self.manu_data[16] in (0xF0, 0x01, 0x0B): # See: https://github.com/8none1/lednetwf_ble/issues/58
+                    # It sounds like 01 and 0B are probably effects mode and music mode 
+                    # and/or likely to the same as for 0x56 devices.  So TODO: fix this properly, but for now
+                    # this does at least allow the lights to work.
                     # RGB mode
                     rgb_color       = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
                     self.hs_color   = tuple(super().rgb_to_hsv(rgb_color)[0:2])
@@ -300,7 +304,14 @@ class Model0x53(DefaultModelAbstraction):
                 return None
         else:
             return None
-        payload = bytearray.fromhex(payload)
+        if not all(c in "0123456789abcdefABCDEF" for c in payload):
+            LOGGER.debug(f"Non-hex notification received (ignoring): {payload}")
+            return None
+        try:
+            payload = bytearray.fromhex(payload)
+        except ValueError:
+            LOGGER.debug(f"Failed to parse hex payload (ignoring): {payload}")
+            return None
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{byte:02X}' for byte in payload])}")
         if payload[0] == 0x81:
             # Status request response

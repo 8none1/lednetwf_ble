@@ -244,6 +244,7 @@ class LEDNETWFBackgroundLight(LightEntity):
         self._attr_name = "Background"  # This will be the entity name suffix
         self._attr_unique_id = f"{self._instance.mac}_background"
         self._device_name = name  # Store the device name for reference
+        self._is_on = True  # Track on/off state independently from brightness
         
     @property
     def available(self):
@@ -259,8 +260,8 @@ class LEDNETWFBackgroundLight(LightEntity):
     
     @property
     def is_on(self) -> Optional[bool]:
-        # Background light is on if main light is on and bg brightness > 0
-        return self._instance.is_on and self._instance.bg_brightness > 0
+        # Background light has its own on/off state, independent of brightness value
+        return self._instance.is_on and self._is_on
 
     @property
     def supported_color_modes(self) -> int:
@@ -319,6 +320,9 @@ class LEDNETWFBackgroundLight(LightEntity):
         if not self._instance.is_on:
             await self._instance.turn_on()
 
+        # Mark as on
+        self._is_on = True
+
         # Determine brightness - preserve current brightness if not explicitly set
         on_brightness = kwargs.get(ATTR_BRIGHTNESS)
         if on_brightness is None:
@@ -327,9 +331,14 @@ class LEDNETWFBackgroundLight(LightEntity):
             if self._instance.bg_brightness is not None and self._instance.bg_brightness >= 10:
                 on_brightness = self._instance.bg_brightness
             else:
-                # Default to full brightness when turning on from off/very dim state
-                on_brightness = 255
-                LOGGER.debug(f"Background brightness was {self._instance.bg_brightness}, defaulting to 255")
+                # Check if we have a saved brightness from before turning off
+                if hasattr(self, '_last_brightness') and self._last_brightness >= 10:
+                    on_brightness = self._last_brightness
+                    LOGGER.debug(f"Restoring last brightness: {on_brightness}")
+                else:
+                    # Default to full brightness when turning on from off/very dim state
+                    on_brightness = 255
+                    LOGGER.debug(f"Background brightness was {self._instance.bg_brightness}, defaulting to 255")
 
         if ATTR_HS_COLOR in kwargs:
             await self._instance.set_bg_hs_color(kwargs[ATTR_HS_COLOR], on_brightness)
@@ -345,7 +354,13 @@ class LEDNETWFBackgroundLight(LightEntity):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        # Set background to black (brightness 0)
+        # Save current brightness before turning off (if it's reasonable)
+        if self._instance.bg_brightness >= 10:
+            self._last_brightness = self._instance.bg_brightness
+            LOGGER.debug(f"Saving brightness {self._last_brightness} before turn off")
+        
+        # Mark as off and set background to black (brightness 0)
+        self._is_on = False
         await self._instance.set_bg_hs_color(self._instance.bg_hs_color, 0)
         self.async_write_ha_state()
 

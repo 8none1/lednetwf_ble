@@ -67,7 +67,14 @@ class Model0x54(DefaultModelAbstraction):
             self.hs_color = tuple(super().rgb_to_hsv(rgb_color))[0:2]
             self.brightness = (super().rgb_to_hsv(rgb_color)[2])
             self.color_mode = ColorMode.HS
-            self.is_on = True if self.manu_data[14] == 0x23 else False
+            # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
+            if self.manu_data[14] == 0x23:
+                self.is_on = True
+            elif self.manu_data[14] == 0x24:
+                self.is_on = False
+            else:
+                LOGGER.warning(f"Unknown power state in manu data: 0x{self.manu_data[14]:02X}, setting to None")
+                self.is_on = None
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
@@ -204,13 +211,13 @@ class Model0x54(DefaultModelAbstraction):
         else:
             return None
         if not all(c in "0123456789abcdefABCDEF" for c in payload):
-            LOGGER.warning(f"Invalid hex characters in payload: {payload}")
+            LOGGER.debug(f"Non-hex notification received (ignoring): {payload}")
             return None
         
         try:
             payload = bytearray.fromhex(payload)
         except ValueError as e:
-            LOGGER.error(f"Failed to parse hex payload '{payload}': {e}")
+            LOGGER.debug(f"Failed to parse hex payload (ignoring): {payload}")
             return None
         #payload = bytearray.fromhex(payload)
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{i}:{byte:02X}' for i, byte in enumerate(payload)])}")
