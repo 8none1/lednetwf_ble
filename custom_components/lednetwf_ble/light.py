@@ -98,7 +98,7 @@ class LEDNETWFLight(LightEntity):
         return self._attr_supported_features
 
     @property
-    def supported_color_modes(self) -> int:
+    def supported_color_modes(self) -> set[ColorMode]:
         """Flag supported color modes."""
         return self._attr_supported_color_modes
 
@@ -270,7 +270,7 @@ class LEDNETWFBackgroundLight(LightEntity):
         return self._instance.is_on and self._is_on
 
     @property
-    def supported_color_modes(self) -> int:
+    def supported_color_modes(self) -> set[ColorMode]:
         """Flag supported color modes."""
         return self._attr_supported_color_modes
 
