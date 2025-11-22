@@ -46,8 +46,13 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
             git add custom_components/lednetwf_ble/manifest.json
-            git commit -m "Bump version to ${{ steps.vars.outputs.version }}"
-            git push origin HEAD:main
+            # Only commit if there are changes
+            if git diff --staged --quiet; then
+              echo "No changes to commit - version already up to date"
+            else
+              git commit -m "Bump version to ${{ steps.vars.outputs.version }}"
+              git push origin HEAD:main
+            fi
 
       - name: Create ZIP
         run: |
