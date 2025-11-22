@@ -32,6 +32,8 @@
       "already_configured": "Este dispositivo ya ha sido configurado.",
       "no_devices_found": "No se encontraron luces LEDnetWF compatibles cerca.",
       "cannot_connect": "No se pudo conectar al dispositivo. Asegúrese de que esté encendido y cerca.",
+      "device_unreachable": "El dispositivo no es accesible o está apagado. Asegúrese de que el dispositivo esté encendido, cerca y que ningún otro dispositivo esté conectado a él.",
+      "device_not_ready": "El dispositivo no está listo. Datos del fabricante no disponibles. Por favor, asegúrese de que el dispositivo esté transmitiendo correctamente e inténtelo de nuevo.",
       "unknown": "Ocurrió un error inesperado. Por favor, inténtelo de nuevo."
     },
     "abort": {

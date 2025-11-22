@@ -5,13 +5,13 @@ from .model_abstractions import DefaultModelAbstraction
 from .. import const
 from enum import Enum
 import logging
-LOGGER = logging.getLogger(__name__)
 
 from homeassistant.components.light import (
     ColorMode,
     EFFECT_OFF
 )
 
+LOGGER = logging.getLogger(__name__)
 SUPPORTED_MODELS = [0x54, 0x55, 0x62]
 
 # This device only supports three colour orders, so override the defaults with our own
@@ -60,14 +60,18 @@ class Model0x54(DefaultModelAbstraction):
         LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
         LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
         # return
+        # Power state is already set by parent class from manu_data[14]
+        # Just handle the 0x38 (off) case specifically
         if self.manu_data[15] == 0x38:
+            # Device is definitely off
             self.is_on = False
-        if self.manu_data[15] == 0x61:
+        elif self.manu_data[15] == 0x61:
+            # Color mode - parse RGB color
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
             self.hs_color = tuple(super().rgb_to_hsv(rgb_color))[0:2]
             self.brightness = (super().rgb_to_hsv(rgb_color)[2])
             self.color_mode = ColorMode.HS
-            self.is_on = True if self.manu_data[14] == 0x23 else False
+            # Power state already handled by parent class
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
@@ -122,12 +126,12 @@ class Model0x54(DefaultModelAbstraction):
         if effect not in EFFECT_LIST_0x54:
             raise ValueError(f"Effect '{effect}' not in EFFECTS_LIST_0x54")
         self.effect = effect
-        self.brightness = brightness
+        # Ensure brightness is in valid range (0-255)
+        self.brightness = min(255, max(0, brightness)) if brightness is not None else 255
         effect_id = EFFECT_MAP_0x54.get(effect)
         
-        if effect_id == 0: # Effect off
-            self.set_color(self.hs_color, self.brightness)
-            return None
+        if effect_id == 0: # Effect off - switch to color mode
+            return self.set_color(self.hs_color, self.brightness)
         
         if 100 <= effect_id <= 200: # Candle mode
             effect_packet = bytearray.fromhex("00 04 80 00 00 09 0a 0b 39 d1 ff 00 00 18 2e 03 52")
@@ -136,10 +140,11 @@ class Model0x54(DefaultModelAbstraction):
             effect_packet[14]    = self.get_brightness_percent()
             effect_packet[16]    = sum(effect_packet[8:16]) & 0xFF
             LOGGER.debug(f"Candle effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
-            return effect_packet
+            #return effect_packet
         if 200 <= effect_id <= 300: # Sound reactive mode
             LOGGER.debug("Sound reactive mode not implemented")
-            return None
+            #return None
+            effect_packet = None
         else:
             effect_packet     = bytearray.fromhex("00 15 80 00 00 05 06 0b 38 25 01 64 c2")
             self.color_mode   = ColorMode.BRIGHTNESS # 2024.2 Allows setting color mode for changing effects brightness.  Effects above here support RGB, so only set here.
@@ -151,8 +156,10 @@ class Model0x54(DefaultModelAbstraction):
             effect_packet[11] = self.get_brightness_percent()
             effect_packet[12] = sum(effect_packet[8:11]) & 0xFF
             LOGGER.debug(f"Effect packet: {' '.join([f'{byte:02X}' for byte in effect_packet])}")
-            return effect_packet
-    
+        LOGGER.debug(f"Set Effect. Effect {self.effect} Brightness {self.get_brightness_percent()} Speed {self.effect_speed}")
+        LOGGER.debug(f"Effect packet to send: {' '.join([f'0x{byte:02x}' for byte in effect_packet]) if effect_packet else 'None'}")
+        return effect_packet
+        
     def set_brightness(self, brightness):
         if brightness == self.brightness:
             LOGGER.debug(f"Brightness already set to {brightness}")
@@ -194,25 +201,45 @@ class Model0x54(DefaultModelAbstraction):
     
     def notification_handler(self, data):
         notification_data = data.decode("utf-8", errors="ignore")
-        last_quote = notification_data.rfind('"')
-        if last_quote > 0:
-            first_quote = notification_data.rfind('"', 0, last_quote)
-            if first_quote > 0:
-                payload = notification_data[first_quote+1:last_quote]
-            else:
+        
+        # Check if this is a JSON-wrapped notification (0x62 devices)
+        if notification_data.strip().startswith('{'):
+            try:
+                import json
+                json_data = json.loads(notification_data)
+                # Check if payload is a hex string (not a nested object)
+                if isinstance(json_data.get('payload'), str):
+                    payload = json_data['payload']
+                else:
+                    # This is device info JSON, not state - ignore it
+                    LOGGER.debug(f"JSON device info notification (ignoring): {json_data}")
+                    return None
+            except (json.JSONDecodeError, KeyError) as e:
+                LOGGER.debug(f"Failed to parse JSON notification: {e}")
                 return None
         else:
-            return None
+            # Original format: extract hex from quotes
+            last_quote = notification_data.rfind('"')
+            if last_quote > 0:
+                first_quote = notification_data.rfind('"', 0, last_quote)
+                if first_quote > 0:
+                    payload = notification_data[first_quote+1:last_quote]
+                else:
+                    return None
+            else:
+                return None
+        
+        # Validate and parse hex payload
         if not all(c in "0123456789abcdefABCDEF" for c in payload):
-            LOGGER.warning(f"Invalid hex characters in payload: {payload}")
+            LOGGER.debug(f"Non-hex notification received (ignoring): {payload}")
             return None
         
         try:
             payload = bytearray.fromhex(payload)
-        except ValueError as e:
-            LOGGER.error(f"Failed to parse hex payload '{payload}': {e}")
+        except ValueError:
+            LOGGER.debug(f"Failed to parse hex payload (ignoring): {payload}")
             return None
-        #payload = bytearray.fromhex(payload)
+        
         LOGGER.debug(f"N: Response Payload: {' '.join([f'{i}:{byte:02X}' for i, byte in enumerate(payload)])}")
         # return
         if payload[0] == 0x81:
@@ -228,11 +255,16 @@ class Model0x54(DefaultModelAbstraction):
                     rgb_color = (payload[6], payload[7], payload[8])
                     hsv_color = super().rgb_to_hsv(rgb_color)
                     self.hs_color = tuple(hsv_color[0:2])
-                    #self.brightness = int(hsv_color[2] * 255 // 100)
-                    self.brightness = int(hsv_color[2]) # It's coming back here already scaled to 0-255.  Why are we doing it again above?
-                    # Maybe this bug has always been here and the brightness has never worked properly?
-                    # Yes looks like it has.  Fixed here, and in 0x53.
-                    # TODO: Fix the others
+                    
+                    # Don't recalculate brightness from RGB - preserve what we sent
+                    # Device may round RGB values causing brightness drift
+                    # Only update brightness if it's currently None (initial state)
+                    if self.brightness is None or self.brightness == 0:
+                        self.brightness = int(hsv_color[2])
+                        # Ensure non-zero default brightness for powered on devices
+                        if self.brightness == 0:
+                            self.brightness = 255
+                    
                     LOGGER.debug(f"RGB colour: {rgb_color}")
                     LOGGER.debug(f"HS colour: {self.hs_color}")
                     LOGGER.debug(f"Brightness: {self.brightness}")
@@ -240,9 +272,30 @@ class Model0x54(DefaultModelAbstraction):
                     self.effect = EFFECT_OFF
                     self.color_mode = ColorMode.HS
                     self.color_temperature_kelvin = None
+            elif mode in EFFECT_ID_TO_NAME_0x54:
+                # Effect mode - the mode byte IS the effect ID!
+                # Effect IDs range from 36-100, plus special values (100=Candle, 200=Sound)
+                # Byte 3 is the effect ID (0x2E = Effect 10, 0x37 = Effect 19, etc.)
+                # Byte 4 is 0x23 (consistent across modes, meaning unclear - sub-mode?)
+                # Byte 5 is the effect speed (inverted: 0x01=fastest/100%, 0x1F=slowest/1%)
+                effect_id = mode  # mode byte IS the effect ID!
+                selected_effect = payload[4]  # Always 0x23 in observed cases
+                # Convert device speed (0x01-0x1F) to percentage (100%-1%)
+                speed_raw = payload[5]
+                self.effect_speed = round((0x1f - speed_raw) * (100 - 1) / (0x1f - 0x01) + 1)
+                self.color_mode = ColorMode.BRIGHTNESS
+                self.effect = EFFECT_ID_TO_NAME_0x54[effect_id]
+                LOGGER.debug(f"Effect mode: {self.effect} (ID: 0x{effect_id:02X}, Speed: {self.effect_speed}% [raw: 0x{speed_raw:02X}])")
+                
+                # Effect mode notifications don't contain brightness data
+                # Bytes 6-8 are not RGB color - meaning unknown
+                # Brightness is controlled but not echoed back by the device
+                # Keep existing brightness value, default to 255 if not set
+                if self.brightness is None or self.brightness == 0:
+                    self.brightness = 255
             elif mode == 0x5f:
-                # I think this is effect mode
-                LOGGER.debug(f"Effect mode notification?")
+                # Alternative effect mode identifier
+                LOGGER.debug("Effect mode notification (0x5f)?")
             #     elif selected_effect == 0x01:
             #         self.color_mode = ColorMode.HS
             #         self.effect = EFFECT_OFF
@@ -271,7 +324,7 @@ class Model0x54(DefaultModelAbstraction):
             #     self.brightness = int(payload[6] * 255 // 100)
         
         elif payload[1] == 0x63:
-            LOGGER.debug(f"LED settings response received")
+            LOGGER.debug("LED settings response received")
             #self.led_count = int.from_bytes(bytes([payload[2], payload[3]]), byteorder='big') * payload[5]
             #self.chip_type = const.LedTypes_StripLight.from_value(payload[6])
             #self.color_order = const.ColorOrdering.from_value(payload[7])

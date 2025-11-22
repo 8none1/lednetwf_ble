@@ -25,6 +25,8 @@ class DefaultModelAbstraction:
         self.color_order                   = None
         self.brightness                    = None
         self.hs_color                      = [0, 100]  # Default to red instead of None to avoid exceptions when enabling effects before selecting a colour
+        self.bg_hs_color                   = [0, 0]    # Background color - defaults to white (hue 0, saturation 0 = white)
+        self.bg_brightness                 = 255       # Background brightness - default to full brightness
         self.effect                        = EFFECT_OFF
         self.effect_speed                  = 50
         self.color_mode                    = ColorMode.UNKNOWN
@@ -48,7 +50,14 @@ class DefaultModelAbstraction:
             self.fw_major          = self.manu_data[0]
             self.fw_minor          = f'{self.manu_data[8]:02X}{self.manu_data[9]:02X}.{self.manu_data[10]:02X}'
             self.led_count         = self.manu_data[24]
-            self.is_on             = True if self.manu_data[14] == 0x23 else False
+            # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
+            if self.manu_data[14] == 0x23:
+                self.is_on = True
+            elif self.manu_data[14] == 0x24:
+                self.is_on = False
+            else:
+                LOGGER.warning(f"Unknown power state in manu data: 0x{self.manu_data[14]:02X}, setting to None")
+                self.is_on = None
         else:
             LOGGER.debug("No manu data")
             self.manu_data         = bytearray(25)
@@ -57,7 +66,7 @@ class DefaultModelAbstraction:
             self.led_count         = None
             self.chip_type         = None
             self.color_order       = None
-            self.is_on             = False # Needs to be something which isn't None or the device won't be "available"
+            self.is_on             = None  # No data means unknown state
 
     def detect_model(self):
         raise NotImplementedError("This method should be implemented by the subclass")
@@ -73,6 +82,17 @@ class DefaultModelAbstraction:
     def get_rgb_color(self):
         # Return RGB colour in the range 0-255
         return self.hsv_to_rgb((self.hs_color[0], self.hs_color[1], self.brightness))
+    def get_bg_hs_color(self):
+        # Return background HS colour in the range 0-360, 0-100 (Home Assistant format)
+        return self.bg_hs_color
+    def get_bg_rgb_color(self):
+        # Return background RGB colour in the range 0-255
+        return self.hsv_to_rgb((self.bg_hs_color[0], self.bg_hs_color[1], self.bg_brightness))
+    def update_bg_color_state(self, rgb_color):
+        # Update background color state from RGB values
+        hsv_color = self.rgb_to_hsv(rgb_color)
+        self.bg_hs_color = tuple(hsv_color[0:2])
+        self.bg_brightness = int(hsv_color[2])
     def turn_on(self):
         self.is_on = True
         return bytearray.fromhex("00 01 80 00 00 0d 0e 0b 3b 23 00 00 00 00 00 00 00 32 00 00 90")

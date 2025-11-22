@@ -89,7 +89,6 @@ Search for "LEDnetWF BLE" and click install.  You will also get notified of futu
 - **Device Detection**: Many settings (LED count, type, color order, segments) are automatically detected from supported devices during setup. Manual configuration may be needed for older devices or if auto-detection fails.
 - **Effect Performance**: Incorrect LED count or type settings may cause effects to display incorrectly or perform poorly.
 
-
 ## Credits
 
 This integration is possible thanks to the work of this incredible people!

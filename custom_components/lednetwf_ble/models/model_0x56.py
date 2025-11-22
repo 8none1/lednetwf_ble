@@ -51,6 +51,7 @@ class Model0x56(DefaultModelAbstraction):
             self.INITIAL_PACKET             = bytearray.fromhex("00 01 80 00 00 0c 0d 0b 10 14 19 09 05 0d 2b 38 05 00 0f cf")
             self.GET_DEVICE_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 02 03 17 22 22")
             self.GET_LED_SETTINGS_PACKET    = bytearray.fromhex("00 05 80 00 00 05 06 0a 63 12 21 0f a5")
+            self.GET_STATUS_PACKET          = bytearray.fromhex("00 14 80 00 00 05 06 0a 44 4a 4b 0f e8")
 
         if self.manu_data[15] == 0x61:
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
@@ -60,11 +61,18 @@ class Model0x56(DefaultModelAbstraction):
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
+            # Background color is NOT encoded in manufacturer data - use default from parent class
+            LOGGER.debug(f"Background color not in manu data, using default: HS {self.bg_hs_color}, brightness {self.bg_brightness}")
             if self.manu_data[16] != 0xf0:
                 # We're not in a colour mode, so set the effect
                 self.effect_speed = self.manu_data[17]
                 if 0x01 <= self.manu_data[16] <= 0x0a:
-                    self.effect = EFFECT_ID_TO_NAME_0x56[self.manu_data[16] << 8]
+                    scaled_effect = self.manu_data[16] << 8
+                    if scaled_effect in EFFECT_ID_TO_NAME_0x56:
+                        self.effect = EFFECT_ID_TO_NAME_0x56[scaled_effect]
+                    else:
+                        LOGGER.warning(f"Unknown static effect: 0x{self.manu_data[16]:02X} (scaled: {scaled_effect}), defaulting to EFFECT_OFF")
+                        self.effect = EFFECT_OFF
                 else:
                     self.effect = EFFECT_OFF
         elif self.manu_data[15] == 0x62:
@@ -72,11 +80,20 @@ class Model0x56(DefaultModelAbstraction):
             self._color_mode = ColorMode.BRIGHTNESS
             effect = self.manu_data[16]
             scaled_effect = (effect + 0x32) << 8
-            self.effect = EFFECT_ID_TO_NAME_0x56[scaled_effect]
+            if scaled_effect in EFFECT_ID_TO_NAME_0x56:
+                self.effect = EFFECT_ID_TO_NAME_0x56[scaled_effect]
+            else:
+                LOGGER.warning(f"Unknown music reactive effect: 0x{effect:02X} (scaled: {scaled_effect}), defaulting to EFFECT_OFF")
+                self.effect = EFFECT_OFF
+                self._color_mode = ColorMode.HS
         elif self.manu_data[15] == 0x25:
             # Effect mode
             effect = self.manu_data[16]
-            self.effect = EFFECT_ID_TO_NAME_0x56[effect]
+            if effect in EFFECT_ID_TO_NAME_0x56:
+                self.effect = EFFECT_ID_TO_NAME_0x56[effect]
+            else:
+                LOGGER.warning(f"Unknown effect: 0x{effect:02X}, defaulting to EFFECT_OFF")
+                self.effect = EFFECT_OFF
             self.effect_speed = self.manu_data[17]
             self.brightness   = int(self.manu_data[18] * 255 // 100)
             self.color_mode   = ColorMode.BRIGHTNESS
@@ -109,8 +126,15 @@ class Model0x56(DefaultModelAbstraction):
         self.hs_color = tuple(hsv_color[0:2])
         self.brightness = int(hsv_color[2])
     
-    def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None):
-        LOGGER.debug(f"Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255}")
+    def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None, bg_rgb_color=None):
+        LOGGER.debug(f"Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255 if brightness is not None else 'None'}, BG RGB: {bg_rgb_color}")
+        
+        # Update background color if provided
+        if bg_rgb_color is not None and max(bg_rgb_color) >= 10:
+            self.update_bg_color_state(bg_rgb_color)
+            LOGGER.debug(f"Updated background from notification: RGB {bg_rgb_color}, HS: {self.bg_hs_color}, brightness: {self.bg_brightness}")
+        
+
         if mode == 0x61:
             if selected_effect == 0xf0:
                 self.update_color_state(rgb_color)
@@ -141,6 +165,22 @@ class Model0x56(DefaultModelAbstraction):
             self.color_mode = ColorMode.BRIGHTNESS
             #self.brightness = int(brightness * 255 // 100)
     
+    def set_bg_color(self, hs_color, brightness):
+        # Returns the byte array to set the background RGB colour
+        self.bg_hs_color = hs_color
+        self.bg_brightness = brightness
+        bg_rgb_color = self.hsv_to_rgb((hs_color[0], hs_color[1], self.bg_brightness))
+        LOGGER.debug(f"Setting background RGB colour: {bg_rgb_color}")
+        # Use the same packet format as set_color but with background color in the right position
+        rgb_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
+        rgb_packet[9]  = 0 # Mode "0" leaves the static current mode unchanged
+        rgb_packet[10:13] = self.get_rgb_color()  # Keep current foreground color
+        rgb_packet[13:16] = bg_rgb_color          # Set background color
+        rgb_packet[16]    = self.effect_speed
+        rgb_packet[20]    = sum(rgb_packet[8:19]) & 0xFF # Checksum
+        LOGGER.debug(f"Set background RGB. RGB {bg_rgb_color} Brightness {self.bg_brightness}")
+        return rgb_packet
+    
     def set_color(self, hs_color, brightness):
         # Returns the byte array to set the RGB colour
         self.color_mode = ColorMode.HS
@@ -148,8 +188,9 @@ class Model0x56(DefaultModelAbstraction):
         self.brightness = brightness
         #self.effect     = EFFECT_OFF # The effect is NOT actually off when setting a colour. Static effect 1 is close to effect off, but it's still an effect.
         rgb_color = self.hsv_to_rgb((hs_color[0], hs_color[1], self.brightness))
-        LOGGER.debug(f"Setting RGB colour: {rgb_color}")
-        background_col = [0,0,0] # Consider adding support for this in the future?  For now, set black
+        LOGGER.debug(f"Setting foreground RGB colour: {rgb_color}")
+        background_col = self.get_bg_rgb_color()  # Use actual background color from state
+        LOGGER.debug(f"Including background RGB colour: {background_col} (from HS: {self.bg_hs_color}, brightness: {self.bg_brightness})")
         rgb_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
         rgb_packet[9]  = 0 # Mode "0" leaves the static current mode unchanged.  If we want this to switch the device back to an actual static RGB mode change this to 1.
         # Leaving it as zero allows people to use the colour picker to change the colour of the static mode in realtime.  I'm not sure what I prefer.  If people want actual
@@ -159,7 +200,7 @@ class Model0x56(DefaultModelAbstraction):
         rgb_packet[13:16] = background_col
         rgb_packet[16]    = self.effect_speed
         rgb_packet[20]    = sum(rgb_packet[8:19]) & 0xFF # Checksum
-        LOGGER.debug(f"Set RGB. RGB {self.get_rgb_color()} Brightness {self.brightness}")
+        LOGGER.debug(f"Set color packet: {' '.join([f'{byte:02X}' for byte in rgb_packet])} (FG bytes 10-12, BG bytes 13-15)")
         return rgb_packet
 
     def set_effect(self, effect, brightness):
@@ -190,9 +231,10 @@ class Model0x56(DefaultModelAbstraction):
             effect_packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 41 02 ff 00 00 00 00 00 32 00 00 f0 64")
             effect_packet[9] = effect_id
             effect_packet[10:13] = self.get_rgb_color()
+            effect_packet[13:16] = self.get_bg_rgb_color()  # Include background color
             effect_packet[16] = self.effect_speed
             effect_packet[20] = sum(effect_packet[8:19]) & 0xFF # checksum
-            LOGGER.debug(f"static effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+            LOGGER.debug(f"Static effect packet: {' '.join([f'{byte:02X}' for byte in effect_packet])} (FG bytes 10-12, BG bytes 13-15)")
             return effect_packet
         
         if 0x2100 <= effect_id <= 0x4100: # Music mode.
@@ -204,11 +246,11 @@ class Model0x56(DefaultModelAbstraction):
             effect_packet[9]     = 1 # On
             effect_packet[11]    = effect_id
             effect_packet[12:15] = self.get_rgb_color()
-            effect_packet[15:18] = self.get_rgb_color() # maybe background colour?
+            effect_packet[15:18] = self.get_bg_rgb_color()  # Background colour
             effect_packet[18]    = self.effect_speed # Actually sensitivity, but would like to avoid another slider if possible
             effect_packet[19]    = self.get_brightness_percent()
             effect_packet[20]    = sum(effect_packet[8:19]) & 0xFF
-            LOGGER.debug(f"music effect packet : {' '.join([f'{byte:02X}' for byte in effect_packet])}")
+            LOGGER.debug(f"Music effect packet: {' '.join([f'{byte:02X}' for byte in effect_packet])} (FG bytes 12-14, BG bytes 15-17)")
             return effect_packet
         
         effect_packet     = bytearray.fromhex("00 00 80 00 00 05 06 0b 42 01 32 64 d9")
@@ -292,22 +334,34 @@ class Model0x56(DefaultModelAbstraction):
             #     LOGGER.debug("Get device settings response received")
             elif list(data[5:7]) == [0x0e, 0x0f]:
                 LOGGER.debug("Normal Status response received")
-                self.is_on = True if data[10] == 0x23 else False
-                mode_type    = data[11]
-                effect_num   = data[12]
-                effect_speed = data[13]
-                rgb_color    = (data[14], data[15], data[16])
-                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15]) # TODO: In "25" mode, brighgtness is byte 14
-                LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
+                # This response format doesn't reliably include power state - skip parsing it
+                # The device is responding so it must be powered on
+                mode_type    = data[8]
+                effect_num   = data[9]
+                effect_speed = data[17]
+                rgb_color    = (data[11], data[12], data[13])  # Foreground RGB at bytes 11-13
+                bg_rgb_color = (data[14], data[15], data[16])  # Background RGB at bytes 14-16
+                LOGGER.debug(f"Foreground RGB from notification: {rgb_color}, Background RGB: {bg_rgb_color}")
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[12], bg_rgb_color=bg_rgb_color)
+                LOGGER.debug(f"Status response. RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
             elif list(data[5:7]) == [0x19, 0x1a]:
                 LOGGER.debug("Normal Status response received - Long type")
-                self.is_on = True if data[14] == 0x23 else False
+                # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
+                if data[14] == 0x23:
+                    self.is_on = True
+                elif data[14] == 0x24:
+                    self.is_on = False
+                else:
+                    LOGGER.warning(f"Unknown power state byte 0x{data[14]:02X}, setting to None")
+                    self.is_on = None
                 mode_type    = data[15]
                 effect_num   = data[16]
                 effect_speed = data[17]
-                # for mode 0x66 (single color) & 0x67  (build-in effects)this does NOT contain the RGB colour! Also brightness does not seem to be in this reponse
-                rgb_color    = (data[18], data[19], data[20])  
-                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15]) # TODO: In "25" mode, brighgtness is byte 14
+                # for mode 0x66 (single color) & 0x67  (build-in effects)this does NOT contain the RGB colour! Also brightness does not seem to be in this response
+                rgb_color    = (data[18], data[19], data[20])
+                # Background color is NOT reliably encoded in notifications - skip parsing it
+                # The internal background color state will be managed by the user's background light entity
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15], bg_rgb_color=None) # TODO: In "25" mode, brightness is byte 14
                 LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}, Mode: {mode_type}, Effect: {effect_num}, Speed: {effect_speed}")
             else:
                 LOGGER.debug("Unknown response received")
@@ -323,7 +377,14 @@ class Model0x56(DefaultModelAbstraction):
                     return None
             else:
                 return None
-            payload = bytearray.fromhex(payload)
+            if not all(c in "0123456789abcdefABCDEF" for c in payload):
+                LOGGER.debug(f"Non-hex notification received (ignoring): {payload}")
+                return None
+            try:
+                payload = bytearray.fromhex(payload)
+            except ValueError as e:
+                LOGGER.debug(f"Failed to parse hex payload (ignoring): {payload}")
+                return None
             LOGGER.debug(f"N: Response Payload: {' '.join([f'{byte:02X}' for byte in payload])}")
 
             if payload[0] == 0x81:
@@ -332,8 +393,15 @@ class Model0x56(DefaultModelAbstraction):
                 mode            = payload[3]
                 selected_effect = payload[4]
                 self.led_count  = payload[12]
-                self.is_on      = True if power == 0x23 else False
-                LOGGER.debug(f"Payload[0]=0x81: Power: {power}, Mode: {mode}, Selected effect: {selected_effect}, LED count: {self.led_count}")
+                # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
+                if power == 0x23:
+                    self.is_on = True
+                elif power == 0x24:
+                    self.is_on = False
+                else:
+                    LOGGER.warning(f"Unknown power state 0x{power:02X} in 0x81 response, setting to None")
+                    self.is_on = None
+                LOGGER.debug(f"Payload[0]=0x81: Power: 0x{power:02X}, Mode: 0x{mode:02X}, Selected effect: {selected_effect}, LED count: {self.led_count}, is_on: {self.is_on}")
 
                 if mode == 0x61:
                     if selected_effect == 0xf0:
@@ -343,6 +411,11 @@ class Model0x56(DefaultModelAbstraction):
                         self.color_mode               = ColorMode.HS
                         self.color_temperature_kelvin = None
                         self.update_color_state(rgb_color)
+                        # Parse background color (bytes 9-11 in payload)
+                        # Don't update bg state from device to preserve brightness control
+                        if len(payload) >= 12:
+                            bg_rgb_color = tuple(int(b) for b in payload[9:12])
+                            LOGGER.debug(f"Background RGB colour from device: {bg_rgb_color} (not updating state)")
                         LOGGER.debug("Light is in colour mode")
                         LOGGER.debug(f"RGB colour: {rgb_color}")
                         LOGGER.debug(f"HS colour: {self.hs_color}")
@@ -353,6 +426,11 @@ class Model0x56(DefaultModelAbstraction):
                         self.effect_speed = payload[5]
                         hs_color = self.rgb_to_hsv(payload[6:9])
                         rgb_color = tuple(int(b) for b in payload[6:9])
+                        # Parse background color for static effects
+                        # Don't update bg state from device to preserve brightness control
+                        if len(payload) >= 12:
+                            bg_rgb_color = tuple(int(b) for b in payload[9:12])
+                            LOGGER.debug(f"Background RGB colour from device: {bg_rgb_color} (not updating state)")
                         LOGGER.debug(f"RGB Color: {rgb_color}, HS colour: {hs_color}, Brightness: {hs_color[2]}")
                         self.hs_color = hs_color[0:2]
                         self.brightness = hs_color[2]
