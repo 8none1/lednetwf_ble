@@ -361,7 +361,7 @@ class Model0x56(DefaultModelAbstraction):
                 rgb_color    = (data[18], data[19], data[20])
                 # Background color is NOT reliably encoded in notifications - skip parsing it
                 # The internal background color state will be managed by the user's background light entity
-                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15], bg_rgb_color=None) # TODO: In "25" mode, brighgtness is byte 14
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15], bg_rgb_color=None) # TODO: In "25" mode, brightness is byte 14
                 LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}, Mode: {mode_type}, Effect: {effect_num}, Speed: {effect_speed}")
             else:
                 LOGGER.debug("Unknown response received")
