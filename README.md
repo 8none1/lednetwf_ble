@@ -19,6 +19,8 @@ This integration supports various models of Zengge LEDnetWF devices, which may a
 
 New devices using the Zengge platform are being released all the time.  We support as many of these as we can.  If you have a device which isn't supported, please log an issue and we will work with you to try and add support.
 
+**Have an unsupported device?** Check out our [BLE Traffic Sniffing Guide](SNIFFING_BLE_TRAFFIC.md) to help us add support for your device!
+
 ## Supported Features
 
 - Automatic discovery of supported devices
