@@ -129,10 +129,8 @@ class Model0x56(DefaultModelAbstraction):
     def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None, bg_rgb_color=None):
         LOGGER.debug(f"Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255 if brightness is not None else 'None'}, BG RGB: {bg_rgb_color}")
         
-        # Update background color if provided
-        if bg_rgb_color is not None and max(bg_rgb_color) >= 10:
-            self.update_bg_color_state(bg_rgb_color)
-            LOGGER.debug(f"Updated background from notification: RGB {bg_rgb_color}, HS: {self.bg_hs_color}, brightness: {self.bg_brightness}")
+        # Background color is NOT reliably sent in notifications - don't update from them
+        # The background color state is managed by the background light entity through explicit commands
         
 
         if mode == 0x61:
