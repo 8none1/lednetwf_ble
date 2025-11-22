@@ -357,7 +357,7 @@ class Model0x56(DefaultModelAbstraction):
                 mode_type    = data[15]
                 effect_num   = data[16]
                 effect_speed = data[17]
-                # for mode 0x66 (single color) & 0x67  (build-in effects)this does NOT contain the RGB colour! Also brightness does not seem to be in this reponse
+                # for mode 0x66 (single color) & 0x67  (build-in effects)this does NOT contain the RGB colour! Also brightness does not seem to be in this response
                 rgb_color    = (data[18], data[19], data[20])
                 # Background color is NOT reliably encoded in notifications - skip parsing it
                 # The internal background color state will be managed by the user's background light entity
