@@ -20,7 +20,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config     = entry.data
     options    = entry.options
     instance   = LEDNETWFInstance(entry.data[CONF_MAC], hass, config, options)
-    delay = entry.options.get(CONF_DELAY, None) or entry.data.get(CONF_DELAY, None)
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = instance
 

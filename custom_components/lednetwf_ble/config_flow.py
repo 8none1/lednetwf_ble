@@ -17,8 +17,9 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.device_registry import format_mac
 import homeassistant.helpers.config_validation as cv
 from bluetooth_data_tools import human_readable_name
-from bleak_retry_connector import BleakNotFoundError
+from bleak_retry_connector import BleakNotFoundError, BleakOutOfConnectionSlotsError
 from asyncio import TimeoutError
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
     DOMAIN,
@@ -207,12 +208,28 @@ class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 getattr(self._instance._model_interface, 'color_order', 'Unknown'),
                 getattr(self._instance._model_interface, 'segments', 'Unknown'))
 
+        except BleakOutOfConnectionSlotsError as e:
+            _LOGGER.error("[VALIDATE] Device unreachable or out of connection slots: %s", e, exc_info=True)
+            return self.async_show_form(
+                step_id="validate",
+                data_schema=vol.Schema({vol.Required("retry"): bool}),
+                errors={"base": "device_unreachable"},
+            )
+
         except (TimeoutError, BleakNotFoundError) as e:
             _LOGGER.error("[VALIDATE] Connection failed: %s", e, exc_info=True)
             return self.async_show_form(
                 step_id="validate",
                 data_schema=vol.Schema({vol.Required("retry"): bool}),
                 errors={"base": "cannot_connect"},
+            )
+
+        except ConfigEntryNotReady as e:
+            _LOGGER.error("[VALIDATE] Device not ready: %s", e, exc_info=True)
+            return self.async_show_form(
+                step_id="validate",
+                data_schema=vol.Schema({vol.Required("retry"): bool}),
+                errors={"base": "device_not_ready"},
             )
 
         except Exception as e:

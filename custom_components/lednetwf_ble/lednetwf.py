@@ -22,7 +22,6 @@ import logging
 from .const import (
     CONF_DELAY,
     CONF_MODEL,
-    CONF_LEDCOUNT,
     CONF_LEDTYPE,
     CONF_COLORORDER,
     CONF_SEGMENTS,
@@ -162,6 +161,17 @@ class LEDNETWFInstance:
                 return False
         model_class_name = find_model_for_value(self._model)
         LOGGER.debug(f"Model class name: {model_class_name}")
+        if model_class_name is None:
+            if self._model is None:
+                LOGGER.error(f"Device model is None. Manufacturer data may not be available yet. MAC: {self._mac}")
+                raise ConfigEntryNotReady(
+                    f"Unable to determine device model for {self._mac}. Manufacturer data not available. Please ensure the device is advertising and try again."
+                )
+            else:
+                LOGGER.error(f"No model class found for model value: 0x{self._model:02X}. Device may not be supported yet.")
+                raise ConfigEntryNotReady(
+                    f"Device model 0x{self._model:02X} is not supported. Please check the integration documentation."
+                )
         model_class = globals()[model_class_name]
         LOGGER.debug(f"Model class via lookup: {model_class}")
         self._model_interface = model_class(service_info['manufacturer_data'])
@@ -211,6 +221,10 @@ class LEDNETWFInstance:
             # All future changes of this data will come via the config flow.
             LOGGER.debug(f"Sending GET_LED_SETTINGS_PACKET to {self.bluetooth_device_name}")
             await self._write(self._model_interface.GET_LED_SETTINGS_PACKET)
+        # Query device status including background color for models that support it
+        if hasattr(self._model_interface, 'GET_STATUS_PACKET'):
+            LOGGER.debug(f"Sending GET_STATUS_PACKET to {self.bluetooth_device_name}")
+            await self._write(self._model_interface.GET_STATUS_PACKET)
     
     @property
     def mac(self):
@@ -386,6 +400,8 @@ class LEDNETWFInstance:
             self._reset_disconnect_timer()
             LOGGER.debug(f"Trying to start notifications for {self._name}")
             await self._client.start_notify(self._read_uuid, self._notification_handler)
+            # Give the BLE stack a moment to register the notification handler
+            await asyncio.sleep(0.1)
             
     def _resolve_characteristics(self, services: BleakGATTServiceCollection) -> bool:
         """Resolve characteristics."""
@@ -446,7 +462,9 @@ class LEDNETWFInstance:
             LOGGER.debug("Disconnected")
     
     def local_callback(self):
-        # Placeholder to be replaced by a call from light.py
-        # I can't work out how to plumb a callback from here to light.py
+        # Notify all registered entities (main light and background light)
+        if hasattr(self, '_callbacks'):
+            for callback in self._callbacks:
+                callback()
         return
 

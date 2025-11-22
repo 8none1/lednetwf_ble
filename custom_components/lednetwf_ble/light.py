@@ -1,6 +1,6 @@
 import logging
 import voluptuous as vol
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 from .lednetwf import LEDNETWFInstance
 from .const import (DOMAIN)
 
@@ -19,7 +19,6 @@ from homeassistant.components.light import (
     LightEntity,
     LightEntityFeature,
 )
-from homeassistant.util.color import match_max_scale
 from homeassistant.helpers import device_registry
 
 LOGGER = logging.getLogger(__name__)
@@ -53,7 +52,10 @@ class LEDNETWFLight(LightEntity):
         self._attr_supported_features = LightEntityFeature.EFFECT
         self._attr_name               = name
         self._attr_unique_id          = self._instance.mac
-        self._instance.local_callback = self.light_local_callback
+        # Register this entity's callback
+        if not hasattr(self._instance, '_callbacks'):
+            self._instance._callbacks = []
+        self._instance._callbacks.append(self.light_local_callback)
         
     @property
     def available(self):
@@ -152,9 +154,9 @@ class LEDNETWFLight(LightEntity):
             await self._instance.turn_on()
 
         on_brightness = kwargs.get(ATTR_BRIGHTNESS)
-        if on_brightness is None and self._instance.brightness is not None:
+        if on_brightness is None and self._instance.brightness is not None and self._instance.brightness > 0:
             on_brightness = self._instance.brightness
-        elif on_brightness is None and self._instance.brightness is None:
+        elif on_brightness is None or on_brightness == 0:
             on_brightness = 255
 
 
@@ -245,6 +247,10 @@ class LEDNETWFBackgroundLight(LightEntity):
         self._attr_unique_id = f"{self._instance.mac}_background"
         self._device_name = name  # Store the device name for reference
         self._is_on = True  # Track on/off state independently from brightness
+        # Register this entity's callback
+        if not hasattr(self._instance, '_callbacks'):
+            self._instance._callbacks = []
+        self._instance._callbacks.append(self.bg_light_local_callback)
         
     @property
     def available(self):
@@ -367,4 +373,8 @@ class LEDNETWFBackgroundLight(LightEntity):
     async def async_update(self) -> None:
         LOGGER.debug("Background light async_update called")
         await self._instance.update()
+        self.async_write_ha_state()
+    
+    def bg_light_local_callback(self):
+        """Called when device state changes via notification."""
         self.async_write_ha_state()

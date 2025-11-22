@@ -32,6 +32,8 @@
       "already_configured": "Zees devicce-a is alreedy configureed, bork bork.",
       "no_devices_found": "Nu supportud LEDnetWF leemps-a foond nearby. Try wavin' a drumstick.",
       "cannot_connect": "Cuoold nu cunnect tu zee devicce-a. Meck sure-a it's pooered oon und nearby!",
+      "device_unreachable": "Devicce-a is nu reecheble-a or toorned ooff. Meke-a sure-a zee devicce-a is pooered oon, nearby, und nu oozeer devicces-a ere-a cunnected tu it!",
+      "device_not_ready": "Devicce-a is nu reedy. Bork bork! Manoofectoorer deta nu efeileble-a. Plees meke-a sure-a zee devicce-a is sendeng pruper-like-a und tryee egein!",
       "unknown": "Ooooh, un unexpectud error heppuned. Try agin, okee dokee!"
     },
     "abort": {

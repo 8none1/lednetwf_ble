@@ -51,6 +51,7 @@ class Model0x56(DefaultModelAbstraction):
             self.INITIAL_PACKET             = bytearray.fromhex("00 01 80 00 00 0c 0d 0b 10 14 19 09 05 0d 2b 38 05 00 0f cf")
             self.GET_DEVICE_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 02 03 17 22 22")
             self.GET_LED_SETTINGS_PACKET    = bytearray.fromhex("00 05 80 00 00 05 06 0a 63 12 21 0f a5")
+            self.GET_STATUS_PACKET          = bytearray.fromhex("00 14 80 00 00 05 06 0a 44 4a 4b 0f e8")
 
         if self.manu_data[15] == 0x61:
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
@@ -333,25 +334,16 @@ class Model0x56(DefaultModelAbstraction):
             #     LOGGER.debug("Get device settings response received")
             elif list(data[5:7]) == [0x0e, 0x0f]:
                 LOGGER.debug("Normal Status response received")
-                # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
-                if data[10] == 0x23:
-                    self.is_on = True
-                elif data[10] == 0x24:
-                    self.is_on = False
-                else:
-                    LOGGER.warning(f"Unknown power state byte 0x{data[10]:02X}, setting to None")
-                    self.is_on = None
-                mode_type    = data[11]
-                effect_num   = data[12]
-                effect_speed = data[13]
-                rgb_color    = (data[14], data[15], data[16])
-                # Parse background color if available (bytes 17-19)
-                bg_rgb_color = None
-                if len(data) >= 20:
-                    bg_rgb_color = (data[17], data[18], data[19])
-                    LOGGER.debug(f"Background RGB colour from status: {bg_rgb_color}")
-                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15], bg_rgb_color=bg_rgb_color) # TODO: In "25" mode, brighgtness is byte 14
-                LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
+                # This response format doesn't reliably include power state - skip parsing it
+                # The device is responding so it must be powered on
+                mode_type    = data[8]
+                effect_num   = data[9]
+                effect_speed = data[17]
+                rgb_color    = (data[11], data[12], data[13])  # Foreground RGB at bytes 11-13
+                bg_rgb_color = (data[14], data[15], data[16])  # Background RGB at bytes 14-16
+                LOGGER.debug(f"Foreground RGB from notification: {rgb_color}, Background RGB: {bg_rgb_color}")
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[12], bg_rgb_color=bg_rgb_color)
+                LOGGER.debug(f"Status response. RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
             elif list(data[5:7]) == [0x19, 0x1a]:
                 LOGGER.debug("Normal Status response received - Long type")
                 # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
@@ -367,12 +359,9 @@ class Model0x56(DefaultModelAbstraction):
                 effect_speed = data[17]
                 # for mode 0x66 (single color) & 0x67  (build-in effects)this does NOT contain the RGB colour! Also brightness does not seem to be in this reponse
                 rgb_color    = (data[18], data[19], data[20])
-                # Parse background color if available (bytes 21-23)
-                bg_rgb_color = None
-                if len(data) >= 24:
-                    bg_rgb_color = (data[21], data[22], data[23])
-                    LOGGER.debug(f"Background RGB colour from status: {bg_rgb_color}")
-                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15], bg_rgb_color=bg_rgb_color) # TODO: In "25" mode, brighgtness is byte 14
+                # Background color is NOT reliably encoded in notifications - skip parsing it
+                # The internal background color state will be managed by the user's background light entity
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15], bg_rgb_color=None) # TODO: In "25" mode, brighgtness is byte 14
                 LOGGER.debug(f"Status response. Is on: {self.is_on}, RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}, Mode: {mode_type}, Effect: {effect_num}, Speed: {effect_speed}")
             else:
                 LOGGER.debug("Unknown response received")
