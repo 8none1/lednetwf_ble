@@ -92,10 +92,13 @@ class DefaultModelAbstraction:
         return self.bg_hs_color
     def get_bg_rgb_color(self):
         # Return background RGB colour in the range 0-255
-        # Initialize bg_brightness on first use if still None
+        # Initialize background color on first use to match foreground
         if self.bg_brightness is None:
             self.bg_brightness = self.brightness if self.brightness is not None else 255
-            LOGGER.debug(f"Initialized bg_brightness to {self.bg_brightness} in get_bg_rgb_color")
+            # Also initialize bg_hs_color to match foreground color
+            if self.hs_color is not None:
+                self.bg_hs_color = list(self.hs_color)  # Copy foreground color
+            LOGGER.debug(f"Initialized bg color to match foreground: HS {self.bg_hs_color}, brightness {self.bg_brightness}")
         return self.hsv_to_rgb((self.bg_hs_color[0], self.bg_hs_color[1], self.bg_brightness))
     def update_bg_color_state(self, rgb_color):
         # Update background color state from RGB values

@@ -147,8 +147,8 @@ class Model0x56(DefaultModelAbstraction):
         self.hs_color = tuple(hsv_color[0:2])
         self.brightness = int(hsv_color[2])
     
-    def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None): # , bg_rgb_color=None):
-        LOGGER.debug(f"Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255 if brightness is not None else 'None'}") # , BG RGB: {bg_rgb_color}")
+    def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None):
+        LOGGER.debug(f"Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255 if brightness is not None else 'None'}")
         
         if mode == 0x61:
             if selected_effect == 0xf0:
@@ -218,7 +218,15 @@ class Model0x56(DefaultModelAbstraction):
         LOGGER.debug(f"Set color packet: {' '.join([f'{byte:02X}' for byte in rgb_packet])} (FG bytes 10-12, BG bytes 13-15)")
         return rgb_packet
 
-    def set_effect(self, effect, brightness):
+    def set_effect(self, effect, on_brightness=255):
+        # Initialize background color on first use to match foreground
+        if self.bg_brightness is None:
+            self.bg_brightness = self.brightness if self.brightness is not None else 255
+            # Also initialize bg_hs_color to match foreground color
+            if self.hs_color is not None:
+                self.bg_hs_color = list(self.hs_color)  # Copy foreground color
+            LOGGER.debug(f"Initialized bg color to match foreground: HS {self.bg_hs_color}, brightness {self.bg_brightness}")
+        
         # Returns the byte array to set the effect
         LOGGER.debug(f"Setting effect: {effect}")
         
@@ -232,7 +240,7 @@ class Model0x56(DefaultModelAbstraction):
             raise ValueError(f"Effect '{effect}' not in EFFECT_LIST_0x56")
         
         self.effect = effect
-        self.brightness = brightness
+        self.brightness = on_brightness
         #self.color_mode  = XXX ColorMode.BRIGHTNESS # Don't set this here, we might want to change the color of the effects?
         effect_id = EFFECT_MAP_0x56.get(effect)
         # We might need to force a colour if there isn't one set. The strip lights effects sometimes need a colour to work properly

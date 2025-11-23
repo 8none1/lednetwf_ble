@@ -463,6 +463,13 @@ class LEDNETWFInstance:
                 await client.disconnect()
             LOGGER.debug("Disconnected")
     
+    def register_callback(self, callback):
+        """Register a callback to be called when device state changes."""
+        if not hasattr(self, '_callbacks'):
+            self._callbacks = []
+        self._callbacks.append(callback)
+        LOGGER.debug(f"Registered callback for {self._mac}, total callbacks: {len(self._callbacks)}")
+    
     def local_callback(self):
         # Notify all registered entities (main light and background light)
         LOGGER.debug(f"local_callback triggered for {self._mac}")

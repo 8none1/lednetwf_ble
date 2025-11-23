@@ -53,9 +53,7 @@ class LEDNETWFLight(LightEntity):
         self._attr_name               = name
         self._attr_unique_id          = self._instance.mac
         # Register this entity's callback
-        if not hasattr(self._instance, '_callbacks'):
-            self._instance._callbacks = []
-        self._instance._callbacks.append(self.light_local_callback)
+        self._instance.register_callback(self.light_local_callback)
         
     @property
     def available(self):
@@ -212,11 +210,6 @@ class LEDNETWFLight(LightEntity):
         LOGGER.debug(f"light_local_callback triggered for {self._instance._mac}")
         LOGGER.debug(f"Current state: is_on={self._instance.is_on}, brightness={self._instance.brightness}")
         self.schedule_update_ha_state()
-    
-    def bg_light_local_callback(self):
-        LOGGER.debug(f"bg_light_local_callback triggered for {self._instance._mac}")
-        LOGGER.debug(f"BG state: is_on={self._instance.is_on}, bg_brightness={self._instance.bg_brightness}")
-        self.schedule_update_ha_state()
 
     def update_ha_state(self) -> None:
         LOGGER.debug("update_ha_state called")
@@ -254,9 +247,7 @@ class LEDNETWFBackgroundLight(LightEntity):
         self._device_name = name  # Store the device name for reference
         self._is_on = True  # Track on/off state independently from brightness
         # Register this entity's callback
-        if not hasattr(self._instance, '_callbacks'):
-            self._instance._callbacks = []
-        self._instance._callbacks.append(self.bg_light_local_callback)
+        self._instance.register_callback(self.bg_light_local_callback)
         
     @property
     def available(self):

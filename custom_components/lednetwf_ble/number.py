@@ -34,9 +34,7 @@ class LEDNETWFSpeedSlider(NumberEntity):
         self._attr_unique_id       = self._instance.mac
         
         # Register for state updates
-        if not hasattr(self._instance, '_callbacks'):
-            self._instance._callbacks = []
-        self._instance._callbacks.append(self.speed_local_callback)
+        self._instance.register_callback(self.speed_local_callback)
 
     @property
     def available(self):
