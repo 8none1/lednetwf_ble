@@ -19,40 +19,32 @@ for e in range(1,100):
 EFFECT_MAP_0x56["Cycle Modes"] = 255
 
 # So called "static" effects.  Actually they are effects which can also be set to a specific colour.
-# TODO:  Rename "effect 1" here to something which is more indicative of what it really is? 
-for e in range(1,11):
+# Static Effect 1 is just a solid color (foreground only), so we give it a more descriptive name
+EFFECT_MAP_0x56["Solid Color"] = 1 << 8  # Static Effect 1 renamed - it's just a solid foreground color
+for e in range(2,11):
     EFFECT_MAP_0x56[f"Static Effect {e}"] = e << 8 # Give the static effects much higher values which we can then shift back again in the effect function
 
 # Sound reactive effects.  Numbered 1-15 internally, we will offset them by 50 to avoid clashes with the other effects
 for e in range(1+0x32, 16+0x32):
     EFFECT_MAP_0x56[f"Sound Reactive {e-0x32}"] = e << 8
 
-EFFECT_LIST_0x56 = sorted(EFFECT_MAP_0x56)
+# Custom order: Solid Color first, then Static Effects, then regular Effects, then Sound Reactive, then Cycle Modes
+EFFECT_LIST_0x56 = ["Solid Color"]
+EFFECT_LIST_0x56.extend([f"Static Effect {e}" for e in range(2, 11)])
+EFFECT_LIST_0x56.extend([f"Effect {e}" for e in range(1, 100)])
+EFFECT_LIST_0x56.extend([f"Sound Reactive {e}" for e in range(1, 16)])
+EFFECT_LIST_0x56.append("Cycle Modes")
+
 EFFECT_ID_TO_NAME_0x56 = {v: k for k, v in EFFECT_MAP_0x56.items()}
 
 class Model0x56(DefaultModelAbstraction):
     # Strip light
-    def __init__(self, manu_data):
-        LOGGER.debug("Model 0x56 init")
-        super().__init__(manu_data)
-        self.supported_color_modes = {ColorMode.HS} # Actually, it supports RGB, but this will allow us to separate colours from brightness
-        self.icon = "mdi:led-strip-variant"
-        self.effect_list = EFFECT_LIST_0x56
-        # self.fw_major = self.manu_data[0] # XX this should already exist
-
-        if isinstance(self.manu_data, str):
-            self.manu_data = [ord(c) for c in self.manu_data]
-        # LOGGER.debug(f"Manu data: {[hex(x) for x in self.manu_data]}")
-        # LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
-        # LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
-
-        if self.fw_major == 0x80:
-            # TODO: Is this the same packet for 0x56 devices or only 0x80?  Find an 0x56 and test it
-            self.INITIAL_PACKET             = bytearray.fromhex("00 01 80 00 00 0c 0d 0b 10 14 19 09 05 0d 2b 38 05 00 0f cf")
-            self.GET_DEVICE_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 02 03 17 22 22")
-            self.GET_LED_SETTINGS_PACKET    = bytearray.fromhex("00 05 80 00 00 05 06 0a 63 12 21 0f a5")
-            self.GET_STATUS_PACKET          = bytearray.fromhex("00 14 80 00 00 05 06 0a 44 4a 4b 0f e8")
-
+    def _parse_state_from_manu_data(self):
+        """Parse device state from manufacturer data. Called during init and when advertisements arrive."""
+        if len(self.manu_data) < 25:
+            LOGGER.warning(f"Manufacturer data too short: {len(self.manu_data)} bytes")
+            return
+            
         if self.manu_data[15] == 0x61:
             rgb_color = (self.manu_data[18], self.manu_data[19], self.manu_data[20])
             self.hs_color = tuple(super().rgb_to_hsv(rgb_color))[0:2]
@@ -61,12 +53,14 @@ class Model0x56(DefaultModelAbstraction):
             LOGGER.debug(f"From manu RGB colour: {rgb_color}")
             LOGGER.debug(f"From manu HS colour: {self.hs_color}")
             LOGGER.debug(f"From manu Brightness: {self.brightness}")
-            # Background color is NOT encoded in manufacturer data - use default from parent class
-            LOGGER.debug(f"Background color not in manu data, using default: HS {self.bg_hs_color}, brightness {self.bg_brightness}")
+            # Background color is NOT encoded in manufacturer data
             if self.manu_data[16] != 0xf0:
                 # We're not in a colour mode, so set the effect
                 self.effect_speed = self.manu_data[17]
-                if 0x01 <= self.manu_data[16] <= 0x0a:
+                if self.manu_data[16] == 0x01:
+                    # Static Effect 1 is just solid color mode - treat as no effect
+                    self.effect = EFFECT_OFF
+                elif 0x02 <= self.manu_data[16] <= 0x0a:
                     scaled_effect = self.manu_data[16] << 8
                     if scaled_effect in EFFECT_ID_TO_NAME_0x56:
                         self.effect = EFFECT_ID_TO_NAME_0x56[scaled_effect]
@@ -106,6 +100,32 @@ class Model0x56(DefaultModelAbstraction):
         LOGGER.debug(f"Is on:            {self.is_on}")
         LOGGER.debug(f"Colour mode:      {self.color_mode}")
         LOGGER.debug(f"HS colour:        {self.hs_color}")
+
+    def process_manu_data(self, manu_data):
+        """Override to parse full state from manufacturer data on updates."""
+        # Call parent to update basic fields (is_on, fw_major, etc.)
+        super().process_manu_data(manu_data)
+        # Parse additional state (colors, effects, etc.)
+        self._parse_state_from_manu_data()
+
+    def __init__(self, manu_data):
+        LOGGER.debug("Model 0x56 init")
+        super().__init__(manu_data)
+        self.supported_color_modes = {ColorMode.HS}
+        self.icon = "mdi:led-strip-variant"
+        self.effect_list = EFFECT_LIST_0x56
+
+        if isinstance(self.manu_data, str):
+            self.manu_data = [ord(c) for c in self.manu_data]
+
+        if self.fw_major == 0x80:
+            self.INITIAL_PACKET             = bytearray.fromhex("00 01 80 00 00 0c 0d 0b 10 14 19 09 05 0d 2b 38 05 00 0f cf")
+            self.GET_DEVICE_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 02 03 17 22 22")
+            self.GET_LED_SETTINGS_PACKET    = bytearray.fromhex("00 05 80 00 00 05 06 0a 63 12 21 0f a5")
+            self.GET_STATUS_PACKET          = bytearray.fromhex("00 14 80 00 00 05 06 0a 44 4a 4b 0f e8")
+
+        # Parse initial state from manufacturer data
+        self._parse_state_from_manu_data()
     
 
     @property
@@ -121,18 +141,15 @@ class Model0x56(DefaultModelAbstraction):
         """Set segments in parent instance."""
         if hasattr(self, '_parent_instance'):
             self._parent_instance._segments = value    
+    
     def update_color_state(self, rgb_color):
         hsv_color = super().rgb_to_hsv(rgb_color)
         self.hs_color = tuple(hsv_color[0:2])
         self.brightness = int(hsv_color[2])
     
-    def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None, bg_rgb_color=None):
-        LOGGER.debug(f"Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255 if brightness is not None else 'None'}, BG RGB: {bg_rgb_color}")
+    def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None):
+        LOGGER.debug(f"Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255 if brightness is not None else 'None'}")
         
-        # Background color is NOT reliably sent in notifications - don't update from them
-        # The background color state is managed by the background light entity through explicit commands
-        
-
         if mode == 0x61:
             if selected_effect == 0xf0:
                 self.update_color_state(rgb_color)
@@ -201,7 +218,15 @@ class Model0x56(DefaultModelAbstraction):
         LOGGER.debug(f"Set color packet: {' '.join([f'{byte:02X}' for byte in rgb_packet])} (FG bytes 10-12, BG bytes 13-15)")
         return rgb_packet
 
-    def set_effect(self, effect, brightness):
+    def set_effect(self, effect, on_brightness=255):
+        # Initialize background color on first use to match foreground
+        if self.bg_brightness is None:
+            self.bg_brightness = self.brightness if self.brightness is not None else 255
+            # Also initialize bg_hs_color to match foreground color
+            if self.hs_color is not None:
+                self.bg_hs_color = list(self.hs_color)  # Copy foreground color
+            LOGGER.debug(f"Initialized bg color to match foreground: HS {self.bg_hs_color}, brightness {self.bg_brightness}")
+        
         # Returns the byte array to set the effect
         LOGGER.debug(f"Setting effect: {effect}")
         
@@ -215,7 +240,7 @@ class Model0x56(DefaultModelAbstraction):
             raise ValueError(f"Effect '{effect}' not in EFFECT_LIST_0x56")
         
         self.effect = effect
-        self.brightness = brightness
+        self.brightness = on_brightness
         #self.color_mode  = XXX ColorMode.BRIGHTNESS # Don't set this here, we might want to change the color of the effects?
         effect_id = EFFECT_MAP_0x56.get(effect)
         # We might need to force a colour if there isn't one set. The strip lights effects sometimes need a colour to work properly
@@ -320,7 +345,6 @@ class Model0x56(DefaultModelAbstraction):
             # 0442 800000 0b 0c 15 00 63 00 13 00 03 01 00 13 03 90
             # 0001 020304 05 06 07 08 09 10 11 12 13 14 15 16 17 18 - index
             if list(data[5:8]) == [0x0b, 0x0c, 0x15]:
-                # LED settings response
                 LOGGER.debug("Get LED settings response received")
                 self.led_count   = data[11]
                 self.chip_type   = const.LedTypes_StripLight(data[14])
@@ -328,20 +352,21 @@ class Model0x56(DefaultModelAbstraction):
                 if hasattr(self, '_parent_instance'):
                     self.segments = data[13]
                 LOGGER.debug(f"LED count: {self.led_count}, Chip type: {self.chip_type}, Colour order: {self.color_order}, Segments: {self.segments}")
-            # elif list(data[5:7]) == [0x1b, 0x1c]: # Not sure if this is a reliable way to identify this packet
-            #     LOGGER.debug("Get device settings response received")
-            elif list(data[5:7]) == [0x0e, 0x0f]:
+            elif list(data[5:9]) == [0x0e, 0x0f, 0x16, 0x81]:
                 LOGGER.debug("Normal Status response received")
-                # This response format doesn't reliably include power state - skip parsing it
-                # The device is responding so it must be powered on
-                mode_type    = data[8]
-                effect_num   = data[9]
-                effect_speed = data[17]
-                rgb_color    = (data[11], data[12], data[13])  # Foreground RGB at bytes 11-13
-                bg_rgb_color = (data[14], data[15], data[16])  # Background RGB at bytes 14-16
-                LOGGER.debug(f"Foreground RGB from notification: {rgb_color}, Background RGB: {bg_rgb_color}")
-                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[12], bg_rgb_color=bg_rgb_color)
-                LOGGER.debug(f"Status response. RGB colour: {rgb_color}, HS colour: {self.hs_color}, Brightness: {self.brightness}")
+                self.is_on   = True if data[10] == 0x23 else False
+                mode_type    = data[11]
+                effect_num   = data[12]
+                effect_speed = data[13]
+                rgb_color    = None  # Default to None
+                if mode_type == 0x61:
+                    rgb_color = (data[14], data[15], data[16])
+                elif mode_type == 0x25:
+                    rgb_color = None  # No RGB colour in effect mode
+                # mode_type 0x62 (music) also has no RGB color in this notification
+                LOGGER.debug(f"Decoded notification data: On: {self.is_on}, Mode: {mode_type:02x}, Effect: {effect_num}, Speed: {effect_speed if effect_speed is not None else 'Unknown'}, RGB: {rgb_color}")
+                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed)
+                
             elif list(data[5:7]) == [0x19, 0x1a]:
                 LOGGER.debug("Normal Status response received - Long type")
                 # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown

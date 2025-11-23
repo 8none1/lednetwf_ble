@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, Event
+from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.const import CONF_MAC, EVENT_HOMEASSISTANT_STOP
 from homeassistant.const import Platform
+from homeassistant.components import bluetooth
+from homeassistant.components.bluetooth import BluetoothServiceInfoBleak, BluetoothChange
 
 from .const import DOMAIN, CONF_DELAY, CONF_IGNORE_NOTIFICATIONS
 from .lednetwf import LEDNETWFInstance
@@ -22,6 +24,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     instance   = LEDNETWFInstance(entry.data[CONF_MAC], hass, config, options)
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = instance
+
+    # Set up passive Bluetooth advertisement listener for manufacturer data updates
+    @callback
+    def _async_handle_bluetooth_event(
+        service_info: BluetoothServiceInfoBleak,
+        change: BluetoothChange,
+    ) -> None:
+        """Handle Bluetooth advertisement updates."""
+        if change == BluetoothChange.ADVERTISEMENT:
+            # Only process if we have manufacturer data
+            if service_info.manufacturer_data:
+                LOGGER.debug(
+                    f"Received advertisement update for {service_info.address}: "
+                    f"manufacturer_data={service_info.manufacturer_data}"
+                )
+                # Update the model interface with new manufacturer data
+                instance._model_interface.process_manu_data(service_info.manufacturer_data)
+                # Trigger entity state updates
+                instance.local_callback()
+
+    # Register the callback with Home Assistant's Bluetooth integration
+    entry.async_on_unload(
+        bluetooth.async_register_callback(
+            hass,
+            _async_handle_bluetooth_event,
+            {"address": entry.data[CONF_MAC]},
+            BluetoothChange.ADVERTISEMENT,
+        )
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

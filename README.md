@@ -16,6 +16,7 @@ This integration supports various models of Zengge LEDnetWF devices, which may a
 - YBCRG-RGBWW
 - Magic Hue
 - Bluetooth full colors selfie ring light
+- Devices advertising as "iotb" prefix
 
 New devices using the Zengge platform are being released all the time.  We support as many of these as we can.  If you have a device which isn't supported, please log an issue and we will work with you to try and add support.
 
@@ -29,7 +30,11 @@ New devices using the Zengge platform are being released all the time.  We suppo
 - RGB mode
 - Brightness
 - Effects
-- Live status updates from remote control (once connected)
+- **Real-time state updates via Bluetooth advertisements** - Device state updates automatically without maintaining active connections
+  - Updates power state, colors, effects, and brightness even when Home Assistant restarts
+  - No connection needed for state monitoring
+  - Reduced Bluetooth interference with other devices
+- Live status updates from remote control (when connected for commands)
 
 ## Installation
 

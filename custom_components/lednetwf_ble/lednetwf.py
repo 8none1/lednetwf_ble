@@ -420,9 +420,11 @@ class LEDNETWFInstance:
     def _reset_disconnect_timer(self) -> None:
         """Reset disconnect timer."""
         if self._disconnect_timer:
+            LOGGER.debug(f"{self._name}: Cancelling existing disconnect timer (delay was {self._delay}s)")
             self._disconnect_timer.cancel()
         self._expected_disconnect = False
         if self._delay is not None and self._delay != 0:
+            LOGGER.debug(f"{self._name}: Creating new disconnect timer with delay {self._delay}s")
             self._disconnect_timer = self.loop.call_later(self._delay, self._disconnect)
 
     def _disconnected(self, client: BleakClientWithServiceCache) -> None:
@@ -461,10 +463,21 @@ class LEDNETWFInstance:
                 await client.disconnect()
             LOGGER.debug("Disconnected")
     
+    def register_callback(self, callback):
+        """Register a callback to be called when device state changes."""
+        if not hasattr(self, '_callbacks'):
+            self._callbacks = []
+        self._callbacks.append(callback)
+        LOGGER.debug(f"Registered callback for {self._mac}, total callbacks: {len(self._callbacks)}")
+    
     def local_callback(self):
         # Notify all registered entities (main light and background light)
+        LOGGER.debug(f"local_callback triggered for {self._mac}")
         if hasattr(self, '_callbacks'):
+            LOGGER.debug(f"Found {len(self._callbacks)} registered callbacks")
             for callback in self._callbacks:
                 callback()
+        else:
+            LOGGER.debug("No callbacks registered!")
         return
 

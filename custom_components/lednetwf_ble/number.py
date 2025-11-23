@@ -8,9 +8,11 @@ from .const import DOMAIN
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers import device_registry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.config_entries import ConfigEntry
 import logging
+
+_LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -30,11 +32,13 @@ class LEDNETWFSpeedSlider(NumberEntity):
         #self._attr_translation_key = attr_name # Can't get this to work
         self._attr_name            = attr_name
         self._attr_unique_id       = self._instance.mac
-        self._effect_speed         = self._instance._model_interface.effect_speed
+        
+        # Register for state updates
+        self._instance.register_callback(self.speed_local_callback)
 
     @property
     def available(self):
-        return self._instance.is_on != None
+        return self._instance.is_on is not None
 
     @property
     def name(self) -> str:
@@ -47,7 +51,15 @@ class LEDNETWFSpeedSlider(NumberEntity):
 
     @property
     def native_value(self) -> int | None:
-        return self._effect_speed
+        # Always read from model to get latest state
+        return self._instance._model_interface.effect_speed
+    
+    @callback
+    def speed_local_callback(self) -> None:
+        """Handle state updates from device."""
+        _LOGGER.debug("Speed callback triggered, effect_speed=%s", 
+                     self._instance._model_interface.effect_speed)
+        self.schedule_update_ha_state()
 
     @property
     def device_info(self):
@@ -60,5 +72,4 @@ class LEDNETWFSpeedSlider(NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the current value."""
-        self._effect_speed = value
         await self._instance.set_effect_speed(int(value))

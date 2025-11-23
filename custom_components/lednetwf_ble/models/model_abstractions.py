@@ -20,13 +20,13 @@ LOGGER = logging.getLogger(__name__)
 
 class DefaultModelAbstraction:
     def __init__(self, manu_data):
-        self.process_manu_data(manu_data)
+        # Initialize default attributes BEFORE calling process_manu_data
         self.chip_type                     = None
         self.color_order                   = None
         self.brightness                    = None
         self.hs_color                      = [0, 100]  # Default to red instead of None to avoid exceptions when enabling effects before selecting a colour
         self.bg_hs_color                   = [0, 0]    # Background color - defaults to white (hue 0, saturation 0 = white)
-        self.bg_brightness                 = 255       # Background brightness - default to full brightness
+        self.bg_brightness                 = None      # Background brightness - will be set to current brightness when first used
         self.effect                        = EFFECT_OFF
         self.effect_speed                  = 50
         self.color_mode                    = ColorMode.UNKNOWN
@@ -40,6 +40,9 @@ class DefaultModelAbstraction:
         self.NOTIFY_CHARACTERISTIC_UUIDS   = ["0000ff02-0000-1000-8000-00805f9b34fb"]
         self.INITIAL_PACKET                = bytearray.fromhex("00 01 80 00 00 04 05 0a 81 8a 8b 96")
         self.GET_LED_SETTINGS_PACKET       = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12 21 f0 86")
+        
+        # Now parse manufacturer data (may override defaults)
+        self.process_manu_data(manu_data)
 
     def process_manu_data(self, manu_data):
         if manu_data:
@@ -53,8 +56,10 @@ class DefaultModelAbstraction:
             # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
             if self.manu_data[14] == 0x23:
                 self.is_on = True
+                LOGGER.debug(f"Updated is_on from manu data: True (byte 14 = 0x23)")
             elif self.manu_data[14] == 0x24:
                 self.is_on = False
+                LOGGER.debug(f"Updated is_on from manu data: False (byte 14 = 0x24)")
             else:
                 LOGGER.warning(f"Unknown power state in manu data: 0x{self.manu_data[14]:02X}, setting to None")
                 self.is_on = None
@@ -87,6 +92,13 @@ class DefaultModelAbstraction:
         return self.bg_hs_color
     def get_bg_rgb_color(self):
         # Return background RGB colour in the range 0-255
+        # Initialize background color on first use to match foreground
+        if self.bg_brightness is None:
+            self.bg_brightness = self.brightness if self.brightness is not None else 255
+            # Also initialize bg_hs_color to match foreground color
+            if self.hs_color is not None:
+                self.bg_hs_color = list(self.hs_color)  # Copy foreground color
+            LOGGER.debug(f"Initialized bg color to match foreground: HS {self.bg_hs_color}, brightness {self.bg_brightness}")
         return self.hsv_to_rgb((self.bg_hs_color[0], self.bg_hs_color[1], self.bg_brightness))
     def update_bg_color_state(self, rgb_color):
         # Update background color state from RGB values
