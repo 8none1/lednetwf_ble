@@ -60,6 +60,7 @@ Search for "LEDnetWF BLE" and click install.  You will also get notified of futu
 - **Default**: 120 seconds
 - **Range**: 0 (never disconnect) to any positive number
 - **Description**: How long to wait before disconnecting from the device when not in use. Setting to 0 means the connection will be maintained permanently, this is not recommended. Shorter timeouts may cause slower response times when controlling the device but will more quickly free up Bluetooth connections for use by other devices.
+- **Tip**: If you only make infrequent changes to your lights, consider trying a timeout of 20 seconds. This can help save connection slots for other Bluetooth devices while still providing reasonable responsiveness.
 
 **Device Name**
 - **Description**: Friendly name for your device as it appears in Home Assistant. This can be changed to something more meaningful like "Living Room Strip" or "Bedroom Lights".
