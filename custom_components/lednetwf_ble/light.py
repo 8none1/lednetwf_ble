@@ -207,10 +207,16 @@ class LEDNETWFLight(LightEntity):
     async def async_update(self) -> None:
         LOGGER.debug("async update called")
         await self._instance.update()
-        self.async_write_ha_state()
     
     def light_local_callback(self):
-        self.async_write_ha_state()
+        LOGGER.debug(f"light_local_callback triggered for {self._instance._mac}")
+        LOGGER.debug(f"Current state: is_on={self._instance.is_on}, brightness={self._instance.brightness}")
+        self.schedule_update_ha_state()
+    
+    def bg_light_local_callback(self):
+        LOGGER.debug(f"bg_light_local_callback triggered for {self._instance._mac}")
+        LOGGER.debug(f"BG state: is_on={self._instance.is_on}, bg_brightness={self._instance.bg_brightness}")
+        self.schedule_update_ha_state()
 
     def update_ha_state(self) -> None:
         LOGGER.debug("update_ha_state called")
@@ -254,7 +260,19 @@ class LEDNETWFBackgroundLight(LightEntity):
         
     @property
     def available(self):
-        return self._instance.is_on is not None
+        """Background light is only available for static effects (excluding Solid Color)."""
+        if self._instance.is_on is None:
+            return False
+        
+        current_effect = self._instance.effect
+        
+        # Only available for static effects (Static Effect 2-10)
+        # NOT available for: color mode, Solid Color, dynamic effects, or sound reactive
+        if current_effect is None or current_effect == EFFECT_OFF:
+            return False
+            
+        # Static effects (but not "Solid Color" which is now EFFECT_OFF)
+        return "Static Effect" in current_effect
 
     @property
     def brightness(self):

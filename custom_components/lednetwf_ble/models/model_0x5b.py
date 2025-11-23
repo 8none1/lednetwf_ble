@@ -20,12 +20,32 @@ EFFECT_MAP_0x5b["_Effect Off"]        = 0
 EFFECT_MAP_0x5b["RGB Jump"]           = 0x63
 EFFECT_MAP_0x5b["Candle Mode"]        = 100
 # EFFECT_MAP_0x5b["Sound Reactive"]     = 200
-EFFECT_LIST_0x5b = sorted(EFFECT_MAP_0x5b)
+
+# Custom order: Effect Off first, then RGB Jump, then numbered effects, then Candle Mode
+EFFECT_LIST_0x5b = ["_Effect Off", "RGB Jump"]
+EFFECT_LIST_0x5b.extend([f"Effect {e-37}" for e in range(37, 58)])
+EFFECT_LIST_0x5b.append("Candle Mode")
+
 EFFECT_ID_TO_NAME_0x5b = {v: k for k, v in EFFECT_MAP_0x5b.items()}
 
 
 class Model0x5b(DefaultModelAbstraction):
     # CCT only strip & Sunrise lamps
+    def _parse_state_from_manu_data(self):
+        """Parse device state from manufacturer data. Called during init and when advertisements arrive."""
+        if len(self.manu_data) < 25:
+            LOGGER.warning(f"Manufacturer data too short: {len(self.manu_data)} bytes")
+            return
+        
+        self.model_specific_manu_data(self.manu_data)
+    
+    def process_manu_data(self, manu_data):
+        """Override to parse full state from manufacturer data on updates."""
+        # Call parent to update basic fields (is_on, fw_major, etc.)
+        super().process_manu_data(manu_data)
+        # Parse additional state (colors, effects, etc.)
+        self._parse_state_from_manu_data()
+
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x5B init")
         super().__init__(manu_data)
@@ -34,7 +54,8 @@ class Model0x5b(DefaultModelAbstraction):
         self.icon                  = "mdi:led-strip-variant"
         self.effect_list           = None
         self.effect                = EFFECT_OFF
-        self.model_specific_manu_data(manu_data)
+        # Parse initial state from manufacturer data
+        self._parse_state_from_manu_data()
 
     def model_specific_manu_data(self, manu_data):
         if manu_data is None:

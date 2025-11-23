@@ -39,27 +39,26 @@ for e in range(37,58):
 EFFECT_MAP_0x54["_Effect Off"]         = 0
 EFFECT_MAP_0x54["Candle Mode"]        = 100
 EFFECT_MAP_0x54["Sound Reactive"]     = 200
-EFFECT_LIST_0x54 = sorted(EFFECT_MAP_0x54)
+
+# Custom order: Effect Off first, then numbered effects, then special modes
+EFFECT_LIST_0x54 = ["_Effect Off"]
+EFFECT_LIST_0x54.extend([f"Effect {e-36}" for e in range(37, 58)])
+EFFECT_LIST_0x54.extend(["Candle Mode", "Sound Reactive"])
+
 EFFECT_ID_TO_NAME_0x54 = {v: k for k, v in EFFECT_MAP_0x54.items()}
 
 class Model0x54(DefaultModelAbstraction):
     # Strip light
-    def __init__(self, manu_data):
-        LOGGER.debug("Model 0x54 init")
-        super().__init__(manu_data)
-        self.SUPPORTED_VERSIONS      = [0x54]
-        self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 02 03 07 22 22")
-        #self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 08 2c 02 07 00 0f ab")
-        self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 0e 05 15 07 00 0f 9d")
-        #                                                 
-        self.supported_color_modes = {ColorMode.HS} # Actually, it supports RGB, but this will allow us to separate colours from brightness
-        self.icon = "mdi:led-strip-variant"
-        self.effect_list = EFFECT_LIST_0x54
-
+    def _parse_state_from_manu_data(self):
+        """Parse device state from manufacturer data. Called during init and when advertisements arrive."""
+        if len(self.manu_data) < 25:
+            LOGGER.warning(f"Manufacturer data too short: {len(self.manu_data)} bytes")
+            return
+        
         LOGGER.debug(f"Manu data: {[f'{i}: {hex(x)}' for i, x in enumerate(self.manu_data)]}")
         LOGGER.debug(f"Manu data 15: {hex(self.manu_data[15])}")
         LOGGER.debug(f"Manu data 16: {hex(self.manu_data[16])}")
-        # return
+        
         # Power state is already set by parent class from manu_data[14]
         # Just handle the 0x38 (off) case specifically
         if self.manu_data[15] == 0x38:
@@ -105,6 +104,25 @@ class Model0x54(DefaultModelAbstraction):
         LOGGER.debug(f"Is on:            {self.is_on}")
         LOGGER.debug(f"Colour mode:      {self.color_mode}")
         LOGGER.debug(f"HS colour:        {self.hs_color}")
+    
+    def process_manu_data(self, manu_data):
+        """Override to parse full state from manufacturer data on updates."""
+        # Call parent to update basic fields (is_on, fw_major, etc.)
+        super().process_manu_data(manu_data)
+        # Parse additional state (colors, effects, etc.)
+        self._parse_state_from_manu_data()
+
+    def __init__(self, manu_data):
+        LOGGER.debug("Model 0x54 init")
+        super().__init__(manu_data)
+        self.SUPPORTED_VERSIONS      = [0x54]
+        self.INITIAL_PACKET          = bytearray.fromhex("00 01 80 00 00 02 03 07 22 22")
+        self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 0c 0d 0b 10 14 18 0b 18 0e 05 15 07 00 0f 9d")
+        self.supported_color_modes = {ColorMode.HS}
+        self.icon = "mdi:led-strip-variant"
+        self.effect_list = EFFECT_LIST_0x54
+        # Parse initial state from manufacturer data
+        self._parse_state_from_manu_data()
 
     def set_color(self, hs_color, brightness):
         # Returns the byte array to set the RGB colour

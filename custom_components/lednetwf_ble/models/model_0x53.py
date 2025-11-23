@@ -133,6 +133,21 @@ EFFECTS_LIST_0x53 = [
 
 class Model0x53(DefaultModelAbstraction):
     # Ring light
+    def _parse_state_from_manu_data(self):
+        """Parse device state from manufacturer data. Called during init and when advertisements arrive."""
+        if len(self.manu_data) < 25:
+            LOGGER.warning(f"Manufacturer data too short: {len(self.manu_data)} bytes")
+            return
+        
+        self.model_specific_manu_data(self.manu_data)
+    
+    def process_manu_data(self, manu_data):
+        """Override to parse full state from manufacturer data on updates."""
+        # Call parent to update basic fields (is_on, fw_major, etc.)
+        super().process_manu_data(manu_data)
+        # Parse additional state (colors, effects, etc.)
+        self._parse_state_from_manu_data()
+
     def __init__(self, manu_data):
         LOGGER.debug("Model 0x53 init")
         super().__init__(manu_data)
@@ -140,7 +155,8 @@ class Model0x53(DefaultModelAbstraction):
         self.supported_color_modes = {ColorMode.HS, ColorMode.COLOR_TEMP}
         self.icon                  = "mdi:lightbulb"
         self.effect_list           = EFFECTS_LIST_0x53
-        self.model_specific_manu_data(manu_data)
+        # Parse initial state from manufacturer data
+        self._parse_state_from_manu_data()
 
     def model_specific_manu_data(self, manu_data):
         if manu_data is None:
