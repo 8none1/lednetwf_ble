@@ -36,7 +36,8 @@ GET_LED_SETTINGS_PACKET       = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12
 DEFAULT_ATTEMPTS              = 3
 BLEAK_BACKOFF_TIME            = 0.25
 RETRY_BACKOFF_EXCEPTIONS      = (BleakDBusError)
-SUPPORTED_MODELS              = {}
+SUPPORTED_MODELS = {}
+IOTBT_MODELS = {}  # Separate registry for IOTBT devices
 
 WrapFuncType = TypeVar("WrapFuncType", bound=Callable[..., Any])
 
@@ -50,23 +51,71 @@ LOGGER.debug(f"Models path: {models_path}")
 
 for _, module_name, _ in pkgutil.iter_modules([models_path]):
     LOGGER.debug(f"Module name: {module_name}")
-    if module_name.startswith('model_0x'):
+    if module_name.startswith('model_'):
         m = importlib.import_module(f'{package}.models.{module_name}')
-        class_name = f'Model{module_name.split("_")[1]}'
+
+        # Determine if this is an IOTBT model
+        is_iotbt = module_name.startswith('model_iotbt')
+
+        # Handle different naming conventions
+        if is_iotbt:
+            # IOTBT models: extract the hex suffix after 'model_iotbt_'
+            # e.g., 'model_iotbt_0x80' -> 'ModelIotbt0x80'
+            suffix = module_name.replace('model_iotbt_', '')
+            class_name = f'ModelIotbt{suffix}'
+        else:
+            class_name = f'Model{module_name.split("_")[1]}'
+
         if hasattr(m, class_name):
             globals()[class_name] = getattr(m, class_name)
+
         if hasattr(m, "SUPPORTED_MODELS"):
-            supported_models_hex = [f"0x{model:02X}" for model in getattr(m, 'SUPPORTED_MODELS')]
-            LOGGER.debug(f"Supported models: {supported_models_hex}")
-            SUPPORTED_MODELS[class_name] = getattr(m, "SUPPORTED_MODELS")
+            supported_models_list = getattr(m, 'SUPPORTED_MODELS')
+            supported_models_hex = [f"0x{model:02X}" for model in supported_models_list]
+            LOGGER.debug(f"{class_name} supported models: {supported_models_hex}")
+
+            # Add to appropriate registry
+            if is_iotbt:
+                IOTBT_MODELS[class_name] = supported_models_list
+            else:
+                SUPPORTED_MODELS[class_name] = supported_models_list
 
 all_models_hex = {class_name: [f"0x{model:02X}" for model in models] for class_name, models in SUPPORTED_MODELS.items()}
-LOGGER.debug(f"All supported modules: {all_models_hex}")
+all_iotbt_models_hex = {class_name: [f"0x{model:02X}" for model in models] for class_name, models in IOTBT_MODELS.items()}
+LOGGER.debug(f"All supported non-IOTBT models: {all_models_hex}")
+LOGGER.debug(f"All supported IOTBT models: {all_iotbt_models_hex}")
 
-def find_model_for_value(value):
-    for model_name, models in SUPPORTED_MODELS.items():
-        if value in models:
-            return model_name
+def find_model_for_value(value, device_name=None):
+    """Find the appropriate model class based on firmware version and optionally device name.
+
+    Args:
+        value: Firmware major version (0x53, 0x54, 0x56, 0x80, etc.)
+        device_name: Device name string (optional, used to distinguish variants)
+
+    Returns:
+        Model class name or None
+    """
+    # Check if this is an IOTBT device by name
+    is_iotbt_device = False
+    if device_name:
+        device_name_lower = device_name.lower()
+        is_iotbt_device = 'iotbt' in device_name_lower
+
+    # Search in the appropriate registry
+    if is_iotbt_device:
+        LOGGER.debug(f"Device name '{device_name}' matches IOTBT pattern, searching IOTBT models")
+        for model_name, models in IOTBT_MODELS.items():
+            if value in models:
+                LOGGER.debug(f"Found IOTBT model: {model_name} for firmware 0x{value:02X}")
+                return model_name
+        LOGGER.warning(f"No IOTBT model found for firmware 0x{value:02X}")
+    else:
+        # Search regular models
+        for model_name, models in SUPPORTED_MODELS.items():
+            if value in models:
+                LOGGER.debug(f"Found model: {model_name} for firmware 0x{value:02X}")
+                return model_name
+
     return None
 
 def retry_bluetooth_connection_error(func: WrapFuncType) -> WrapFuncType:
@@ -140,9 +189,9 @@ class LEDNETWFInstance:
         self._name    = self._data.get('name')
         self._model   = self._data.get(CONF_MODEL)
         self._ignore_notifications = self._data.get(CONF_IGNORE_NOTIFICATIONS, options.get(CONF_IGNORE_NOTIFICATIONS, False))
-        LOGGER.debug(f"Ignore notifications: {self._ignore_notifications}")
+        # LOGGER.debug(f"Ignore notifications: {self._ignore_notifications}")
         self._segments = self._data.get(CONF_SEGMENTS, options.get(CONF_SEGMENTS, 1))
-        LOGGER.debug(f"Segments: {self._segments}")
+        # LOGGER.debug(f"Segments: {self._segments}")
         self._options = options
         self._hass    = hass
         self._mac     = mac
@@ -159,13 +208,13 @@ class LEDNETWFInstance:
             if service_info['address'] != self._mac:
                 LOGGER.error(f"Service info address {service_info['address']} does not match expected MAC {self._mac}. This shouldn't happen, but it does. Try again later.")
                 return False
-        model_class_name = find_model_for_value(self._model)
+        model_class_name = find_model_for_value(self._model, device_name=self._name)
         LOGGER.debug(f"Model class name: {model_class_name}")
         if model_class_name is None:
             if self._model is None:
                 LOGGER.error(f"Device model is None. Manufacturer data may not be available yet. MAC: {self._mac}")
                 raise ConfigEntryNotReady(
-                    f"Unable to determine device model for {self._mac}. Manufacturer data not available. Please ensure the device is advertising and try again."
+                    f"We haven't received manufacturer data from {self._mac} yet. You probably just need to wait a bit longer and try again."
                 )
             else:
                 LOGGER.error(f"No model class found for model value: 0x{self._model:02X}. Device may not be supported yet.")
@@ -185,8 +234,8 @@ class LEDNETWFInstance:
         self._read_uuid             = None
         self._model_interface.chip_type = self._options.get(CONF_LEDTYPE)
         self._model_interface.color_order = self._options.get(CONF_COLORORDER)
-        LOGGER.debug(f"Chip type: {self._model_interface.chip_type}")
-        LOGGER.debug(f"Color order: {self._model_interface.color_order}")
+        #LOGGER.debug(f"Chip type: {self._model_interface.chip_type}")
+        #LOGGER.debug(f"Color order: {self._model_interface.color_order}")
     
     async def _write(self, data: bytearray):
         """Send command to device and read response."""
