@@ -14,7 +14,7 @@ SUPPORTED_MODELS = [0x80]
 
 # IOTBT 0x80 Effect configuration
 NUM_FX = 12
-NUM_MUSIC_FX = 0x0D
+NUM_MUSIC_FX = 13
 
 def _build_iotbt_effects():
     """Build effect mappings for IOTBT 0x80 controller.
@@ -51,7 +51,29 @@ EFFECT_MAP_IOTBT_0x80, EFFECT_LIST_IOTBT_0x80, EFFECT_ID_TO_NAME_IOTBT_0x80 = _b
 class ModelIotbt0x80(DefaultModelAbstraction):
     # IOTBT BLE LED controller
     def _parse_state_from_manu_data(self):
+        LOGGER.debug("IOTBT: Parsing state from manufacturer data")
         self.is_on = True if self.manu_data[1] == 0x23 else False
+        mode = self.manu_data[2]
+        match mode:
+            case 0x66:
+                # Solid colour mode, but no colour data is included so :shrug:
+                self.color_mode = ColorMode.HS
+                self.effect = EFFECT_OFF
+                LOGGER.debug(f"IOTBT: Solid colour mode detected. Setting color_mode={self.color_mode}, effect={self.effect}")
+            case 0x67:
+                # Effect mode
+                effect_id = self.manu_data[3]
+                if effect_id in EFFECT_ID_TO_NAME_IOTBT_0x80:
+                    self.effect = EFFECT_ID_TO_NAME_IOTBT_0x80[effect_id]
+                self.color_mode = ColorMode.BRIGHTNESS
+                LOGGER.debug(f"IOTBT: Effect mode detected. effect_id={effect_id}, effect={self.effect}, color_mode={self.color_mode}")
+            case 0x69:
+                # Music reactive mode
+                effect_id = self.manu_data[3] << 8
+                if effect_id in EFFECT_ID_TO_NAME_IOTBT_0x80:
+                    self.effect = EFFECT_ID_TO_NAME_IOTBT_0x80[effect_id]
+                self.color_mode = ColorMode.BRIGHTNESS
+                LOGGER.debug(f"IOTBT: Music mode detected. effect_id={effect_id}, effect={self.effect}, color_mode={self.color_mode}")
 
     def process_manu_data(self, manu_data):
         """Override to parse full state from manufacturer data on updates."""
@@ -76,73 +98,14 @@ class ModelIotbt0x80(DefaultModelAbstraction):
             self.manu_data = [ord(c) for c in self.manu_data]
 
         # IOTBT-specific packets from captured traffic
-        self.INITIAL_PACKET             = bytearray.fromhex("00 03 80 00 00 05 06 0a ea 81 8a 8b 59")
-        self.GET_DEVICE_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 02 03 17 22 22")
-        self.GET_LED_SETTINGS_PACKET    = bytearray.fromhex("00 b3 80 00 00 03 04 0a e0 0e 01")
+        # self.INITIAL_PACKET             = bytearray.fromhex("00 03 80 00 00 05 06 0a ea 81 8a 8b 59")
+        self.INITIAL_PACKET             = bytearray.fromhex("00 02 80 00 00 0c 0d 0a 10 14 19 0b 1a 0c 04 2e 03 00 0f b2")
+        self.GET_DEVICE_SETTINGS_PACKET = bytearray.fromhex("00 08 80 00 00 03 04 0a e0 0e 01")
+        self.GET_LED_SETTINGS_PACKET    = bytearray.fromhex("00 04 80 00 00 02 03 0a ea 81")
         self.GET_STATUS_PACKET          = bytearray.fromhex("00 14 80 00 00 05 06 0a 44 4a 4b 0f e8")
 
         # Parse initial state from manufacturer data
         self._parse_state_from_manu_data()
-    
-    # @property
-    # def segments(self):
-    #     """Get segments from parent instance."""
-    #     if hasattr(self, '_parent_instance') and hasattr(self._parent_instance, '_segments'):
-    #         return self._parent_instance._segments
-    #     return None
-    
-    # @segments.setter
-    # def segments(self, value):
-    #     LOGGER.debug(f"IOTBT: Setting segments to {value}")
-    #     """Set segments in parent instance."""
-    #     if hasattr(self, '_parent_instance'):
-    #         self._parent_instance._segments = value    
-    
-    def update_color_state(self, rgb_color):
-        hsv_color = super().rgb_to_hsv(rgb_color)
-        self.hs_color = tuple(hsv_color[0:2])
-        self.brightness = int(hsv_color[2])
-    
-    def update_effect_state(self, mode, selected_effect, rgb_color=None, effect_speed=None, brightness=None):
-        LOGGER.debug(f"IOTBT: Updating effect state. Mode: {mode}, Selected effect: {selected_effect}, RGB color: {rgb_color}, Effect speed: {effect_speed}, Brightness: {brightness/255 if brightness is not None else 'None'}")
-        
-        if mode == 0x66:
-            # IOTBT: Static effect mode with color (0x66 and 0x67 appear to be similar)
-            self.color_mode = ColorMode.HS
-            self.effect_speed = effect_speed
-            if rgb_color:
-                self.update_color_state(rgb_color)
-            
-            if selected_effect == 0x01 or selected_effect == 0xf0:
-                self.effect = EFFECT_OFF
-            elif 0x02 <= selected_effect <= 0x0a:
-                scaled_effect = selected_effect << 8
-                if scaled_effect in EFFECT_ID_TO_NAME_IOTBT_0x80:
-                    self.effect = EFFECT_ID_TO_NAME_IOTBT_0x80[scaled_effect]
-                else:
-                    LOGGER.warning(f"IOTBT: Unknown static effect in notification: 0x{selected_effect:02X}")
-                    self.effect = EFFECT_OFF
-            else:
-                self.effect = EFFECT_OFF
-                
-            LOGGER.debug(f"IOTBT mode 0x{mode:02X}: effect={self.effect}, speed={self.effect_speed}, HS={self.hs_color}, brightness={self.brightness}")
-        
-        elif mode == 0x62:
-            # Music reactive mode
-            scaled_effect = (selected_effect + 0x32) << 8
-            try:
-                self.effect = EFFECT_ID_TO_NAME_IOTBT_0x80[scaled_effect]
-            except KeyError:
-                self.effect = "Unknown"
-        
-        elif mode == 0x25:
-            # Effects mode
-            self.effect = EFFECT_ID_TO_NAME_IOTBT_0x80[selected_effect]
-            self.effect_speed = effect_speed
-            self.color_mode = ColorMode.BRIGHTNESS
-        
-        else:
-            LOGGER.debug(f"IOTBT: Unhandled mode in update_effect_state: 0x{mode:02X}")
     
     def set_color(self, hs_color, brightness):
         """
@@ -199,13 +162,15 @@ class ModelIotbt0x80(DefaultModelAbstraction):
         
         if effect_name not in EFFECT_MAP_IOTBT_0x80:
             LOGGER.error(f"IOTBT: Effect {effect_name} not found in effect map")
+            self.effect = EFFECT_OFF
             return None
 
         effect_id = EFFECT_MAP_IOTBT_0x80[effect_name]
+        self.brightness   = brightness
 
         # Handle different effect types
         if effect_id >= 256:  # Music mode
-            brightness   = max(1, min(0x64, brightness))
+            # brightness   = max(1, min(0x64, brightness))
             sensitivity  = max(1, min(0x64, self.effect_speed)) # Use effect_speed as sensitivity
             effect_id_real = effect_id >> 8
             effect_packet = bytearray.fromhex(
@@ -214,16 +179,14 @@ class ModelIotbt0x80(DefaultModelAbstraction):
             "a1 00 00 00 06 a1 00 64 64 a1 96 64 64 a1 78 64 64 "
             "a1 5a 64 64 a1 3c 64 64 a1 1e 64 64"
             )
-            effect_packet[11] = brightness
+            effect_packet[11] = self.get_brightness_percent()
             effect_packet[12] = effect_id_real
             effect_packet[15] = sensitivity
             self.effect       = effect_name
-            self.brightness   = brightness
             self.color_mode   = ColorMode.BRIGHTNESS
             LOGGER.debug(f"IOTBT: Music mode: effect id pre-shift: {effect_id}, effect id real: {effect_id_real}, speed: {self.effect_speed}")
         
         else:  # Regular effects
-            self.brightness    = brightness
             self.effect        = effect_name
             LOGGER.debug(f"IOTBT: Setting regular effect ID: {effect_id}. Speed: {self.effect_speed}, Brightness: {self.get_brightness_percent()}%")
             effect_packet = bytearray.fromhex("00 00 80 00 00 06 07 0a e0 02 00 00 50 50")
@@ -266,6 +229,8 @@ class ModelIotbt0x80(DefaultModelAbstraction):
         return power_packet
 
     def set_led_settings(self, options: dict):
+            # Packet: 00 06 80 00 00 05 06 0a e1 0a 01 02 00
+            # led type --------------------------------^^
             LOGGER.debug(f"Setting LED settings: {options}")
             led_count   = options.get(const.CONF_LEDCOUNT)
             chip_type   = options.get(const.CONF_LEDTYPE)
@@ -296,40 +261,34 @@ class ModelIotbt0x80(DefaultModelAbstraction):
             return None
 
     def notification_handler(self, data):
-        # This devices notifications are useless and convey only which mode the device is in
-        # so we ignore them.  Some old code left here for reference.
-        return None
         data_hex = ' '.join(f'{byte:02X}' for byte in data)
         LOGGER.debug(f"IOTBT: Notification received. fw_major: 0x{self.fw_major:02X}, data: {data_hex}")
-        rgb_color = None
-        effect_num = None
-        effect_speed = None
-
+        effect_num   = EFFECT_MAP_IOTBT_0x80[self.effect] if self.effect is not EFFECT_OFF and self.effect in EFFECT_MAP_IOTBT_0x80 else EFFECT_OFF
+        LOGGER.debug(f"IOTBT: Notification data length: {len(data)}")
+        LOGGER.debug(f"IOTBT: Current state before notification: is_on={self.is_on}, effect_num={effect_num}, effect={self.effect}, effect_speed={self.effect_speed}, brightness={self.brightness}")
         if len(data) > 10:
             if data[0] == 0x04:  # Status response
-                LOGGER.debug("IOTBT: Normal Status response received - Long type")
-                
+                LOGGER.debug("IOTBT: Normal Status response received")
                 # Parse power state from notification (byte 14)
-                if data[14] == 0x23:
-                    self.is_on = True
-                elif data[14] == 0x24:
-                    self.is_on = False
-                else:
-                    LOGGER.warning(f"IOTBT: Unknown power state byte 0x{data[14]:02X}, setting to None")
-                    self.is_on = None
-                
-                mode_type    = data[15]
-                if mode_type == 0x62:
-                    # Music mode
-                    effect_num   = data[16] << 8
-                    effect_speed = data[17]
-                if mode_type == 0x66:
-                    LOGGER.debug("IOTBT: Static colour mode detected in notification?")
-                    return None
-                if mode_type == 0x67:
-                    effect_num   = data[16]
-                    effect_speed = data[17]
-                self.update_effect_state(mode_type, effect_num, rgb_color, effect_speed, brightness=data[15])
+                self.is_on = True if data[14] == 0x23 else False
+                LOGGER.debug(f"IOTBT: Power state updated from notification: is_on={self.is_on}")
+                mode_type = data[15]
+                match mode_type:
+                    case 0x62:
+                        # Music mode
+                        effect_num   = data[16] << 8
+                        self.effect = EFFECT_ID_TO_NAME_IOTBT_0x80.get(effect_num, EFFECT_OFF)
+                        self.effect_speed = data[17]
+                        self.color_mode = ColorMode.BRIGHTNESS
+                    case 0x66:
+                        LOGGER.debug("IOTBT: Static colour mode detected in notification")
+                        self.effect = EFFECT_OFF
+                        self.color_mode = ColorMode.HS
+                    case 0x67:
+                        effect_num   = data[16]
+                        self.effect = EFFECT_ID_TO_NAME_IOTBT_0x80.get(effect_num, EFFECT_OFF)
+                        self.effect_speed = data[17]
+                        self.color_mode = ColorMode.BRIGHTNESS
             else:
                 LOGGER.debug("IOTBT: Unknown response received")
                 return None
