@@ -63,7 +63,7 @@ class DeviceData:
 
     def is_supported(self) -> bool:
         return (
-            self.logical_name.lower().startswith("lednetwf") or self.logical_name.lower().startswith("iotb")
+            (self.logical_name.lower().startswith("lednetwf") or self.logical_name.lower().startswith("iotb"))
             and self.fw_major is not None
             and self.fw_major in SUPPORTED_MODELS
         )
