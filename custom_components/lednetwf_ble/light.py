@@ -147,6 +147,7 @@ class LEDNETWFLight(LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         LOGGER.debug("async_turn_on called")
         LOGGER.debug("kwargs: %s", kwargs)
+        LOGGER.debug(f"Current state: color_mode={self._instance.color_mode}, effect={self._instance.effect}, hs_color={self._instance.hs_color}, brightness={self._instance.brightness}")
 
         if not self.is_on:
             await self._instance.turn_on()
@@ -160,6 +161,7 @@ class LEDNETWFLight(LightEntity):
 
         if ATTR_COLOR_TEMP_KELVIN not in kwargs and ATTR_HS_COLOR not in kwargs and ATTR_EFFECT not in kwargs and ATTR_RGB_COLOR not in kwargs:
             # i.e. only a brightness change
+            LOGGER.debug(f"Brightness-only change detected. Current color_mode: {self._instance.color_mode}, effect: {self._instance.effect}")
             if self._instance.effect is not None and self._instance.effect is not EFFECT_OFF:
                 # Before HA 2024.2
 
@@ -169,24 +171,31 @@ class LEDNETWFLight(LightEntity):
 
                 #HA 2024.2 changes this, setting color mode to "brightness" should allow to change effects brightness as well as introduces the predefined EFFECT_OFF status
                 kwargs[ATTR_EFFECT] = self._instance.effect
+                LOGGER.debug(f"Added effect to kwargs: {self._instance.effect}")
             elif self._instance.color_mode is ColorMode.COLOR_TEMP:
                 kwargs[ATTR_COLOR_TEMP_KELVIN] = self._instance.color_temp_kelvin
+                LOGGER.debug(f"Added color_temp to kwargs: {self._instance.color_temp_kelvin}")
             elif self._instance.color_mode is ColorMode.HS:
                 kwargs[ATTR_HS_COLOR] = self._instance.hs_color
+                LOGGER.debug(f"Added hs_color to kwargs: {self._instance.hs_color}")
             elif self._instance.color_mode is ColorMode.RGB:
                 kwargs[ATTR_RGB_COLOR] = self._instance.rgb_color
+                LOGGER.debug(f"Added rgb_color to kwargs: {self._instance.rgb_color}")
 
         if ATTR_BRIGHTNESS in kwargs and ATTR_EFFECT == EFFECT_OFF:
             self._instance._effect = EFFECT_OFF
         
         # Set foreground color/effect
         if ATTR_COLOR_TEMP_KELVIN in kwargs:
+            LOGGER.debug(f"Setting color temp: {kwargs[ATTR_COLOR_TEMP_KELVIN]}, brightness: {on_brightness}")
             self._instance._color_mode = ColorMode.COLOR_TEMP
             await self._instance.set_color_temp_kelvin(kwargs[ATTR_COLOR_TEMP_KELVIN], on_brightness)
         elif ATTR_HS_COLOR in kwargs:
             # set_hs_color -> set_color includes background color in the packet
+            LOGGER.debug(f"Setting hs_color: {kwargs[ATTR_HS_COLOR]}, brightness: {on_brightness}")
             await self._instance.set_hs_color(kwargs[ATTR_HS_COLOR], on_brightness)
         elif ATTR_RGB_COLOR in kwargs:
+            LOGGER.debug(f"Setting rgb_color: {kwargs[ATTR_RGB_COLOR]}, brightness: {on_brightness}")
             await self._instance.set_rgb_color(kwargs[ATTR_RGB_COLOR], on_brightness)
         elif ATTR_EFFECT in kwargs and kwargs[ATTR_EFFECT] != EFFECT_OFF:
             effect = kwargs[ATTR_EFFECT]
@@ -194,7 +203,10 @@ class LEDNETWFLight(LightEntity):
             if effect.startswith("Unknown Effect"):
                 LOGGER.warning(f"Cannot set unknown effect: {effect}. Ignoring.")
             else:
+                LOGGER.debug(f"Setting effect: {effect}, brightness: {on_brightness}")
                 await self._instance.set_effect(effect, on_brightness)
+        else:
+            LOGGER.debug(f"No color/effect attribute to set. kwargs keys: {kwargs.keys()}")
         
         self.async_write_ha_state()
 
@@ -370,10 +382,10 @@ class LEDNETWFBackgroundLight(LightEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         # Save current brightness before turning off (if it's reasonable)
-        if self._instance.bg_brightness >= 10:
+        if self._instance.bg_brightness is not None and self._instance.bg_brightness >= 10:
             self._last_brightness = self._instance.bg_brightness
             LOGGER.debug(f"Saving brightness {self._last_brightness} before turn off")
-        
+
         # Mark as off and set background to black (brightness 0)
         self._is_on = False
         await self._instance.set_bg_hs_color(self._instance.bg_hs_color, 0)
