@@ -382,10 +382,10 @@ class LEDNETWFBackgroundLight(LightEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         # Save current brightness before turning off (if it's reasonable)
-        if self._instance.bg_brightness >= 10:
+        if self._instance.bg_brightness is not None and self._instance.bg_brightness >= 10:
             self._last_brightness = self._instance.bg_brightness
             LOGGER.debug(f"Saving brightness {self._last_brightness} before turn off")
-        
+
         # Mark as off and set background to black (brightness 0)
         self._is_on = False
         await self._instance.set_bg_hs_color(self._instance.bg_hs_color, 0)
