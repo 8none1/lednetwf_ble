@@ -51,6 +51,16 @@ for _, module_name, _ in pkgutil.iter_modules([models_path]):
             SUPPORTED_MODELS.extend(module.SUPPORTED_MODELS)
 
 
+# Device name prefixes that indicate potentially supported devices
+SUPPORTED_NAME_PREFIXES = ["lednetwf", "iotb"]
+
+
+def _has_supported_name(device_name: str) -> bool:
+    """Check if device name matches any supported prefix."""
+    name_lower = device_name.lower()
+    return any(name_lower.startswith(prefix) for prefix in SUPPORTED_NAME_PREFIXES)
+
+
 class DeviceData:
     def __init__(self, discovery: BluetoothServiceInfoBleak):
         self._discovery = discovery
@@ -58,12 +68,23 @@ class DeviceData:
         self.unique_id = format_mac(self.address)
         self.logical_name = discovery.name
         self.rssi = discovery.rssi
+
+        # Log service data for debugging - only for our devices
+        if _has_supported_name(self.logical_name):
+            if discovery.service_data:
+                _LOGGER.debug(f"[{self.logical_name}] Service data found:")
+                for uuid, data in discovery.service_data.items():
+                    data_hex = ' '.join(f'{byte:02X}' for byte in data) if isinstance(data, (bytes, bytearray)) else str(data)
+                    _LOGGER.debug(f"  UUID: {uuid}, Data: {data_hex}")
+            else:
+                _LOGGER.debug(f"[{self.logical_name}] No service data available")
+
         manu_data = next(iter(discovery.manufacturer_data.values()), None)
         self.fw_major = manu_data[0] if isinstance(manu_data, (bytes, bytearray)) and len(manu_data) > 0 else None
 
     def is_supported(self) -> bool:
         return (
-            (self.logical_name.lower().startswith("lednetwf") or self.logical_name.lower().startswith("iotb"))
+            _has_supported_name(self.logical_name)
             and self.fw_major is not None
             and self.fw_major in SUPPORTED_MODELS
         )

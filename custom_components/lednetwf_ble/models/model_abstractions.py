@@ -50,9 +50,9 @@ class DefaultModelAbstraction:
             LOGGER.debug(f"Manu data: {manu_data_str}")
             manu_data_id           = next(iter(manu_data))
             self.manu_data         = bytearray(manu_data[manu_data_id])
-            self.fw_major          = self.manu_data[0]
-            self.fw_minor          = f'{self.manu_data[8]:02X}{self.manu_data[9]:02X}.{self.manu_data[10]:02X}'
-            self.led_count         = self.manu_data[24]
+            self.fw_major          = self.manu_data[0] # TODO: Make this device specific. IOTBT devices store this in service info not manu data
+            self.fw_minor          = f'{self.manu_data[8]:02X}{self.manu_data[9]:02X}.{self.manu_data[10]:02X}|{self.manu_data[1]:02X}'
+            self.led_count         = self.manu_data[24] # TODO: It's not safe to assume this here.  Make it more device specific
             # Parse power state: 0x23 = on, 0x24 = off, anything else = unknown
             if self.manu_data[14] == 0x23:
                 self.is_on = True

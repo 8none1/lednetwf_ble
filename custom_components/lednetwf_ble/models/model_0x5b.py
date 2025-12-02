@@ -60,7 +60,7 @@ class Model0x5b(DefaultModelAbstraction):
     def model_specific_manu_data(self, manu_data):
         if manu_data is None:
             LOGGER.debug("Manu data is None, using defaults")
-            self.color_mode = ColorMode.COLOR_TEMP
+            self.color_mode = ColorMode.UNKNOWN
             self.hs_color   = None
             self.brightness = 255
             self.effect     = EFFECT_OFF
@@ -80,7 +80,7 @@ class Model0x5b(DefaultModelAbstraction):
                     self.icon                    = "mdi:lightbulb"
                     self.GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 05 80 00 00 02 03 07 22 22")
                     self.led_count               = 1
-                    LOGGER.debug(f"Setting led count to 1 for RGB mode")
+                    LOGGER.debug("Setting led count to 1 for RGB mode")
                     # self.color_temperature_kelvin = self.min_color_temp
                     LOGGER.debug(f"From manu RGB colour: {rgb_color}")
                     LOGGER.debug(f"From manu HS colour: {self.hs_color}")
