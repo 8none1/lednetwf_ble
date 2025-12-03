@@ -19,10 +19,12 @@ Data parsed from advertisements (no connection required):
 - Power state, color mode (from embedded state data)
 - RGB, brightness, WW/CW values (format may vary by device)
 
-Capability Detection (from protocol doc section 10.5.8):
+Capability Detection (see protocol_docs/08_state_query_response_parsing.md):
 - Passive detection: Infer capabilities from state query response
 - Active probing: Send test commands to definitively detect RGB/WW/CW
 - Capabilities are cached by MAC address (~/.lednetwf_capabilities.json)
+
+Protocol documentation: ../protocol_docs/
 
 Limitations:
 - Advertisement state data format varies by device - values shown may not
@@ -43,12 +45,75 @@ import asyncio
 import argparse
 import json
 import os
+import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 from bleak import BleakScanner, BleakClient
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
+
+
+# =============================================================================
+# BLE VERSION DETECTION
+# Source: protocol_docs/04_device_identification_capabilities.md
+# The BLE version is extracted from the device name suffix (e.g., "LEDnetWF07" → 7)
+# This determines which power command format to use:
+#   < 5:  Use 0x71 command (legacy)
+#   >= 5: Use 0x3B command (modern)
+# =============================================================================
+
+# Pattern to extract version number from device name
+# Matches: LEDnetWF07, LEDnetWF_07, iotwf10, IOTBT_11, etc.
+BLE_VERSION_PATTERN = re.compile(r'(?:lednetwf|iotwf|iotbt)[_]?(\d+)', re.IGNORECASE)
+
+
+def extract_ble_version_from_name(device_name: Optional[str]) -> Optional[int]:
+    """
+    Extract BLE protocol version from device name suffix.
+
+    Examples:
+        "LEDnetWF07" → 7
+        "LEDnetWF_10" → 10
+        "iotwf05" → 5
+        "IOTBT_11" → 11
+        "Unknown" → None
+
+    Source: protocol_docs/04_device_identification_capabilities.md
+    The app extracts version from BaseModuleType.f23897c field.
+    """
+    if not device_name:
+        return None
+
+    match = BLE_VERSION_PATTERN.search(device_name)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            pass
+    return None
+
+
+def get_recommended_power_command(ble_version: Optional[int]) -> str:
+    """
+    Get the recommended power command type based on BLE version.
+
+    From protocol_docs/04_device_identification_capabilities.md:
+        Version < 5:  Use 0x71 (legacy)
+        Version >= 5: Use 0x3B (modern)
+
+    Returns:
+        "0x3B" for modern devices (BLE v5+)
+        "0x71" for legacy devices (BLE v1-4)
+        "0x3B" as default if version unknown (most devices are modern)
+    """
+    if ble_version is None:
+        return "0x3B"  # Default to modern, most common
+
+    if ble_version >= 5:
+        return "0x3B"
+    else:
+        return "0x71"
 
 
 # Manufacturer ID ranges from protocol doc (Section 9.1)
@@ -89,84 +154,144 @@ GET_LED_SETTINGS_PACKET = bytearray.fromhex("00 02 80 00 00 05 06 0a 63 12 21 f0
 # These are used when device is OFF or in effect mode (all channels may be 0)
 # Each probe sets a specific channel to test if the device supports it
 
-# RGB Probe: Set R=50, G=0, B=0, brightness=100 in static RGB mode
-# Format: [0x31, R, G, B, 0x00, 0xF0, 0x0F, checksum] for RGB mode
-RGB_PROBE_RAW = bytearray([0x31, 0x32, 0x00, 0x00, 0x00, 0xF0, 0x0F])
-RGB_PROBE_RAW.append(sum(RGB_PROBE_RAW) & 0xFF)  # Add checksum
+# RGB Probe: Set R=50, G=0, B=0 in static RGB mode
+# Format from protocol_docs/07_control_commands.md:
+# [0x31, R, G, B, WW, CW, Mode(0x5A), Persist, Checksum] - 9 bytes
+RGB_PROBE_RAW = bytearray([0x31, 0x32, 0x00, 0x00, 0x00, 0x00, 0x5A, 0x0F])
+RGB_PROBE_RAW.append(sum(RGB_PROBE_RAW) & 0xFF)  # Checksum of bytes 0-7
 
 # WW Probe: Set warm white to 50 in static white mode
-# Format: [0x31, 0x00, 0x00, 0x00, WW, 0x0F, 0xF0, checksum]
-WW_PROBE_RAW = bytearray([0x31, 0x00, 0x00, 0x00, 0x32, 0x0F, 0xF0])
-WW_PROBE_RAW.append(sum(WW_PROBE_RAW) & 0xFF)
+# Format: [0x31, R, G, B, WW, CW, Mode(0x0F=white), Persist, Checksum]
+WW_PROBE_RAW = bytearray([0x31, 0x00, 0x00, 0x00, 0x32, 0x00, 0x0F, 0x0F])
+WW_PROBE_RAW.append(sum(WW_PROBE_RAW) & 0xFF)  # Checksum of bytes 0-7
 
 # CW Probe: Set cool white to 50 in static white mode
-# This requires a different approach - set CCT with cool bias
-CW_PROBE_RAW = bytearray([0x31, 0x00, 0x00, 0x00, 0x00, 0x0F, 0xF0, 0x32])  # CW at end
-CW_PROBE_RAW.append(sum(CW_PROBE_RAW[:-1]) & 0xFF)  # Checksum excludes last byte
+# Format: [0x31, R, G, B, WW, CW, Mode(0x0F=white), Persist, Checksum]
+CW_PROBE_RAW = bytearray([0x31, 0x00, 0x00, 0x00, 0x00, 0x32, 0x0F, 0x0F])
+CW_PROBE_RAW.append(sum(CW_PROBE_RAW) & 0xFF)  # Checksum of bytes 0-7
+
+# =============================================================================
+# POWER COMMANDS - Multiple versions depending on device BLE protocol version
+# Source: com/zengge/wifi/COMM/Protocol/q.java
+#
+# Version selection logic (from BaseDeviceInfo.E()):
+#   BLE version >= 5: Use 0x3B command with PowerType mode byte
+#   BLE version < 5:  Use 0x71 command
+#   Very old devices: Use 0x11 command (legacy, often doesn't work)
+#
+# PowerType enum (from CommandPackagePowerOverDuraion.java):
+#   PowerType_PowerON  = 0x23 (35)
+#   PowerType_PowerOFF = 0x24 (36)
+#   PowerType_PowerSwitch = 0x25 (37) - toggle
+# =============================================================================
+
+# Modern power command (0x3B) - BLE v5+ - RECOMMENDED for most devices
+# Source: tc/d.java method c() + CommandPackagePowerOverDuraion.java
+# Format: [0x3B, PowerType, HSV(0,0), params(0,0,0), duration(0,0,50), time(0,0), checksum]
+# These are PRE-WRAPPED with transport layer header - send directly, no wrapping needed!
+POWER_ON_0x3B_WRAPPED = bytearray.fromhex("00 01 80 00 00 0d 0e 0b 3b 23 00 00 00 00 00 00 00 32 00 00 90")
+POWER_OFF_0x3B_WRAPPED = bytearray.fromhex("00 01 80 00 00 0d 0e 0b 3b 24 00 00 00 00 00 00 00 32 00 00 91")
+
+# Legacy power command (0x71) - BLE v1-4
+# Source: tc/b.java method M() lines 759-772
+# Format: [0x71, state(0x23/0x24), persist(0x0F), checksum]
+POWER_ON_0x71_RAW = bytearray([0x71, 0x23, 0x0F])
+POWER_ON_0x71_RAW.append(sum(POWER_ON_0x71_RAW) & 0xFF)  # = 0xA3
+
+POWER_OFF_0x71_RAW = bytearray([0x71, 0x24, 0x0F])
+POWER_OFF_0x71_RAW.append(sum(POWER_OFF_0x71_RAW) & 0xFF)  # = 0xA4
+
+# Very old power command (0x11) - legacy, often doesn't work on modern devices
+# Source: tc/b.java method m() lines 1648-1657
+# Format: [0x11, 0x1A, 0x1B, state, checksum]
+POWER_ON_0x11_RAW = bytearray([0x11, 0x1A, 0x1B, 0xF0])
+POWER_ON_0x11_RAW.append(sum(POWER_ON_0x11_RAW) & 0xFF)  # = 0xE6
+
+POWER_OFF_0x11_RAW = bytearray([0x11, 0x1A, 0x1B, 0x0F])
+POWER_OFF_0x11_RAW.append(sum(POWER_OFF_0x11_RAW) & 0xFF)  # = 0x55
+
+# Aliases for backward compatibility (HA integration uses these names)
+HA_POWER_ON_WRAPPED = POWER_ON_0x3B_WRAPPED
+HA_POWER_OFF_WRAPPED = POWER_OFF_0x3B_WRAPPED
+POWER_ON_RAW = POWER_ON_0x11_RAW   # Legacy alias (often doesn't work)
+POWER_OFF_RAW = POWER_OFF_0x11_RAW  # Legacy alias (often doesn't work)
 
 # Capability cache file location
 CAPABILITY_CACHE_FILE = os.path.expanduser("~/.lednetwf_capabilities.json")
 
-# Product ID to capability mapping from protocol doc (Section 10.5.2)
+# Product ID to capability mapping from protocol_docs/04_device_identification_capabilities.md
+# Source: com/zengge/wifi/Device/a.java method k()
 # Capabilities: has_rgb, has_ww (warm white), has_cw (cool white), has_dim (dimmer only)
+# BaseType indicates the class hierarchy from the app
 PRODUCT_ID_CAPABILITIES = {
-    # Controllers with RGB + White
-    6:   {"name": "Ctrl_Mini_RGBW_0x06", "has_rgb": True, "has_ww": True, "has_cw": True},
-    7:   {"name": "Ctrl_Mini_RGBCW_0x07", "has_rgb": True, "has_ww": True, "has_cw": True},
-    32:  {"name": "Ctrl_Mini_RGBW_0x20", "has_rgb": True, "has_ww": True, "has_cw": True},
-    37:  {"name": "Ctrl_RGBCW_Both_0x25", "has_rgb": True, "has_ww": True, "has_cw": True},
-    38:  {"name": "Ctrl_Mini_RGBW_0x26", "has_rgb": True, "has_ww": True, "has_cw": True},
-    39:  {"name": "Ctrl_Mini_RGBW_0x27", "has_rgb": True, "has_ww": True, "has_cw": True},
-    72:  {"name": "Ctrl_Mini_RGBW_Mic_0x48", "has_rgb": True, "has_ww": True, "has_cw": True},
+    # Controllers with RGB + White (RGBWBoth / RGBCWBoth BaseType)
+    4:   {"name": "Ctrl_RGBW_UFO_0x04", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBW"},
+    6:   {"name": "Ctrl_Mini_RGBW_0x06", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
+    7:   {"name": "Ctrl_Mini_RGBCW_0x07", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth"},
+    32:  {"name": "Ctrl_Mini_RGBW_0x20", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
+    37:  {"name": "Ctrl_RGBCW_Both_0x25", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth"},
+    38:  {"name": "Ctrl_Mini_RGBW_0x26", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
+    39:  {"name": "Ctrl_Mini_RGBW_0x27", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
+    72:  {"name": "Ctrl_Mini_RGBW_Mic_0x48", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
 
-    # Controllers with RGB only
-    8:   {"name": "Ctrl_Mini_RGB_Mic_0x08", "has_rgb": True, "has_ww": False, "has_cw": False},
-    51:  {"name": "Ctrl_Mini_RGB_0x33", "has_rgb": True, "has_ww": False, "has_cw": False},
+    # Controllers with RGB only (RGB / RGBSymphony BaseType)
+    8:   {"name": "Ctrl_Mini_RGB_Mic_0x08", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBSymphony"},
+    16:  {"name": "ChristmasLight_0x10", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB"},
+    51:  {"name": "Ctrl_Mini_RGB_0x33", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB"},
 
-    # CCT only (no RGB)
-    9:   {"name": "Ctrl_Ceiling_light_CCT_0x09", "has_rgb": False, "has_ww": True, "has_cw": True},
-    22:  {"name": "Magnetic_CCT_0x16", "has_rgb": False, "has_ww": True, "has_cw": True},
-    28:  {"name": "TableLamp_CCT_0x1C", "has_rgb": False, "has_ww": True, "has_cw": True},
-    # FillLight_0x1D is a STUB device class - capabilities vary by hardware variant!
-    # Must detect capabilities dynamically via state query, not from productId
-    29:  {"name": "FillLight_0x1D", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True},
-    82:  {"name": "Bulb_CCT_0x52", "has_rgb": False, "has_ww": True, "has_cw": True},
-    98:  {"name": "Ctrl_CCT_0x62", "has_rgb": False, "has_ww": True, "has_cw": True},
+    # CCT only - no RGB (CCT BaseType)
+    9:   {"name": "Ctrl_Ceiling_light_CCT_0x09", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
+    22:  {"name": "Magnetic_CCT_0x16", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
+    28:  {"name": "TableLamp_CCT_0x1C", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
+    82:  {"name": "Bulb_CCT_0x52", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
+    98:  {"name": "Ctrl_CCT_0x62", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
 
-    # Dimmer only
-    23:  {"name": "Magnetic_Dim_0x17", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True},
-    33:  {"name": "Bulb_Dim_0x21", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True},
-    65:  {"name": "Ctrl_Dim_0x41", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True},
+    # Dimmer only (Brightness BaseType)
+    23:  {"name": "Magnetic_Dim_0x17", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness"},
+    33:  {"name": "Bulb_Dim_0x21", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness"},
+    65:  {"name": "Ctrl_Dim_0x41", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness"},
 
-    # Bulbs with RGBCW
-    14:  {"name": "FloorLamp_RGBCW_0x0E", "has_rgb": True, "has_ww": True, "has_cw": True},
-    30:  {"name": "CeilingLight_RGBCW_0x1E", "has_rgb": True, "has_ww": True, "has_cw": True},
-    41:  {"name": "MirrorLight_0x29", "has_rgb": True, "has_ww": True, "has_cw": True},
-    53:  {"name": "Bulb_RGBCW_R120_0x35", "has_rgb": True, "has_ww": True, "has_cw": True},
-    59:  {"name": "Bulb_RGBCW_0x3B", "has_rgb": True, "has_ww": True, "has_cw": True},
-    68:  {"name": "Bulb_RGBW_0x44", "has_rgb": True, "has_ww": True, "has_cw": True},
-    84:  {"name": "Downlight_RGBW_0X54", "has_rgb": True, "has_ww": True, "has_cw": True},
+    # Bulbs with RGBCW (RGBCWBulb / RGBWBulb BaseType)
+    14:  {"name": "FloorLamp_RGBCW_0x0E", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth"},
+    30:  {"name": "CeilingLight_RGBCW_0x1E", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth"},
+    53:  {"name": "Bulb_RGBCW_R120_0x35", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBulb"},
+    59:  {"name": "Bulb_RGBCW_0x3B", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBulb"},
+    68:  {"name": "Bulb_RGBW_0x44", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBulb"},
+    84:  {"name": "Downlight_RGBW_0X54", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
+
+    # Switches and Sockets (Switch BaseType) - on/off only, no dimming
+    11:  {"name": "Switch_1c_0x0b", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "base_type": "Switch"},
+    147: {"name": "Switch_1C_0x93", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "base_type": "Switch"},
+    148: {"name": "Switch_1c_Watt_0x94", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "has_power_monitoring": True, "base_type": "Switch"},
+    149: {"name": "Switch_2c_0x95", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "channels": 2, "base_type": "Switch"},
+    150: {"name": "Switch_4c_0x96", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "channels": 4, "base_type": "Switch"},
+    151: {"name": "Socket_1c_0x97", "has_rgb": False, "has_ww": False, "has_cw": False, "is_socket": True, "base_type": "Switch"},
 
     # Special/misc devices
-    24:  {"name": "PlantLight_0x18", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True},
-    25:  {"name": "Socket_2Usb_0x19", "has_rgb": False, "has_ww": False, "has_cw": False, "is_socket": True},
-    26:  {"name": "ChristmasLight_0x1A", "has_rgb": True, "has_ww": False, "has_cw": False},
-    27:  {"name": "SprayLight_0x1B", "has_rgb": True, "has_ww": False, "has_cw": False},
-    45:  {"name": "GAON_PlantLight_0x2D", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True},
-    209: {"name": "Digital_Light_0xd1", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True},
+    24:  {"name": "PlantLight_0x18", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special"},
+    25:  {"name": "Socket_2Usb_0x19", "has_rgb": False, "has_ww": False, "has_cw": False, "is_socket": True, "base_type": "Switch"},
+    26:  {"name": "ChristmasLight_0x1A", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB"},
+    27:  {"name": "SprayLight_0x1B", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "Special"},
+    29:  {"name": "FillLight_0x1D", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True, "base_type": "Special"},
+    41:  {"name": "MirrorLight_0x29", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "Special"},
+    45:  {"name": "GAON_PlantLight_0x2D", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special"},
+    209: {"name": "Digital_Light_0xd1", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special"},
 
-    # Ceiling lights
-    225: {"name": "Ctrl_Ceiling_light_0xe1", "has_rgb": False, "has_ww": True, "has_cw": True},
-    226: {"name": "Ctrl_Ceiling_light_Assist_0xe2", "has_rgb": False, "has_ww": True, "has_cw": True},
+    # Ceiling lights (Ceiling BaseType)
+    225: {"name": "Ctrl_Ceiling_light_0xe1", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "Ceiling"},
+    226: {"name": "Ctrl_Ceiling_light_Assist_0xe2", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "Ceiling"},
 
-    # Symphony controllers (RGB with effects)
-    161: {"name": "Ctrl_Mini_RGB_Symphony_0xa1", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100},
-    162: {"name": "Ctrl_Mini_RGB_Symphony_new_0xa2", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100},
-    163: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA3", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100},
-    164: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA4", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100},
-    166: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA6", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100},
-    167: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA7", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100},
-    169: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA9", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100},
+    # Symphony controllers - addressable RGB with effects (RGBSymphony / RGBNewSymphony BaseType)
+    161: {"name": "Ctrl_Mini_RGB_Symphony_0xa1", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBSymphony"},
+    162: {"name": "Ctrl_Mini_RGB_Symphony_new_0xa2", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
+    163: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA3", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
+    164: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA4", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
+    166: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA6", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
+    167: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA7", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
+    169: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA9", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
+
+    # Unknown/None
+    0:   {"name": "TypeNone", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True, "base_type": "None"},
 }
 
 
@@ -265,108 +390,367 @@ def wrap_command(raw_payload: bytes, cmd_family: int = 0x0b, seq: int = 0) -> by
     """
     Wrap a raw command payload in the transport layer format.
 
-    Based on protocol doc section 10.5.7 and existing HA integration packets.
+    Based on protocol_docs/06_transport_layer_protocol.md:
 
     Header format (8 bytes):
-      - Bytes 0-1: Sequence number (little-endian)
-      - Byte 2: 0x80 (flags)
-      - Bytes 3-4: 0x00, 0x00 (reserved)
-      - Byte 5: payload_len (length of payload including checksum)
-      - Byte 6: payload_len + 1
-      - Byte 7: cmd_family (0x0a = query, 0x0b = command)
+      - Byte 0: Header flags (0x00 for version 0, not segmented)
+      - Byte 1: Sequence number (0-255)
+      - Bytes 2-3: Frag Control (0x80, 0x00 = single complete segment)
+      - Bytes 4-5: Total payload length (big-endian)
+      - Byte 6: Payload length + 1 (for cmdId)
+      - Byte 7: cmdId (0x0a = expects response, 0x0b = no response)
 
-    Payload is followed by a checksum byte.
+    NOTE: raw_payload should already include checksum if the command requires one.
+          This function does NOT add a checksum - that's part of the command itself.
 
     Args:
-        raw_payload: Raw command bytes (without checksum)
-        cmd_family: 0x0a for queries, 0x0b for commands
-        seq: Sequence number (0-65535)
+        raw_payload: Raw command bytes (including checksum if needed)
+        cmd_family: 0x0a for queries expecting response, 0x0b for commands
+        seq: Sequence number (0-255)
 
     Returns:
         Complete wrapped packet ready to send
     """
-    payload_len = len(raw_payload) + 1  # +1 for checksum
+    payload_len = len(raw_payload)
 
-    # Build header
-    packet = bytearray(8 + len(raw_payload) + 1)
-    packet[0] = seq & 0xFF
-    packet[1] = (seq >> 8) & 0xFF
-    packet[2] = 0x80
-    packet[3] = 0x00
-    packet[4] = 0x00
-    packet[5] = payload_len
-    packet[6] = payload_len + 1
-    packet[7] = cmd_family
+    # Build header per protocol_docs/06_transport_layer_protocol.md
+    packet = bytearray(8 + payload_len)
+    packet[0] = 0x00                      # Header: version 0, not segmented
+    packet[1] = seq & 0xFF                # Sequence number (single byte)
+    packet[2] = 0x80                      # Frag control high byte
+    packet[3] = 0x00                      # Frag control low byte
+    packet[4] = (payload_len >> 8) & 0xFF # Total length high byte
+    packet[5] = payload_len & 0xFF        # Total length low byte
+    packet[6] = (payload_len + 1) & 0xFF  # Payload length + 1
+    packet[7] = cmd_family                # cmdId
 
-    # Add payload
-    packet[8:8+len(raw_payload)] = raw_payload
-
-    # Calculate checksum (sum of payload bytes, mod 256)
-    checksum = sum(raw_payload) & 0xFF
-    packet[-1] = checksum
+    # Add payload (already includes checksum if needed)
+    packet[8:] = raw_payload
 
     return packet
 
 
-def build_rgb_probe_packet(brightness: int = 100) -> bytearray:
+def build_rgb_probe_packet(brightness: int = 100, format_type: str = "9byte") -> bytearray:
     """
     Build a packet to set RGB color (for probing RGB capability).
 
-    Uses the 0x53 model format which is common across many devices.
-    Sets a red color (hue=0, sat=100) to test if RGB channels respond.
-    Format: 0x3b (HSV cmd), 0xa1 (mode), hue, sat, brightness, padding...
+    Different devices may require different command formats:
+    - "9byte": [0x31, R, G, B, WW, CW, Mode(0xF0), Persist(0x0F), CS] - RGBCW devices
+    - "8byte_v": [0x31, R, G, B, W, 0x00, Persist(0x0F), CS] - tc.b.v() format
+    - "8byte_x": [0x31, R, G, B, W, Mode, Persist(0x0F), CS] - tc.b.x() format
+    - "symphony": 0x3B HSV command for BLE v5+ devices
+
+    Source: tc/b.java methods t(), v(), x() and tc/d.java method a()
     """
-    hue = 0    # Red
-    sat = 100  # Full saturation
-    # Build HS color packet (21 bytes total with header)
-    packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 3b a1 00 64 64 00 00 00 00 00 00 00 00")
-    packet[10] = hue
-    packet[11] = sat
-    packet[12] = brightness
-    return packet
+    r_value = brightness & 0xFF
+
+    if format_type == "9byte":
+        # tc.b.t() format - 9 bytes: [0x31, R, G, B, 0, 0, 0xF0, 0x0F, CS]
+        raw_cmd = bytearray([0x31, r_value, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "8byte_v":
+        # tc.b.v() format - 8 bytes: [0x31, R, G, B, W, 0x00, 0x0F, CS]
+        raw_cmd = bytearray([0x31, r_value, 0x00, 0x00, 0x00, 0x00, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "8byte_x":
+        # tc.b.x() format - 8 bytes: [0x31, R, G, B, W, mode(0xF0), 0x0F, CS]
+        raw_cmd = bytearray([0x31, r_value, 0x00, 0x00, 0x00, 0xF0, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "symphony":
+        # tc.d.a() format - 0x3B HSV command for BLE v5+ devices
+        # Mode 0xA1 (161) for color, HSV=0/100/brightness, time=30
+        # [0x3B, mode, HSV_hi, HSV_lo, brightness, 0, 0, time_hi, time_mid, time_lo, 0, 0, CS]
+        # For red: Hue=0, Sat=100, Val=brightness
+        hue = 0
+        sat = 100
+        val = min(brightness, 100)  # 0-100 for brightness
+        packed_hs = (hue << 7) | sat
+        hs_hi = (packed_hs >> 8) & 0xFF
+        hs_lo = packed_hs & 0xFF
+        time_val = 30
+        raw_cmd = bytearray([0x3B, 0xA1, hs_hi, hs_lo, val, 0x00, 0x00, 0x00, 0x00, time_val, 0x00, 0x00])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    else:
+        raise ValueError(f"Unknown format_type: {format_type}")
+
+    # Wrap in transport layer
+    return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
 
 
-def build_ww_probe_packet(brightness: int = 50) -> bytearray:
+def build_ww_probe_packet(brightness: int = 50, format_type: str = "9byte") -> bytearray:
     """
     Build a packet to set warm white (for probing WW capability).
 
-    Uses CCT mode with warm bias (color_temp_pct = 0 = warmest).
+    Different devices may require different command formats.
+    Source: tc/b.java methods t(), v(), x()
     """
-    # CCT packet with warm bias
-    packet = bytearray.fromhex("00 10 80 00 00 0d 0e 0b 3b b1 00 00 00 00 00 00 00 00 00 00 3d")
-    packet[13] = 0  # color_temp_pct = 0 (warmest)
-    packet[14] = brightness  # brightness percentage
-    return packet
+    ww_value = brightness & 0xFF
+
+    if format_type == "9byte":
+        # [0x31, R, G, B, WW, CW, 0x0F, 0x0F, CS]
+        raw_cmd = bytearray([0x31, 0x00, 0x00, 0x00, ww_value, 0x00, 0x0F, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "8byte_v":
+        # tc.b.v() format - put WW in byte[4]
+        raw_cmd = bytearray([0x31, 0x00, 0x00, 0x00, ww_value, 0x00, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "8byte_x":
+        # tc.b.x() format - put WW in byte[4], mode based on W>0
+        raw_cmd = bytearray([0x31, 0x00, 0x00, 0x00, ww_value, 0x0F, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    else:
+        raise ValueError(f"Unknown format_type: {format_type}")
+
+    return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
 
 
-def build_cw_probe_packet(brightness: int = 50) -> bytearray:
+def build_cw_probe_packet(brightness: int = 50, format_type: str = "9byte") -> bytearray:
     """
     Build a packet to set cool white (for probing CW capability).
 
-    Uses CCT mode with cool bias (color_temp_pct = 100 = coolest).
+    Different devices may require different command formats.
+    Source: tc/b.java methods t(), v(), x()
     """
-    # CCT packet with cool bias
-    packet = bytearray.fromhex("00 10 80 00 00 0d 0e 0b 3b b1 00 00 00 00 00 00 00 00 00 00 3d")
-    packet[13] = 100  # color_temp_pct = 100 (coolest)
-    packet[14] = brightness  # brightness percentage
-    return packet
+    cw_value = brightness & 0xFF
+
+    if format_type == "9byte":
+        # [0x31, R, G, B, WW, CW, 0x0F, 0x0F, CS]
+        raw_cmd = bytearray([0x31, 0x00, 0x00, 0x00, 0x00, cw_value, 0x0F, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "8byte_v":
+        # tc.b.v() format - CW would need different handling
+        # Most 8-byte devices don't have separate CW channel
+        raw_cmd = bytearray([0x31, 0x00, 0x00, 0x00, cw_value, 0x00, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "8byte_x":
+        # tc.b.x() format
+        raw_cmd = bytearray([0x31, 0x00, 0x00, 0x00, cw_value, 0x0F, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    else:
+        raise ValueError(f"Unknown format_type: {format_type}")
+
+    return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
+
+
+def build_power_on_packet() -> bytearray:
+    """
+    Build a packet to turn the device ON.
+
+    Uses the 0x11 power command from protocol_docs/07_control_commands.md.
+    Format: [0x11, 0x1A, 0x1B, 0xF0, checksum]
+    """
+    return wrap_command(POWER_ON_RAW, cmd_family=0x0b, seq=0)
+
+
+def build_power_off_packet() -> bytearray:
+    """
+    Build a packet to turn the device OFF.
+
+    Uses the 0x11 power command from protocol_docs/07_control_commands.md.
+    Format: [0x11, 0x1A, 0x1B, 0x0F, checksum]
+    """
+    return wrap_command(POWER_OFF_RAW, cmd_family=0x0b, seq=0)
+
+
+async def send_power_command(device: BLEDevice, turn_on: bool) -> bool:
+    """
+    Connect to device and send power on/off command (legacy 0x11 version).
+
+    Uses the 0x11 command format from tc/b.java method m() lines 1648-1657.
+    NOTE: This is a very old command that DOESN'T WORK on most modern devices.
+    Use send_power_command_ha() for BLE v5+ devices (recommended).
+    Use send_power_command_0x71() for BLE v1-4 devices.
+
+    Args:
+        device: BLEDevice to control
+        turn_on: True to turn on, False to turn off
+
+    Returns:
+        True if command was sent successfully
+    """
+    action = "ON" if turn_on else "OFF"
+    print(f"\n  Sending POWER {action} (legacy 0x11 - often doesn't work) to {device.name or device.address}...")
+
+    try:
+        async with BleakClient(device.address, timeout=10.0) as client:
+            # Find write characteristic
+            write_char = None
+            for service in client.services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == WRITE_CHARACTERISTIC_UUID.lower():
+                        write_char = char
+                        break
+
+            if not write_char:
+                print(f"  Error: Write characteristic not found")
+                return False
+
+            # Determine write method
+            use_response = "write" in write_char.properties and "write-without-response" not in write_char.properties
+
+            # Build and send command
+            packet = build_power_on_packet() if turn_on else build_power_off_packet()
+            print(f"  Sending: {format_bytes_hex(packet)}")
+
+            await client.write_gatt_char(write_char.uuid, packet, response=use_response)
+            print(f"  ✓ Power {action} command sent!")
+            return True
+
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+
+async def send_power_command_ha(device: BLEDevice, turn_on: bool) -> bool:
+    """
+    Connect to device and send power on/off command (modern 0x3B version).
+
+    Uses the pre-wrapped 0x3B command format with PowerType mode byte.
+    This is the RECOMMENDED power command for BLE v5+ devices (most modern devices).
+
+    Source: CommandPackagePowerOverDuraion.java, tc/d.java method c()
+    PowerType: 0x23 = ON, 0x24 = OFF
+
+    Args:
+        device: BLEDevice to control
+        turn_on: True to turn on, False to turn off
+
+    Returns:
+        True if command was sent successfully
+    """
+    action = "ON" if turn_on else "OFF"
+    print(f"\n  Sending POWER {action} (modern 0x3B - BLE v5+) to {device.name or device.address}...")
+
+    try:
+        async with BleakClient(device.address, timeout=10.0) as client:
+            # Find write characteristic
+            write_char = None
+            for service in client.services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == WRITE_CHARACTERISTIC_UUID.lower():
+                        write_char = char
+                        break
+
+            if not write_char:
+                print(f"  Error: Write characteristic not found")
+                return False
+
+            # Determine write method
+            use_response = "write" in write_char.properties and "write-without-response" not in write_char.properties
+
+            # Use pre-wrapped 0x3B power commands (no need to call wrap_command)
+            packet = POWER_ON_0x3B_WRAPPED if turn_on else POWER_OFF_0x3B_WRAPPED
+            print(f"  Sending: {format_bytes_hex(packet)}")
+
+            await client.write_gatt_char(write_char.uuid, packet, response=use_response)
+            print(f"  ✓ Power {action} command sent!")
+            return True
+
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+
+async def send_power_command_0x71(device: BLEDevice, turn_on: bool) -> bool:
+    """
+    Connect to device and send power on/off command (legacy 0x71 version).
+
+    Uses the 0x71 command format for BLE v1-4 devices.
+    Source: tc/b.java method M() lines 759-772
+    State: 0x23 = ON, 0x24 = OFF
+
+    Args:
+        device: BLEDevice to control
+        turn_on: True to turn on, False to turn off
+
+    Returns:
+        True if command was sent successfully
+    """
+    action = "ON" if turn_on else "OFF"
+    print(f"\n  Sending POWER {action} (legacy 0x71 - BLE v1-4) to {device.name or device.address}...")
+
+    try:
+        async with BleakClient(device.address, timeout=10.0) as client:
+            # Find write characteristic
+            write_char = None
+            for service in client.services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == WRITE_CHARACTERISTIC_UUID.lower():
+                        write_char = char
+                        break
+
+            if not write_char:
+                print(f"  Error: Write characteristic not found")
+                return False
+
+            # Determine write method
+            use_response = "write" in write_char.properties and "write-without-response" not in write_char.properties
+
+            # Wrap 0x71 command in transport layer
+            raw_packet = POWER_ON_0x71_RAW if turn_on else POWER_OFF_0x71_RAW
+            packet = wrap_command(raw_packet, cmd_family=0x0b, seq=0)
+            print(f"  Sending: {format_bytes_hex(packet)}")
+
+            await client.write_gatt_char(write_char.uuid, packet, response=use_response)
+            print(f"  ✓ Power {action} command sent!")
+            return True
+
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+
+async def send_power_command_auto(device: BLEDevice, turn_on: bool) -> bool:
+    """
+    Connect to device and send power on/off command with AUTO-DETECTION.
+
+    Automatically selects the appropriate power command based on BLE version
+    extracted from the device name:
+        - BLE v5+: Uses modern 0x3B command
+        - BLE v1-4: Uses legacy 0x71 command
+        - Unknown: Defaults to 0x3B (most devices are modern)
+
+    Source: protocol_docs/04_device_identification_capabilities.md
+
+    Args:
+        device: BLEDevice to control
+        turn_on: True to turn on, False to turn off
+
+    Returns:
+        True if command was sent successfully
+    """
+    # Extract BLE version from device name
+    ble_version = extract_ble_version_from_name(device.name)
+    recommended_cmd = get_recommended_power_command(ble_version)
+
+    action = "ON" if turn_on else "OFF"
+    version_str = f"v{ble_version}" if ble_version else "unknown"
+    print(f"\n  AUTO-DETECTING power command for {device.name or device.address}...")
+    print(f"  BLE version: {version_str} → using {recommended_cmd} command")
+
+    if recommended_cmd == "0x3B":
+        return await send_power_command_ha(device, turn_on)
+    else:
+        return await send_power_command_0x71(device, turn_on)
 
 
 async def detect_capabilities_via_probe(
     client: BleakClient,
     write_char_uuid: str,
     notify_char_uuid: str,
-    use_response: bool = False
+    use_response: bool = False,
+    ble_version: int = 0
 ) -> DeviceCapabilities:
     """
     Actively probe device to detect capabilities (from protocol doc section 10.5.8).
 
     This function:
     1. Queries current state to save it
-    2. Sends RGB probe command, queries state, checks if RGB channels changed
-    3. Sends WW probe command, queries state, checks if WW channel changed
-    4. Sends CW probe command, queries state, checks if CW channel changed
-    5. Returns detected capabilities
+    2. Tries multiple command formats to find one that works
+    3. Sends RGB probe command, queries state, checks if RGB channels changed
+    4. Sends WW probe command, queries state, checks if WW channel changed
+    5. Sends CW probe command, queries state, checks if CW channel changed
+    6. Returns detected capabilities
 
     NOTE: This WILL change the device's current color/state temporarily.
     The caller should restore the original state afterward if needed.
@@ -376,6 +760,7 @@ async def detect_capabilities_via_probe(
         write_char_uuid: UUID of write characteristic
         notify_char_uuid: UUID of notify characteristic
         use_response: Whether to use write-with-response
+        ble_version: BLE version from manufacturer data (determines format order)
 
     Returns:
         DeviceCapabilities with detected flags
@@ -415,9 +800,24 @@ async def detect_capabilities_via_probe(
         except Exception:
             return False
 
+    # Determine format order based on BLE version
+    # BLE v5+ prefers symphony (0x3B) commands, older versions use 0x31
+    # From Protocol/r.java analysis:
+    # - BLE v5+: Try symphony first, then 8byte_x
+    # - BLE v1-4: Try 8byte_x first, then 9byte
+    # - Unknown (0): Try all formats
+    if ble_version >= 5:
+        format_order = ["symphony", "8byte_x", "8byte_v", "9byte"]
+    elif ble_version >= 1:
+        format_order = ["8byte_x", "8byte_v", "9byte", "symphony"]
+    else:
+        format_order = ["9byte", "8byte_x", "8byte_v", "symphony"]
+
     # Enable notifications
     await client.start_notify(notify_char_uuid, notification_handler)
     await asyncio.sleep(0.2)
+
+    working_format = None
 
     try:
         # Step 1: Get initial state
@@ -430,52 +830,88 @@ async def detect_capabilities_via_probe(
 
         print(f"    Probing: Initial state - RGB({initial_state.red},{initial_state.green},{initial_state.blue}) "
               f"WW={initial_state.warm_white} CW={initial_state.cool_white}")
+        print(f"    Probing: BLE version={ble_version}, format order={format_order}")
 
-        # Step 2: Probe RGB capability
+        # Step 2: Probe RGB capability - try different formats until one works
         print("    Probing: Testing RGB capability...")
-        rgb_packet = build_rgb_probe_packet(brightness=50)
-        if await send_probe(rgb_packet):
-            state = await query_state()
-            if state:
-                # Check if any RGB channel responded
-                if state.red > 0 or state.green > 0 or state.blue > 0:
-                    caps.has_rgb = True
-                    caps.rgb_confirmed = True
-                    print(f"    Probing: RGB DETECTED - R={state.red} G={state.green} B={state.blue}")
+        for format_type in format_order:
+            print(f"      Trying format: {format_type}")
+            try:
+                rgb_packet = build_rgb_probe_packet(brightness=50, format_type=format_type)
+            except ValueError:
+                continue  # Skip unsupported formats
+
+            if await send_probe(rgb_packet):
+                state = await query_state()
+                if state:
+                    # Check if any RGB channel responded
+                    if state.red > 0 or state.green > 0 or state.blue > 0:
+                        caps.has_rgb = True
+                        caps.rgb_confirmed = True
+                        working_format = format_type
+                        print(f"    Probing: RGB DETECTED with format={format_type} - R={state.red} G={state.green} B={state.blue}")
+                        break
+                    else:
+                        print(f"      Format {format_type}: RGB channels unchanged, trying next...")
                 else:
-                    print("    Probing: RGB not detected (channels unchanged)")
+                    print(f"      Format {format_type}: No state response")
+            else:
+                print(f"      Format {format_type}: Failed to send")
+
+        if not caps.has_rgb:
+            print("    Probing: RGB not detected with any format")
+
+        # Use the working format for WW/CW if we found one, otherwise try all
+        ww_cw_formats = [working_format] if working_format else format_order
 
         # Step 3: Probe WW capability
         print("    Probing: Testing Warm White capability...")
-        ww_packet = build_ww_probe_packet(brightness=50)
-        if await send_probe(ww_packet):
-            state = await query_state()
-            if state:
-                if state.warm_white > 0:
+        for format_type in ww_cw_formats:
+            if format_type == "symphony":
+                continue  # Symphony doesn't have a WW-only mode
+            print(f"      Trying format: {format_type}")
+            try:
+                ww_packet = build_ww_probe_packet(brightness=50, format_type=format_type)
+            except ValueError:
+                continue
+
+            if await send_probe(ww_packet):
+                state = await query_state()
+                if state and state.warm_white > 0:
                     caps.has_ww = True
                     caps.ww_confirmed = True
-                    print(f"    Probing: WW DETECTED - value={state.warm_white}")
-                else:
-                    print("    Probing: WW not detected (channel unchanged)")
+                    print(f"    Probing: WW DETECTED with format={format_type} - value={state.warm_white}")
+                    break
+        if not caps.has_ww:
+            print("    Probing: WW not detected")
 
         # Step 4: Probe CW capability
         print("    Probing: Testing Cool White capability...")
-        cw_packet = build_cw_probe_packet(brightness=50)
-        if await send_probe(cw_packet):
-            state = await query_state()
-            if state:
-                if state.cool_white > 0:
+        for format_type in ww_cw_formats:
+            if format_type == "symphony":
+                continue  # Symphony doesn't have a CW-only mode
+            print(f"      Trying format: {format_type}")
+            try:
+                cw_packet = build_cw_probe_packet(brightness=50, format_type=format_type)
+            except ValueError:
+                continue
+
+            if await send_probe(cw_packet):
+                state = await query_state()
+                if state and state.cool_white > 0:
                     caps.has_cw = True
                     caps.cw_confirmed = True
-                    print(f"    Probing: CW DETECTED - value={state.cool_white}")
-                else:
-                    print("    Probing: CW not detected (channel unchanged)")
+                    print(f"    Probing: CW DETECTED with format={format_type} - value={state.cool_white}")
+                    break
+        if not caps.has_cw:
+            print("    Probing: CW not detected")
 
         # Check dimmability from any state we got
         if initial_state.brightness > 0:
             caps.is_dimmable = True
 
         print(f"\n    Probing complete: RGB={caps.has_rgb}, WW={caps.has_ww}, CW={caps.has_cw}")
+        print(f"    Working format: {working_format or 'none found'}")
         print(f"    Suggested color mode: {caps.color_mode_str}")
 
     finally:
@@ -1085,8 +1521,10 @@ async def connect_and_query_device(
                 # Stop current notifications first (detect_capabilities_via_probe will start its own)
                 await client.stop_notify(notify_char.uuid)
 
+                # Pass BLE version to help determine which command format to try first
+                ble_ver = manu_data.ble_version if manu_data else 0
                 probed_caps = await detect_capabilities_via_probe(
-                    client, write_char.uuid, notify_char.uuid, use_response
+                    client, write_char.uuid, notify_char.uuid, use_response, ble_version=ble_ver
                 )
 
                 if probed_caps.detection_method != "probe_failed":
@@ -1513,14 +1951,25 @@ async def interactive_mode(duration: float = 10.0):
             cached = get_cached_capabilities(device.address)
             cache_indicator = " [cached]" if cached else ""
             marker = " <--" if selected_device_idx == i - 1 else ""
-            print(f"  {i}. {name} ({device.address}) - {caps['name']}{cache_indicator}{marker}")
+            # Show BLE version from device name
+            ble_ver = extract_ble_version_from_name(device.name)
+            ver_str = f" [BLE v{ble_ver}]" if ble_ver else ""
+            print(f"  {i}. {name} ({device.address}) - {caps['name']}{ver_str}{cache_indicator}{marker}")
 
-        print("\nOptions:")
-        print("  [1-N]  Connect to device and query state")
-        print("  [p N]  Probe device N for capabilities (will change device color!)")
-        print("  [c N]  Clear cached capabilities for device N")
-        print("  [r]    Rescan for devices")
-        print("  [q]    Quit")
+        print("\nPower commands:")
+        print("  [pow N]   Turn device N ON/OFF (AUTO-SELECT based on BLE version)")
+        print("  [on N]    Turn device N ON  (legacy 0x11 - often doesn't work)")
+        print("  [off N]   Turn device N OFF (legacy 0x11 - often doesn't work)")
+        print("  [on2 N]   Turn device N ON  (modern 0x3B - BLE v5+)")
+        print("  [off2 N]  Turn device N OFF (modern 0x3B - BLE v5+)")
+        print("  [on3 N]   Turn device N ON  (legacy 0x71 - BLE v1-4)")
+        print("  [off3 N]  Turn device N OFF (legacy 0x71 - BLE v1-4)")
+        print("\nOther options:")
+        print("  [1-N]     Connect to device and query state")
+        print("  [p N]     Probe device N for capabilities (will change device color!)")
+        print("  [c N]     Clear cached capabilities for device N")
+        print("  [r]       Rescan for devices")
+        print("  [q]       Quit")
 
         try:
             choice = input("\nEnter choice: ").strip().lower()
@@ -1535,6 +1984,101 @@ async def interactive_mode(duration: float = 10.0):
             found_devices = await scan_once(duration)
             if not found_devices:
                 print("No devices found. Try again or quit.")
+        elif choice.startswith('pow '):
+            # Toggle power with AUTO-SELECT command based on BLE version
+            parts = choice.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                if 0 <= idx < len(found_devices):
+                    device, _, _, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    # Determine on/off from optional third argument, default to ON
+                    if len(parts) >= 3 and parts[2] in ('off', '0', 'false'):
+                        await send_power_command_auto(device, turn_on=False)
+                    else:
+                        await send_power_command_auto(device, turn_on=True)
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: pow N [on|off] (where N is the device number)")
+        elif choice.startswith('on ') and not choice.startswith('on2') and not choice.startswith('on3'):
+            # Turn device ON (protocol doc version)
+            parts = choice.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                if 0 <= idx < len(found_devices):
+                    device, _, _, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    await send_power_command(device, turn_on=True)
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: on N (where N is the device number)")
+        elif choice.startswith('off ') and not choice.startswith('off2') and not choice.startswith('off3'):
+            # Turn device OFF (legacy 0x11 version)
+            parts = choice.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                if 0 <= idx < len(found_devices):
+                    device, _, _, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    await send_power_command(device, turn_on=False)
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: off N (where N is the device number)")
+        elif choice.startswith('on2 '):
+            # Turn device ON (modern 0x3B - BLE v5+, recommended)
+            parts = choice.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                if 0 <= idx < len(found_devices):
+                    device, _, _, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    await send_power_command_ha(device, turn_on=True)
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: on2 N (where N is the device number)")
+        elif choice.startswith('off2 '):
+            # Turn device OFF (modern 0x3B - BLE v5+, recommended)
+            parts = choice.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                if 0 <= idx < len(found_devices):
+                    device, _, _, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    await send_power_command_ha(device, turn_on=False)
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: off2 N (where N is the device number)")
+        elif choice.startswith('on3 '):
+            # Turn device ON (legacy 0x71 - BLE v1-4)
+            parts = choice.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                if 0 <= idx < len(found_devices):
+                    device, _, _, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    await send_power_command_0x71(device, turn_on=True)
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: on3 N (where N is the device number)")
+        elif choice.startswith('off3 '):
+            # Turn device OFF (legacy 0x71 - BLE v1-4)
+            parts = choice.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                if 0 <= idx < len(found_devices):
+                    device, _, _, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    await send_power_command_0x71(device, turn_on=False)
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: off3 N (where N is the device number)")
         elif choice.startswith('p ') or choice.startswith('p'):
             # Probe capabilities
             parts = choice.split()
@@ -1581,7 +2125,7 @@ async def interactive_mode(duration: float = 10.0):
             else:
                 print(f"Invalid choice. Enter 1-{len(found_devices)}")
         else:
-            print("Invalid choice. Enter a number, 'p N', 'c N', 'r', or 'q'.")
+            print("Invalid choice. Enter 'pow N', 'on/on2/on3 N', 'off/off2/off3 N', 'p N', 'c N', 'r', or 'q'.")
 
 
 def main():
