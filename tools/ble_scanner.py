@@ -210,11 +210,7 @@ POWER_ON_0x11_RAW.append(sum(POWER_ON_0x11_RAW) & 0xFF)  # = 0xE6
 POWER_OFF_0x11_RAW = bytearray([0x11, 0x1A, 0x1B, 0x0F])
 POWER_OFF_0x11_RAW.append(sum(POWER_OFF_0x11_RAW) & 0xFF)  # = 0x55
 
-# Aliases for backward compatibility (HA integration uses these names)
-HA_POWER_ON_WRAPPED = POWER_ON_0x3B_WRAPPED
-HA_POWER_OFF_WRAPPED = POWER_OFF_0x3B_WRAPPED
-POWER_ON_RAW = POWER_ON_0x11_RAW   # Legacy alias (often doesn't work)
-POWER_OFF_RAW = POWER_OFF_0x11_RAW  # Legacy alias (often doesn't work)
+# Note: 0x11 commands kept for reference but not used - most devices ignore them
 
 # Capability cache file location
 CAPABILITY_CACHE_FILE = os.path.expanduser("~/.lednetwf_capabilities.json")
@@ -282,13 +278,14 @@ PRODUCT_ID_CAPABILITIES = {
     226: {"name": "Ctrl_Ceiling_light_Assist_0xe2", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "Ceiling"},
 
     # Symphony controllers - addressable RGB with effects (RGBSymphony / RGBNewSymphony BaseType)
-    161: {"name": "Ctrl_Mini_RGB_Symphony_0xa1", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBSymphony"},
-    162: {"name": "Ctrl_Mini_RGB_Symphony_new_0xa2", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
-    163: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA3", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
-    164: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA4", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
-    166: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA6", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
-    167: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA7", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
-    169: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA9", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony"},
+    # These support segments (addressable LEDs), IC chip type selection, and LED count configuration
+    161: {"name": "Ctrl_Mini_RGB_Symphony_0xa1", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBSymphony", "has_segments": True, "has_ic_config": True},
+    162: {"name": "Ctrl_Mini_RGB_Symphony_new_0xa2", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
+    163: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA3", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
+    164: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA4", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
+    166: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA6", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
+    167: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA7", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
+    169: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA9", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
 
     # Unknown/None
     0:   {"name": "TypeNone", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True, "base_type": "None"},
@@ -304,11 +301,19 @@ class DeviceCapabilities:
     1. Product ID lookup (initial guess from PRODUCT_ID_CAPABILITIES)
     2. State query response (check which channels have non-zero values)
     3. Active probing (definitively test each channel if needed)
+    4. LED Settings response (0x63) - indicates addressable LED support
     """
     has_rgb: bool = False
     has_ww: bool = False  # Warm white
     has_cw: bool = False  # Cool white
     is_dimmable: bool = True  # Most devices support brightness
+
+    # Addressable LED (Symphony) capabilities
+    has_segments: bool = False  # Supports addressable LED segments (Symphony devices)
+    has_ic_config: bool = False  # Can configure IC chip type (WS2812B, SK6812, etc)
+    led_count: Optional[int] = None  # Configured LED count (from 0x63 response)
+    ic_type: Optional[int] = None  # IC chip type code (from 0x63 response)
+    color_order: Optional[int] = None  # RGB color order code (from 0x63 response)
 
     # Detection metadata
     detection_method: str = "unknown"  # "product_id", "state_query", "active_probe"
@@ -320,6 +325,7 @@ class DeviceCapabilities:
     rgb_confirmed: bool = False
     ww_confirmed: bool = False
     cw_confirmed: bool = False
+    segments_confirmed: bool = False  # True if 0x63 response was valid
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -532,75 +538,6 @@ def build_cw_probe_packet(brightness: int = 50, format_type: str = "9byte") -> b
     return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
 
 
-def build_power_on_packet() -> bytearray:
-    """
-    Build a packet to turn the device ON.
-
-    Uses the 0x11 power command from protocol_docs/07_control_commands.md.
-    Format: [0x11, 0x1A, 0x1B, 0xF0, checksum]
-    """
-    return wrap_command(POWER_ON_RAW, cmd_family=0x0b, seq=0)
-
-
-def build_power_off_packet() -> bytearray:
-    """
-    Build a packet to turn the device OFF.
-
-    Uses the 0x11 power command from protocol_docs/07_control_commands.md.
-    Format: [0x11, 0x1A, 0x1B, 0x0F, checksum]
-    """
-    return wrap_command(POWER_OFF_RAW, cmd_family=0x0b, seq=0)
-
-
-async def send_power_command(device: BLEDevice, turn_on: bool) -> bool:
-    """
-    Connect to device and send power on/off command (legacy 0x11 version).
-
-    Uses the 0x11 command format from tc/b.java method m() lines 1648-1657.
-    NOTE: This is a very old command that DOESN'T WORK on most modern devices.
-    Use send_power_command_ha() for BLE v5+ devices (recommended).
-    Use send_power_command_0x71() for BLE v1-4 devices.
-
-    Args:
-        device: BLEDevice to control
-        turn_on: True to turn on, False to turn off
-
-    Returns:
-        True if command was sent successfully
-    """
-    action = "ON" if turn_on else "OFF"
-    print(f"\n  Sending POWER {action} (legacy 0x11 - often doesn't work) to {device.name or device.address}...")
-
-    try:
-        async with BleakClient(device.address, timeout=10.0) as client:
-            # Find write characteristic
-            write_char = None
-            for service in client.services:
-                for char in service.characteristics:
-                    if char.uuid.lower() == WRITE_CHARACTERISTIC_UUID.lower():
-                        write_char = char
-                        break
-
-            if not write_char:
-                print(f"  Error: Write characteristic not found")
-                return False
-
-            # Determine write method
-            use_response = "write" in write_char.properties and "write-without-response" not in write_char.properties
-
-            # Build and send command
-            packet = build_power_on_packet() if turn_on else build_power_off_packet()
-            print(f"  Sending: {format_bytes_hex(packet)}")
-
-            await client.write_gatt_char(write_char.uuid, packet, response=use_response)
-            print(f"  ✓ Power {action} command sent!")
-            return True
-
-    except Exception as e:
-        print(f"  Error: {e}")
-        return False
-
-
 async def send_power_command_ha(device: BLEDevice, turn_on: bool) -> bool:
     """
     Connect to device and send power on/off command (modern 0x3B version).
@@ -700,32 +637,48 @@ async def send_power_command_0x71(device: BLEDevice, turn_on: bool) -> bool:
         return False
 
 
-async def send_power_command_auto(device: BLEDevice, turn_on: bool) -> bool:
+async def toggle_power(device: BLEDevice, manu_data: 'ManufacturerData') -> bool:
     """
-    Connect to device and send power on/off command with AUTO-DETECTION.
+    Toggle device power state with automatic protocol selection.
 
-    Automatically selects the appropriate power command based on BLE version
-    extracted from the device name:
+    This function:
+    1. Reads current power state from manufacturer data advertisement
+    2. Selects appropriate protocol based on BLE version (from name or manu_data)
+    3. Sends the command to toggle the state (ON→OFF or OFF→ON)
+
+    Protocol selection (from protocol_docs/04_device_identification_capabilities.md):
         - BLE v5+: Uses modern 0x3B command
         - BLE v1-4: Uses legacy 0x71 command
         - Unknown: Defaults to 0x3B (most devices are modern)
 
-    Source: protocol_docs/04_device_identification_capabilities.md
-
     Args:
         device: BLEDevice to control
-        turn_on: True to turn on, False to turn off
+        manu_data: Parsed manufacturer data with power state and BLE version
 
     Returns:
         True if command was sent successfully
     """
-    # Extract BLE version from device name
-    ble_version = extract_ble_version_from_name(device.name)
+    # Determine current state and desired action
+    current_state = manu_data.power_state  # "ON", "OFF", or None
+    if current_state == "ON":
+        turn_on = False
+        action = "OFF"
+    elif current_state == "OFF":
+        turn_on = True
+        action = "ON"
+    else:
+        # Unknown state - default to turning ON
+        turn_on = True
+        action = "ON (state unknown)"
+
+    # Get BLE version - prefer from manu_data, fallback to device name
+    ble_version = manu_data.ble_version if manu_data.ble_version else extract_ble_version_from_name(device.name)
     recommended_cmd = get_recommended_power_command(ble_version)
 
-    action = "ON" if turn_on else "OFF"
     version_str = f"v{ble_version}" if ble_version else "unknown"
-    print(f"\n  AUTO-DETECTING power command for {device.name or device.address}...")
+    current_str = current_state if current_state else "unknown"
+    print(f"\n  Toggling power for {device.name or device.address}...")
+    print(f"  Current state: {current_str} → sending {action}")
     print(f"  BLE version: {version_str} → using {recommended_cmd} command")
 
     if recommended_cmd == "0x3B":
@@ -1289,6 +1242,168 @@ def parse_state_response(data: bytes) -> Optional[StateResponse]:
     )
 
 
+# =============================================================================
+# LED SETTINGS (0x63 Response) - Addressable LED Strip Configuration
+# Source: tc/b.java method g() lines 180-195
+#
+# This response indicates the device supports addressable LED strips (Symphony).
+# Format: [0x63, ledCount_hi, ledCount_lo, icType, colorOrder, param1, param2, param3, freq_hi, freq_lo, unknown, checksum]
+#
+# IC Types (from dd/i.java):
+#   1=UCS1903, 2=SM16703, 3=WS2811, 4=WS2812B, 5=SK6812, 6=INK1003,
+#   7=WS2801/WS2815, 8=LB1914/WS2815, 9=APA102, 10=TM1914, 11=UCS2904B
+#
+# The presence of a valid 0x63 response confirms the device is a Symphony
+# (addressable LED) controller that supports segments.
+# =============================================================================
+
+# Known IC chip types from Java source (dd/i.java)
+IC_TYPES = {
+    1: "UCS1903",
+    2: "SM16703",
+    3: "WS2811",
+    4: "WS2812B",
+    5: "SK6812",
+    6: "INK1003",
+    7: "WS2801",
+    8: "WS2815",
+    9: "APA102",
+    10: "TM1914",
+    11: "UCS2904B",
+    # Additional types from other IC lists
+    12: "JY1903",
+    13: "WS2812E",
+    14: "CF1903B",
+}
+
+# Color orders (common values)
+COLOR_ORDERS = {
+    0: "RGB",
+    1: "RBG",
+    2: "GRB",
+    3: "GBR",
+    4: "BRG",
+    5: "BGR",
+}
+
+
+@dataclass
+class LedSettings:
+    """
+    LED Settings response (0x63) - for addressable LED strips.
+
+    Source: tc/b.java method g() (parsing) and tc/b.java lines 520-540 (setting)
+
+    The presence of this response indicates the device is a "Symphony" type
+    controller that supports addressable LED strips with configurable:
+    - LED count
+    - IC chip type (WS2812B, SK6812, etc.)
+    - Color order (RGB, GRB, etc.)
+    """
+    raw_bytes: bytes
+    valid: bool
+
+    # Parsed fields
+    led_count: int  # Number of LEDs in the strip
+    ic_type: int  # IC chip type code
+    color_order: int  # Color order code
+    param_c: int  # SymphonyICTypeItem.f24024c
+    param_d: int  # SymphonyICTypeItem.f24025d
+    param_e: int  # SymphonyICTypeItem.f24026e
+    param_f: int  # SymphonyICTypeItem.f24027f
+    frequency: int  # LED refresh frequency
+
+    checksum: int
+    checksum_valid: bool
+
+    @property
+    def ic_type_name(self) -> str:
+        """Get human-readable IC type name."""
+        return IC_TYPES.get(self.ic_type, f"Unknown (0x{self.ic_type:02X})")
+
+    @property
+    def color_order_name(self) -> str:
+        """Get human-readable color order name."""
+        return COLOR_ORDERS.get(self.color_order, f"Unknown (0x{self.color_order:02X})")
+
+
+def parse_led_settings(data: bytes) -> Optional[LedSettings]:
+    """
+    Parse a LED settings response (0x63) from the device.
+
+    Source: tc/b.java method g() lines 180-195
+
+    The device may send:
+    1. Raw 12-byte binary response (header 0x63)
+    2. JSON-wrapped hex payload containing the settings
+
+    Returns LedSettings if valid, None if data is invalid or not a LED settings response.
+    """
+    # First, try to extract from JSON wrapper
+    payload = extract_hex_payload_from_notification(data)
+    if payload is None:
+        # Fall back to raw binary
+        payload = data
+
+    if len(payload) < 12:
+        return None
+
+    header = payload[0]
+    if header != 0x63:
+        # Not a LED settings response
+        return None
+
+    # Calculate expected checksum (sum of bytes 0-10)
+    expected_checksum = sum(payload[:11]) & 0xFF
+    actual_checksum = payload[11]
+    checksum_valid = expected_checksum == actual_checksum
+
+    # Parse LED count as big-endian 16-bit value from bytes 1-2
+    led_count = (payload[1] << 8) | payload[2]
+
+    # Parse frequency as big-endian 16-bit value from bytes 8-9
+    frequency = (payload[8] << 8) | payload[9]
+
+    return LedSettings(
+        raw_bytes=payload[:12],
+        valid=checksum_valid,
+        led_count=led_count,
+        ic_type=payload[3],
+        color_order=payload[4],
+        param_c=payload[4],  # Same as color_order in original structure
+        param_d=payload[5],
+        param_e=payload[6],
+        param_f=payload[7],
+        frequency=frequency,
+        checksum=actual_checksum,
+        checksum_valid=checksum_valid,
+    )
+
+
+def print_led_settings(settings: LedSettings):
+    """Print formatted LED settings information."""
+    print("\n" + "-" * 60)
+    print("LED SETTINGS (Addressable Strip Configuration)")
+    print("-" * 60)
+
+    print(f"  Raw Data ({len(settings.raw_bytes)} bytes):")
+    print(f"    {format_bytes_hex(settings.raw_bytes)}")
+
+    if not settings.checksum_valid:
+        print(f"\n  ⚠️  CHECKSUM INVALID: expected 0x{sum(settings.raw_bytes[:11]) & 0xFF:02X}, got 0x{settings.checksum:02X}")
+    else:
+        print(f"\n  ✓ Checksum valid (0x{settings.checksum:02X})")
+
+    print("\n  PARSED FIELDS:")
+    print(f"    LED Count:      {settings.led_count}")
+    print(f"    IC Chip Type:   {settings.ic_type_name} (0x{settings.ic_type:02X})")
+    print(f"    Color Order:    {settings.color_order_name} (0x{settings.color_order:02X})")
+    print(f"    Frequency:      {settings.frequency} Hz")
+
+    print("\n  ✓ This device supports ADDRESSABLE LED STRIPS (Symphony)")
+    print("    Features: Segments, IC chip config, LED count config, Effects")
+
+
 def print_state_response(state: StateResponse):
     """Print formatted state response information."""
     print("\n" + "=" * 70)
@@ -1457,20 +1572,29 @@ async def connect_and_query_device(
 
             await asyncio.sleep(0.5)
 
+            # Parse LED settings response - indicates addressable LED support
+            led_settings = None
             for data in received_data:
                 print(f"\n  LED_SETTINGS response ({len(data)} bytes):")
                 print(f"    Raw: {format_bytes_hex(data)}")
 
-                # Try to extract hex payload from JSON wrapper
-                payload = extract_hex_payload_from_notification(data)
-                if payload:
-                    print(f"    Extracted payload: {format_bytes_hex(payload)}")
-                    if len(payload) >= 5 and payload[0] == 0x63:
-                        print(f"    LED Count:    {payload[2]}")
-                        print(f"    Chip Type:    0x{payload[3]:02X}")
-                        print(f"    Color Order:  0x{payload[4]:02X}")
+                # Try to parse as LED settings
+                led_settings = parse_led_settings(data)
+                if led_settings:
+                    print_led_settings(led_settings)
+                    break
                 else:
-                    print("    (Could not extract JSON-wrapped hex payload)")
+                    # Try to extract hex payload from JSON wrapper for display
+                    payload = extract_hex_payload_from_notification(data)
+                    if payload:
+                        print(f"    Extracted payload: {format_bytes_hex(payload)}")
+                        if len(payload) >= 5 and payload[0] == 0x63:
+                            # Try parsing the extracted payload
+                            led_settings = parse_led_settings(payload)
+                            if led_settings:
+                                print_led_settings(led_settings)
+                                break
+                    print("    Not a valid LED settings response (0x63)")
 
             # Capability Detection
             print("\n  " + "=" * 60)
@@ -1502,10 +1626,26 @@ async def connect_and_query_device(
                 print(f"    RGB: {detected_caps.has_rgb}, WW: {detected_caps.has_ww}, CW: {detected_caps.has_cw}")
                 print(f"    Suggested color mode: {detected_caps.color_mode_str}")
 
+                # Update capabilities with LED settings info if we got a valid response
+                if led_settings and led_settings.valid:
+                    detected_caps.has_segments = True
+                    detected_caps.segments_confirmed = True
+                    detected_caps.has_ic_config = True
+                    detected_caps.led_count = led_settings.led_count
+                    detected_caps.ic_type = led_settings.ic_type
+                    detected_caps.color_order = led_settings.color_order
+                    print(f"\n  ✓ Addressable LED support CONFIRMED (0x63 response valid)")
+                    print(f"    Segments: Yes, LED count: {led_settings.led_count}")
+                    print(f"    IC chip: {led_settings.ic_type_name}, Color order: {led_settings.color_order_name}")
+
                 # Check if this is a stub device that needs probing
                 is_stub = False
                 if product_id and product_id in PRODUCT_ID_CAPABILITIES:
                     is_stub = PRODUCT_ID_CAPABILITIES[product_id].get('is_stub', False)
+                    # Also get segment info from product ID if not confirmed
+                    if not detected_caps.segments_confirmed:
+                        detected_caps.has_segments = PRODUCT_ID_CAPABILITIES[product_id].get('has_segments', False)
+                        detected_caps.has_ic_config = PRODUCT_ID_CAPABILITIES[product_id].get('has_ic_config', False)
 
                 if is_stub:
                     print("\n  ⚠️  This is a STUB device - capabilities may vary by hardware variant")
@@ -1736,8 +1876,9 @@ def print_device_info(device: BLEDevice, adv_data: AdvertisementData, manu_data:
 
     # Capabilities
     caps = manu_data.capabilities
-    print(f"\n  CAPABILITIES (from Product ID):")
+    print("\n  CAPABILITIES (from Product ID):")
     print(f"    Device Type:    {caps['name']}")
+    print(f"    Base Type:      {caps.get('base_type', 'Unknown')}")
 
     # Handle stub devices where capabilities are unknown
     if caps.get('is_stub'):
@@ -1749,6 +1890,13 @@ def print_device_info(device: BLEDevice, adv_data: AdvertisementData, manu_data:
         print(f"    Has RGB:        {'Yes' if caps.get('has_rgb') else 'No'}")
         print(f"    Has Warm White: {'Yes' if caps.get('has_ww') else 'No'}")
         print(f"    Has Cool White: {'Yes' if caps.get('has_cw') else 'No'}")
+
+    # Symphony/addressable LED features
+    if caps.get('has_segments'):
+        print(f"    Segments:       Yes (addressable LED strip)")
+        print(f"    IC Config:      {'Yes' if caps.get('has_ic_config') else 'No'} (chip type, color order)")
+    elif caps.get('base_type') in ('RGBSymphony', 'RGBNewSymphony'):
+        print(f"    Segments:       Likely (Symphony device type)")
 
     if caps.get('has_dim'):
         print("    Dimmer Only:    Yes")
@@ -1951,20 +2099,16 @@ async def interactive_mode(duration: float = 10.0):
             cached = get_cached_capabilities(device.address)
             cache_indicator = " [cached]" if cached else ""
             marker = " <--" if selected_device_idx == i - 1 else ""
-            # Show BLE version from device name
-            ble_ver = extract_ble_version_from_name(device.name)
-            ver_str = f" [BLE v{ble_ver}]" if ble_ver else ""
-            print(f"  {i}. {name} ({device.address}) - {caps['name']}{ver_str}{cache_indicator}{marker}")
+            # Show BLE version (prefer from manu_data, fallback to device name)
+            ble_ver = manu_data.ble_version if manu_data.ble_version else extract_ble_version_from_name(device.name)
+            ver_str = f"v{ble_ver}" if ble_ver else "v?"
+            # Show power state
+            pwr = manu_data.power_state or "?"
+            pwr_indicator = "ON " if pwr == "ON" else "OFF" if pwr == "OFF" else "?  "
+            print(f"  {i}. [{pwr_indicator}] {name} ({device.address}) - {caps['name']} [{ver_str}]{cache_indicator}{marker}")
 
-        print("\nPower commands:")
-        print("  [pow N]   Turn device N ON/OFF (AUTO-SELECT based on BLE version)")
-        print("  [on N]    Turn device N ON  (legacy 0x11 - often doesn't work)")
-        print("  [off N]   Turn device N OFF (legacy 0x11 - often doesn't work)")
-        print("  [on2 N]   Turn device N ON  (modern 0x3B - BLE v5+)")
-        print("  [off2 N]  Turn device N OFF (modern 0x3B - BLE v5+)")
-        print("  [on3 N]   Turn device N ON  (legacy 0x71 - BLE v1-4)")
-        print("  [off3 N]  Turn device N OFF (legacy 0x71 - BLE v1-4)")
-        print("\nOther options:")
+        print("\nCommands:")
+        print("  [pow N]   Toggle power for device N (auto-selects protocol)")
         print("  [1-N]     Connect to device and query state")
         print("  [p N]     Probe device N for capabilities (will change device color!)")
         print("  [c N]     Clear cached capabilities for device N")
@@ -1985,100 +2129,18 @@ async def interactive_mode(duration: float = 10.0):
             if not found_devices:
                 print("No devices found. Try again or quit.")
         elif choice.startswith('pow '):
-            # Toggle power with AUTO-SELECT command based on BLE version
-            parts = choice.split()
-            if len(parts) >= 2 and parts[1].isdigit():
-                idx = int(parts[1]) - 1
-                if 0 <= idx < len(found_devices):
-                    device, _, _, _ = found_devices[idx]
-                    selected_device_idx = idx
-                    # Determine on/off from optional third argument, default to ON
-                    if len(parts) >= 3 and parts[2] in ('off', '0', 'false'):
-                        await send_power_command_auto(device, turn_on=False)
-                    else:
-                        await send_power_command_auto(device, turn_on=True)
-                else:
-                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
-            else:
-                print("Usage: pow N [on|off] (where N is the device number)")
-        elif choice.startswith('on ') and not choice.startswith('on2') and not choice.startswith('on3'):
-            # Turn device ON (protocol doc version)
+            # Toggle power with auto-protocol selection based on BLE version
             parts = choice.split()
             if len(parts) == 2 and parts[1].isdigit():
                 idx = int(parts[1]) - 1
                 if 0 <= idx < len(found_devices):
-                    device, _, _, _ = found_devices[idx]
+                    device, _, manu_data, _ = found_devices[idx]
                     selected_device_idx = idx
-                    await send_power_command(device, turn_on=True)
+                    await toggle_power(device, manu_data)
                 else:
                     print(f"Invalid device number. Enter 1-{len(found_devices)}")
             else:
-                print("Usage: on N (where N is the device number)")
-        elif choice.startswith('off ') and not choice.startswith('off2') and not choice.startswith('off3'):
-            # Turn device OFF (legacy 0x11 version)
-            parts = choice.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                idx = int(parts[1]) - 1
-                if 0 <= idx < len(found_devices):
-                    device, _, _, _ = found_devices[idx]
-                    selected_device_idx = idx
-                    await send_power_command(device, turn_on=False)
-                else:
-                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
-            else:
-                print("Usage: off N (where N is the device number)")
-        elif choice.startswith('on2 '):
-            # Turn device ON (modern 0x3B - BLE v5+, recommended)
-            parts = choice.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                idx = int(parts[1]) - 1
-                if 0 <= idx < len(found_devices):
-                    device, _, _, _ = found_devices[idx]
-                    selected_device_idx = idx
-                    await send_power_command_ha(device, turn_on=True)
-                else:
-                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
-            else:
-                print("Usage: on2 N (where N is the device number)")
-        elif choice.startswith('off2 '):
-            # Turn device OFF (modern 0x3B - BLE v5+, recommended)
-            parts = choice.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                idx = int(parts[1]) - 1
-                if 0 <= idx < len(found_devices):
-                    device, _, _, _ = found_devices[idx]
-                    selected_device_idx = idx
-                    await send_power_command_ha(device, turn_on=False)
-                else:
-                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
-            else:
-                print("Usage: off2 N (where N is the device number)")
-        elif choice.startswith('on3 '):
-            # Turn device ON (legacy 0x71 - BLE v1-4)
-            parts = choice.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                idx = int(parts[1]) - 1
-                if 0 <= idx < len(found_devices):
-                    device, _, _, _ = found_devices[idx]
-                    selected_device_idx = idx
-                    await send_power_command_0x71(device, turn_on=True)
-                else:
-                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
-            else:
-                print("Usage: on3 N (where N is the device number)")
-        elif choice.startswith('off3 '):
-            # Turn device OFF (legacy 0x71 - BLE v1-4)
-            parts = choice.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                idx = int(parts[1]) - 1
-                if 0 <= idx < len(found_devices):
-                    device, _, _, _ = found_devices[idx]
-                    selected_device_idx = idx
-                    await send_power_command_0x71(device, turn_on=False)
-                else:
-                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
-            else:
-                print("Usage: off3 N (where N is the device number)")
+                print("Usage: pow N (where N is the device number)")
         elif choice.startswith('p ') or choice.startswith('p'):
             # Probe capabilities
             parts = choice.split()
@@ -2125,7 +2187,7 @@ async def interactive_mode(duration: float = 10.0):
             else:
                 print(f"Invalid choice. Enter 1-{len(found_devices)}")
         else:
-            print("Invalid choice. Enter 'pow N', 'on/on2/on3 N', 'off/off2/off3 N', 'p N', 'c N', 'r', or 'q'.")
+            print("Invalid choice. Enter 'pow N', 'p N', 'c N', a number, 'r', or 'q'.")
 
 
 def main():
