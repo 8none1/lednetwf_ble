@@ -25,6 +25,7 @@ This documentation has been split into 11 separate files for easier navigation a
 | **Work with effects** / addressable LEDs      | `09_effects_addressable_led_support.md`   |
 | **Implement in Python** / complete example    | `10_python_implementation_guide.md`       |
 | **Reference original code** / Java files      | `11_java_source_code_references.md`       |
+| **Look up effect names** / Symphony modes     | `12_symphony_effect_names.md`             |
 
 ---
 
@@ -307,7 +308,8 @@ docs/
 ├── 08_state_query_response_parsing.md
 ├── 09_effects_addressable_led_support.md
 ├── 10_python_implementation_guide.md
-└── 11_java_source_code_references.md
+├── 11_java_source_code_references.md
+└── 12_symphony_effect_names.md
 ```
 
 ---

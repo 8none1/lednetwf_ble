@@ -58,3 +58,45 @@ def parse_state_response(response: bytes) -> dict:
         'cool_white': response[11],
     }
 ```
+
+## State in Manufacturer Data (Alternative Method)
+
+Some devices broadcast their current state in BLE advertisement manufacturer data,
+which can be read passively without connecting. This is useful for:
+- Quick status checks without connection overhead
+- Devices where BLE stack issues prevent receiving notifications
+- Real-time state monitoring via advertisement scanning
+
+State is embedded in the BLE advertisement:
+
+| Byte | Field             | Description                      |
+|------|-------------------|----------------------------------|
+| 14   | Power State       | 0x23 = ON, 0x24 = OFF            |
+| 15   | Mode              | 0x61 = color/white, 0x25 = effect|
+| 16   | Sub-mode          | 0xF0 = RGB, 0x0F = white, effect#|
+| 17   | Brightness (white)| Brightness 0-100 (white mode)    |
+| 18   | Red               | Red channel 0-255                |
+| 19   | Green             | Green channel 0-255              |
+| 20   | Blue              | Blue channel 0-255               |
+| 21   | Color Temp        | Color temperature 0-100          |
+
+### Detection Strategy for Unknown Devices
+
+When probing a new device:
+
+1. Try sending the standard state query (0x81, 0x8A, 0x8B, checksum)
+2. Wait up to 3 seconds for a notification response
+3. If no response:
+   - Check if state_data is present in manufacturer data advertisement
+   - Parse state from manufacturer data bytes 14-24
+   - Use product_id and sta byte to determine capabilities
+4. Commands (color, power, effects) may still work even if state queries don't
+
+### Java Source Reference
+
+FillLight0x1D.java (com/zengge/wifi/Device/Type/):
+
+- This is a "stub" device class with all methods returning null/0/false
+- Product ID 0x1D = 29 (decimal)
+- The Java app doesn't fully support this device type
+- Control commands still work via BaseDeviceInfo inheritance

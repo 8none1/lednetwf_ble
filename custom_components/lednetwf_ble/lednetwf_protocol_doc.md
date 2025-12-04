@@ -709,7 +709,8 @@ USER-OBSERVED HS PACKET FORMAT (FillLight_0x1D device):
         packet = bytearray.fromhex("00 00 80 00 00 0d 0e 0b 3b a1 00 00 64 00 00 00 00 00 00 00 00")
         
         # Pack hue and saturation using the correct bit-packing method
-        packed = (hue << 7) | (saturation & 0x7F)
+        # Note: saturation is 0-100, NOT scaled to 0-127!
+        packed = (hue << 7) | saturation
         packet[10] = (packed >> 8) & 0xFF   # High byte (effectively hue/2)
         packet[11] = packed & 0xFF          # Low byte (hue LSB << 7 | saturation)
         packet[12] = brightness & 0xFF      # Brightness 0-100
@@ -819,7 +820,8 @@ For devices that use HS color mode:
           packet[8] = 0x3B   # HSV command prefix
           packet[9] = 0xA1   # Mode = Symphony HSV
           # Correct bit-packing for hue+saturation
-          packed = (hue << 7) | (sat & 0x7F)
+          # Note: saturation is 0-100, NOT scaled to 0-127!
+          packed = (hue << 7) | sat
           packet[10] = (packed >> 8) & 0xFF  # High byte
           packet[11] = packed & 0xFF         # Low byte
           packet[12] = bright & 0xFF

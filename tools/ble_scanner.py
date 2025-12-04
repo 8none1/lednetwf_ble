@@ -49,6 +49,11 @@ import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Optional, Tuple
+
+# Force Bleak to use legacy D-Bus notification method instead of socket-based AcquireNotify
+# This fixes "sock_hup" issues on some Linux/BlueZ systems where notifications fail immediately
+os.environ["BLEAK_DBUS_AUTH_LEGACY"] = "1"
+
 from bleak import BleakScanner, BleakClient
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
@@ -215,81 +220,185 @@ POWER_OFF_0x11_RAW.append(sum(POWER_OFF_0x11_RAW) & 0xFF)  # = 0x55
 # Capability cache file location
 CAPABILITY_CACHE_FILE = os.path.expanduser("~/.lednetwf_capabilities.json")
 
+# Global flag to force write-with-response mode (set via --with-response CLI flag)
+# When True, always use write-with-response even if write-without-response is available
+FORCE_WRITE_WITH_RESPONSE = False
+
 # Product ID to capability mapping from protocol_docs/04_device_identification_capabilities.md
 # Source: com/zengge/wifi/Device/a.java method k()
 # Capabilities: has_rgb, has_ww (warm white), has_cw (cool white), has_dim (dimmer only)
 # BaseType indicates the class hierarchy from the app
 PRODUCT_ID_CAPABILITIES = {
     # Controllers with RGB + White (RGBWBoth / RGBCWBoth BaseType)
-    4:   {"name": "Ctrl_RGBW_UFO_0x04", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBW"},
-    6:   {"name": "Ctrl_Mini_RGBW_0x06", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
-    7:   {"name": "Ctrl_Mini_RGBCW_0x07", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth"},
-    32:  {"name": "Ctrl_Mini_RGBW_0x20", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
-    37:  {"name": "Ctrl_RGBCW_Both_0x25", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth"},
-    38:  {"name": "Ctrl_Mini_RGBW_0x26", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
-    39:  {"name": "Ctrl_Mini_RGBW_0x27", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
-    72:  {"name": "Ctrl_Mini_RGBW_Mic_0x48", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
+    # effect_type: "simple" = 0x61 command (IDs 37-56), "symphony" = 0x38 command, "none" = no effects
+    4:   {"name": "Ctrl_RGBW_UFO_0x04", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBW", "effect_type": "simple"},
+    6:   {"name": "Ctrl_Mini_RGBW_0x06", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth", "effect_type": "simple"},
+    7:   {"name": "Ctrl_Mini_RGBCW_0x07", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth", "effect_type": "simple"},
+    32:  {"name": "Ctrl_Mini_RGBW_0x20", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth", "effect_type": "simple"},
+    37:  {"name": "Ctrl_RGBCW_Both_0x25", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth", "effect_type": "simple"},
+    38:  {"name": "Ctrl_Mini_RGBW_0x26", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth", "effect_type": "simple"},
+    39:  {"name": "Ctrl_Mini_RGBW_0x27", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth", "effect_type": "simple"},
+    72:  {"name": "Ctrl_Mini_RGBW_Mic_0x48", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth", "effect_type": "simple"},
 
     # Controllers with RGB only (RGB / RGBSymphony BaseType)
-    8:   {"name": "Ctrl_Mini_RGB_Mic_0x08", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBSymphony"},
-    16:  {"name": "ChristmasLight_0x10", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB"},
-    51:  {"name": "Ctrl_Mini_RGB_0x33", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB"},
+    8:   {"name": "Ctrl_Mini_RGB_Mic_0x08", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBSymphony", "effect_type": "symphony"},
+    16:  {"name": "ChristmasLight_0x10", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB", "effect_type": "simple"},
+    51:  {"name": "Ctrl_Mini_RGB_0x33", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB", "effect_type": "simple"},
 
-    # CCT only - no RGB (CCT BaseType)
-    9:   {"name": "Ctrl_Ceiling_light_CCT_0x09", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
-    22:  {"name": "Magnetic_CCT_0x16", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
-    28:  {"name": "TableLamp_CCT_0x1C", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
-    82:  {"name": "Bulb_CCT_0x52", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
-    98:  {"name": "Ctrl_CCT_0x62", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT"},
+    # CCT only - no RGB (CCT BaseType) - no effects
+    9:   {"name": "Ctrl_Ceiling_light_CCT_0x09", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT", "effect_type": "none"},
+    22:  {"name": "Magnetic_CCT_0x16", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT", "effect_type": "none"},
+    28:  {"name": "TableLamp_CCT_0x1C", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT", "effect_type": "none"},
+    82:  {"name": "Bulb_CCT_0x52", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT", "effect_type": "none"},
+    98:  {"name": "Ctrl_CCT_0x62", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "CCT", "effect_type": "none"},
 
-    # Dimmer only (Brightness BaseType)
-    23:  {"name": "Magnetic_Dim_0x17", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness"},
-    33:  {"name": "Bulb_Dim_0x21", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness"},
-    65:  {"name": "Ctrl_Dim_0x41", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness"},
+    # Dimmer only (Brightness BaseType) - no effects
+    23:  {"name": "Magnetic_Dim_0x17", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness", "effect_type": "none"},
+    33:  {"name": "Bulb_Dim_0x21", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness", "effect_type": "none"},
+    65:  {"name": "Ctrl_Dim_0x41", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Brightness", "effect_type": "none"},
 
     # Bulbs with RGBCW (RGBCWBulb / RGBWBulb BaseType)
-    14:  {"name": "FloorLamp_RGBCW_0x0E", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth"},
-    30:  {"name": "CeilingLight_RGBCW_0x1E", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth"},
-    53:  {"name": "Bulb_RGBCW_R120_0x35", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBulb"},
-    59:  {"name": "Bulb_RGBCW_0x3B", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBulb"},
-    68:  {"name": "Bulb_RGBW_0x44", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBulb"},
-    84:  {"name": "Downlight_RGBW_0X54", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth"},
+    14:  {"name": "FloorLamp_RGBCW_0x0E", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth", "effect_type": "simple"},
+    30:  {"name": "CeilingLight_RGBCW_0x1E", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBoth", "effect_type": "simple"},
+    53:  {"name": "Bulb_RGBCW_R120_0x35", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBulb", "effect_type": "simple"},
+    59:  {"name": "Bulb_RGBCW_0x3B", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "RGBCWBulb", "effect_type": "simple"},
+    68:  {"name": "Bulb_RGBW_0x44", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBulb", "effect_type": "simple"},
+    84:  {"name": "Downlight_RGBW_0X54", "has_rgb": True, "has_ww": True, "has_cw": False, "base_type": "RGBWBoth", "effect_type": "simple"},
 
-    # Switches and Sockets (Switch BaseType) - on/off only, no dimming
-    11:  {"name": "Switch_1c_0x0b", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "base_type": "Switch"},
-    147: {"name": "Switch_1C_0x93", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "base_type": "Switch"},
-    148: {"name": "Switch_1c_Watt_0x94", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "has_power_monitoring": True, "base_type": "Switch"},
-    149: {"name": "Switch_2c_0x95", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "channels": 2, "base_type": "Switch"},
-    150: {"name": "Switch_4c_0x96", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "channels": 4, "base_type": "Switch"},
-    151: {"name": "Socket_1c_0x97", "has_rgb": False, "has_ww": False, "has_cw": False, "is_socket": True, "base_type": "Switch"},
+    # Switches and Sockets (Switch BaseType) - on/off only, no effects
+    11:  {"name": "Switch_1c_0x0b", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "base_type": "Switch", "effect_type": "none"},
+    147: {"name": "Switch_1C_0x93", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "base_type": "Switch", "effect_type": "none"},
+    148: {"name": "Switch_1c_Watt_0x94", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "has_power_monitoring": True, "base_type": "Switch", "effect_type": "none"},
+    149: {"name": "Switch_2c_0x95", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "channels": 2, "base_type": "Switch", "effect_type": "none"},
+    150: {"name": "Switch_4c_0x96", "has_rgb": False, "has_ww": False, "has_cw": False, "is_switch": True, "channels": 4, "base_type": "Switch", "effect_type": "none"},
+    151: {"name": "Socket_1c_0x97", "has_rgb": False, "has_ww": False, "has_cw": False, "is_socket": True, "base_type": "Switch", "effect_type": "none"},
 
     # Special/misc devices
-    24:  {"name": "PlantLight_0x18", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special"},
-    25:  {"name": "Socket_2Usb_0x19", "has_rgb": False, "has_ww": False, "has_cw": False, "is_socket": True, "base_type": "Switch"},
-    26:  {"name": "ChristmasLight_0x1A", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB"},
-    27:  {"name": "SprayLight_0x1B", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "Special"},
-    29:  {"name": "FillLight_0x1D", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True, "base_type": "Special"},
-    41:  {"name": "MirrorLight_0x29", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "Special"},
-    45:  {"name": "GAON_PlantLight_0x2D", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special"},
-    209: {"name": "Digital_Light_0xd1", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special"},
+    24:  {"name": "PlantLight_0x18", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special", "effect_type": "none"},
+    25:  {"name": "Socket_2Usb_0x19", "has_rgb": False, "has_ww": False, "has_cw": False, "is_socket": True, "base_type": "Switch", "effect_type": "none"},
+    26:  {"name": "ChristmasLight_0x1A", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGB", "effect_type": "simple"},
+    27:  {"name": "SprayLight_0x1B", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "Special", "effect_type": "simple"},
+    29:  {"name": "FillLight_0x1D", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True, "base_type": "Special", "effect_type": "unknown"},
+    41:  {"name": "MirrorLight_0x29", "has_rgb": True, "has_ww": True, "has_cw": True, "base_type": "Special", "effect_type": "simple"},
+    45:  {"name": "GAON_PlantLight_0x2D", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special", "effect_type": "none"},
+    209: {"name": "Digital_Light_0xd1", "has_rgb": False, "has_ww": False, "has_cw": False, "has_dim": True, "base_type": "Special", "effect_type": "symphony"},
 
-    # Ceiling lights (Ceiling BaseType)
-    225: {"name": "Ctrl_Ceiling_light_0xe1", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "Ceiling"},
-    226: {"name": "Ctrl_Ceiling_light_Assist_0xe2", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "Ceiling"},
+    # Ceiling lights (Ceiling BaseType) - no effects
+    225: {"name": "Ctrl_Ceiling_light_0xe1", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "Ceiling", "effect_type": "none"},
+    226: {"name": "Ctrl_Ceiling_light_Assist_0xe2", "has_rgb": False, "has_ww": True, "has_cw": True, "base_type": "Ceiling", "effect_type": "none"},
 
     # Symphony controllers - addressable RGB with effects (RGBSymphony / RGBNewSymphony BaseType)
     # These support segments (addressable LEDs), IC chip type selection, and LED count configuration
-    161: {"name": "Ctrl_Mini_RGB_Symphony_0xa1", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBSymphony", "has_segments": True, "has_ic_config": True},
-    162: {"name": "Ctrl_Mini_RGB_Symphony_new_0xa2", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
-    163: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA3", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
-    164: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA4", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
-    166: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA6", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
-    167: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA7", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
-    169: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA9", "has_rgb": True, "has_ww": False, "has_cw": False, "effects": 100, "base_type": "RGBNewSymphony", "has_segments": True, "has_ic_config": True},
+    # effect_type "symphony": Scene effects (1-44) + Build effects (100-399)
+    161: {"name": "Ctrl_Mini_RGB_Symphony_0xa1", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBSymphony", "effect_type": "symphony", "has_segments": True, "has_ic_config": True},
+    162: {"name": "Ctrl_Mini_RGB_Symphony_new_0xa2", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBNewSymphony", "effect_type": "symphony", "has_segments": True, "has_ic_config": True},
+    163: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA3", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBNewSymphony", "effect_type": "symphony", "has_segments": True, "has_ic_config": True},
+    164: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA4", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBNewSymphony", "effect_type": "symphony", "has_segments": True, "has_ic_config": True},
+    166: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA6", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBNewSymphony", "effect_type": "symphony", "has_segments": True, "has_ic_config": True},
+    167: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA7", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBNewSymphony", "effect_type": "symphony", "has_segments": True, "has_ic_config": True},
+    169: {"name": "Ctrl_Mini_RGB_Symphony_new_0xA9", "has_rgb": True, "has_ww": False, "has_cw": False, "base_type": "RGBNewSymphony", "effect_type": "symphony", "has_segments": True, "has_ic_config": True},
 
     # Unknown/None
-    0:   {"name": "TypeNone", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True, "base_type": "None"},
+    0:   {"name": "TypeNone", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True, "base_type": "None", "effect_type": "unknown"},
 }
+
+
+# =============================================================================
+# EFFECT NAMES AND TYPES
+# Source: protocol_docs/09_effects_addressable_led_support.md
+# =============================================================================
+
+# Simple effects (0x61 command) - IDs 37-56 for non-Symphony RGB devices
+SIMPLE_EFFECTS = {
+    37: "Seven color cross fade",
+    38: "Red gradual change",
+    39: "Green gradual change",
+    40: "Blue gradual change",
+    41: "Yellow gradual change",
+    42: "Cyan gradual change",
+    43: "Purple gradual change",
+    44: "White gradual change",
+    45: "Red/green cross fade",
+    46: "Red/blue cross fade",
+    47: "Green/blue cross fade",
+    48: "Seven color strobe flash",
+    49: "Red strobe flash",
+    50: "Green strobe flash",
+    51: "Blue strobe flash",
+    52: "Yellow strobe flash",
+    53: "Cyan strobe flash",
+    54: "Purple strobe flash",
+    55: "White strobe flash",
+    56: "Seven color jumping change",
+}
+
+# Symphony Scene effects (0x38 command) - IDs 1-44
+# Note: Names are abbreviated, full list in protocol_docs/12_symphony_effect_names.md
+SYMPHONY_SCENE_EFFECTS = {
+    1: "Static",
+    2: "Breathing",
+    3: "Rainbow",
+    4: "Color wipe",
+    5: "Theater chase",
+    6: "Twinkle",
+    7: "Scanner",
+    8: "Fade",
+    9: "Color chase",
+    10: "Running lights",
+    # Effects 11-44 are variations and additional modes
+}
+
+# Symphony Build effects use IDs 100-399 (internal 1-300)
+# These are loaded from app resources, names are numeric
+
+
+def get_effect_type(product_id: Optional[int]) -> str:
+    """
+    Determine effect type based on Product ID.
+
+    Returns:
+        "symphony" - Uses 0x38 command, Scene (1-44) + Build (100-399) effects
+        "simple" - Uses 0x61 command, effects 37-56
+        "none" - No effect support
+        "unknown" - Need to probe or test
+    """
+    if product_id is None:
+        return "unknown"
+
+    if product_id in PRODUCT_ID_CAPABILITIES:
+        return PRODUCT_ID_CAPABILITIES[product_id].get("effect_type", "unknown")
+
+    return "unknown"
+
+
+def get_effect_range(effect_type: str) -> Tuple[int, int]:
+    """
+    Get valid effect ID range for the given effect type.
+
+    Returns:
+        Tuple of (min_id, max_id)
+    """
+    if effect_type == "simple":
+        return (37, 56)
+    elif effect_type == "symphony":
+        # Scene: 1-44, Build: 100-399
+        return (1, 399)
+    else:
+        return (0, 0)
+
+
+def get_effect_name(effect_id: int, effect_type: str) -> str:
+    """Get human-readable name for an effect ID."""
+    if effect_type == "simple":
+        return SIMPLE_EFFECTS.get(effect_id, f"Effect {effect_id}")
+    elif effect_type == "symphony":
+        if effect_id in SYMPHONY_SCENE_EFFECTS:
+            return SYMPHONY_SCENE_EFFECTS[effect_id]
+        elif effect_id >= 100:
+            return f"Build effect {effect_id - 99}"
+        else:
+            return f"Scene {effect_id}"
+    return f"Effect {effect_id}"
 
 
 @dataclass
@@ -559,7 +668,7 @@ async def send_power_command_ha(device: BLEDevice, turn_on: bool) -> bool:
     print(f"\n  Sending POWER {action} (modern 0x3B - BLE v5+) to {device.name or device.address}...")
 
     try:
-        async with BleakClient(device.address, timeout=10.0) as client:
+        async with BleakClient(device.address, timeout=10.0, use_cached=False) as client:
             # Find write characteristic
             write_char = None
             for service in client.services:
@@ -573,13 +682,16 @@ async def send_power_command_ha(device: BLEDevice, turn_on: bool) -> bool:
                 return False
 
             # Determine write method
-            use_response = "write" in write_char.properties and "write-without-response" not in write_char.properties
+            # Use write-with-response if forced OR if characteristic only supports write (not write-without-response)
+            use_response = FORCE_WRITE_WITH_RESPONSE or ("write" in write_char.properties and "write-without-response" not in write_char.properties)
 
             # Use pre-wrapped 0x3B power commands (no need to call wrap_command)
             packet = POWER_ON_0x3B_WRAPPED if turn_on else POWER_OFF_0x3B_WRAPPED
             print(f"  Sending: {format_bytes_hex(packet)}")
 
             await client.write_gatt_char(write_char.uuid, packet, response=use_response)
+            # Delay to let device process before disconnect
+            await asyncio.sleep(0.3)
             print(f"  ✓ Power {action} command sent!")
             return True
 
@@ -607,7 +719,7 @@ async def send_power_command_0x71(device: BLEDevice, turn_on: bool) -> bool:
     print(f"\n  Sending POWER {action} (legacy 0x71 - BLE v1-4) to {device.name or device.address}...")
 
     try:
-        async with BleakClient(device.address, timeout=10.0) as client:
+        async with BleakClient(device.address, timeout=10.0, use_cached=False) as client:
             # Find write characteristic
             write_char = None
             for service in client.services:
@@ -621,7 +733,8 @@ async def send_power_command_0x71(device: BLEDevice, turn_on: bool) -> bool:
                 return False
 
             # Determine write method
-            use_response = "write" in write_char.properties and "write-without-response" not in write_char.properties
+            # Use write-with-response if forced OR if characteristic only supports write (not write-without-response)
+            use_response = FORCE_WRITE_WITH_RESPONSE or ("write" in write_char.properties and "write-without-response" not in write_char.properties)
 
             # Wrap 0x71 command in transport layer
             raw_packet = POWER_ON_0x71_RAW if turn_on else POWER_OFF_0x71_RAW
@@ -629,6 +742,8 @@ async def send_power_command_0x71(device: BLEDevice, turn_on: bool) -> bool:
             print(f"  Sending: {format_bytes_hex(packet)}")
 
             await client.write_gatt_char(write_char.uuid, packet, response=use_response)
+            # Delay to let device process before disconnect
+            await asyncio.sleep(0.3)
             print(f"  ✓ Power {action} command sent!")
             return True
 
@@ -685,6 +800,739 @@ async def toggle_power(device: BLEDevice, manu_data: 'ManufacturerData') -> bool
         return await send_power_command_ha(device, turn_on)
     else:
         return await send_power_command_0x71(device, turn_on)
+
+
+def parse_rgb_input(rgb_str: str) -> Optional[Tuple[int, int, int]]:
+    """
+    Parse RGB color from various input formats.
+
+    Supported formats:
+        - rgb(255,255,255)
+        - rgb(255, 255, 255)
+        - 255,255,255
+        - 255, 255, 255
+        - #ff00ff (hex)
+        - ff00ff (hex without #)
+        - red, green, blue (named colors - basic set)
+
+    Returns:
+        Tuple of (r, g, b) with values 0-255, or None if parsing fails
+    """
+    rgb_str = rgb_str.strip().lower()
+
+    # Named colors (basic set)
+    named_colors = {
+        'red': (255, 0, 0),
+        'green': (0, 255, 0),
+        'blue': (0, 0, 255),
+        'white': (255, 255, 255),
+        'black': (0, 0, 0),
+        'yellow': (255, 255, 0),
+        'cyan': (0, 255, 255),
+        'magenta': (255, 0, 255),
+        'orange': (255, 165, 0),
+        'purple': (128, 0, 128),
+        'pink': (255, 192, 203),
+    }
+
+    if rgb_str in named_colors:
+        return named_colors[rgb_str]
+
+    # Try hex format: #ff00ff or ff00ff
+    hex_match = re.match(r'^#?([0-9a-f]{6})$', rgb_str)
+    if hex_match:
+        hex_val = hex_match.group(1)
+        return (int(hex_val[0:2], 16), int(hex_val[2:4], 16), int(hex_val[4:6], 16))
+
+    # Try rgb(r,g,b) format
+    rgb_func_match = re.match(r'^rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$', rgb_str)
+    if rgb_func_match:
+        r, g, b = int(rgb_func_match.group(1)), int(rgb_func_match.group(2)), int(rgb_func_match.group(3))
+        if 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255:
+            return (r, g, b)
+        return None
+
+    # Try comma-separated: 255,255,255 or 255, 255, 255
+    csv_match = re.match(r'^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$', rgb_str)
+    if csv_match:
+        r, g, b = int(csv_match.group(1)), int(csv_match.group(2)), int(csv_match.group(3))
+        if 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255:
+            return (r, g, b)
+        return None
+
+    return None
+
+
+def rgb_to_hsv(r: int, g: int, b: int) -> Tuple[int, int, int]:
+    """
+    Convert RGB (0-255) to HSV for 0x3B command.
+
+    Returns:
+        Tuple of (hue, saturation, value/brightness)
+        - hue: 0-360
+        - saturation: 0-100
+        - value: 0-100
+    """
+    r_norm, g_norm, b_norm = r / 255.0, g / 255.0, b / 255.0
+    c_max = max(r_norm, g_norm, b_norm)
+    c_min = min(r_norm, g_norm, b_norm)
+    delta = c_max - c_min
+
+    # Hue calculation
+    if delta == 0:
+        hue = 0
+    elif c_max == r_norm:
+        hue = 60 * (((g_norm - b_norm) / delta) % 6)
+    elif c_max == g_norm:
+        hue = 60 * (((b_norm - r_norm) / delta) + 2)
+    else:
+        hue = 60 * (((r_norm - g_norm) / delta) + 4)
+
+    # Saturation calculation
+    saturation = 0 if c_max == 0 else (delta / c_max) * 100
+
+    # Value calculation
+    value = c_max * 100
+
+    return (int(round(hue)), int(round(saturation)), int(round(value)))
+
+
+def build_color_command_0x3B(r: int, g: int, b: int) -> bytearray:
+    """
+    Build a 0x3B HSV color command for BLE v5+ devices.
+
+    From protocol_docs/07_control_commands.md:
+    Format (13 bytes):
+        [0x3B, mode(0xA1), HSV_hi, HSV_lo, brightness, 0, 0, R, G, B, time_hi, time_lo, checksum]
+
+    HSV encoding (from tc/d.java line 22):
+        packed = (hue << 7) | saturation
+        - hue: 0-360 (needs 9 bits)
+        - saturation: 0-100 (uses 7 bits, NOT scaled to 127!)
+        byte_hi = (packed >> 8) & 0xFF
+        byte_lo = packed & 0xFF
+
+    Note: The 0x3B command also includes RGB values in bytes 7-9 for reference.
+    """
+    hue, sat, val = rgb_to_hsv(r, g, b)
+
+    # Encode hue and saturation into 2 bytes
+    # From Java: (hue << 7) | saturation
+    # Saturation is 0-100, NOT scaled to 127!
+    packed = (hue << 7) | (int(sat) & 0x7F)
+    hsv_hi = (packed >> 8) & 0xFF
+    hsv_lo = packed & 0xFF
+
+    # Brightness is 0-100
+    brightness = val
+
+    # Build raw command
+    # Mode 0xA1 (161) = Symphony HSV color mode
+    raw_cmd = bytearray([
+        0x3B,           # Command
+        0xA1,           # Mode: HSV color
+        hsv_hi,         # Hue+Sat high byte
+        hsv_lo,         # Hue+Sat low byte
+        brightness,     # Brightness (0-100)
+        0x00,           # Param 1
+        0x00,           # Param 2
+        r & 0xFF,       # Red (for reference)
+        g & 0xFF,       # Green (for reference)
+        b & 0xFF,       # Blue (for reference)
+        0x00,           # Time high
+        0x1E,           # Time low (30)
+    ])
+    raw_cmd.append(sum(raw_cmd) & 0xFF)  # Checksum
+
+    return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
+
+
+def build_color_command_0x31(r: int, g: int, b: int, format_type: str = "9byte") -> bytearray:
+    """
+    Build a 0x31 RGB color command for legacy BLE devices.
+
+    From protocol_docs/07_control_commands.md:
+    Multiple formats exist based on device type:
+        - "9byte": [0x31, R, G, B, WW, CW, Mode(0xF0), Persist(0x0F), CS]
+        - "8byte_v": [0x31, R, G, B, W, 0x00, Persist(0x0F), CS]
+        - "8byte_x": [0x31, R, G, B, W, Mode(0xF0), Persist(0x0F), CS]
+    """
+    if format_type == "9byte":
+        # 9-byte format: [0x31, R, G, B, WW, CW, 0xF0, 0x0F, CS]
+        raw_cmd = bytearray([0x31, r & 0xFF, g & 0xFF, b & 0xFF, 0x00, 0x00, 0xF0, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "8byte_v":
+        # 8-byte v format: [0x31, R, G, B, W, 0x00, 0x0F, CS]
+        raw_cmd = bytearray([0x31, r & 0xFF, g & 0xFF, b & 0xFF, 0x00, 0x00, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    elif format_type == "8byte_x":
+        # 8-byte x format: [0x31, R, G, B, W, 0xF0, 0x0F, CS]
+        raw_cmd = bytearray([0x31, r & 0xFF, g & 0xFF, b & 0xFF, 0x00, 0xF0, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    else:
+        raise ValueError(f"Unknown format_type: {format_type}")
+
+    return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
+
+
+# =============================================================================
+# EFFECT COMMAND BUILDERS
+# Source: protocol_docs/07_control_commands.md
+# =============================================================================
+
+def build_effect_command_0x38(effect_id: int, speed: int = 128, param: int = 0) -> bytearray:
+    """
+    Build Symphony effect command (0x38).
+
+    Used for Symphony devices (product IDs 0xA1-0xA9, 0x08).
+    Scene effects: IDs 1-44
+    Build effects: IDs 100-399 (internal 1-300)
+
+    Format (5 bytes):
+        [0x38, effect_id, speed, param, checksum]
+
+    Args:
+        effect_id: Effect number (1-44 for scene, 100-399 for build)
+        speed: Effect speed 0-255 (higher = faster)
+        param: Effect-specific parameter (usually 0)
+
+    Returns:
+        Wrapped command packet ready to send
+    """
+    # For build effects (100-399), convert to internal ID (1-300)
+    internal_id = effect_id - 99 if effect_id >= 100 else effect_id
+
+    raw_cmd = bytearray([
+        0x38,                   # Command opcode
+        internal_id & 0xFF,     # Effect ID
+        speed & 0xFF,           # Speed
+        param & 0xFF,           # Parameter
+    ])
+    raw_cmd.append(sum(raw_cmd) & 0xFF)  # Checksum
+
+    return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
+
+
+def build_effect_command_0x61(effect_id: int, speed: int = 128, persist: bool = False) -> bytearray:
+    """
+    Build legacy effect command (0x61).
+
+    Used for non-Symphony RGB devices (simple effects).
+    Effect IDs: 37-56 (20 effects)
+
+    Format (5 bytes):
+        [0x61, effect_id, speed, persist, checksum]
+
+    Args:
+        effect_id: Effect number (37-56)
+        speed: Effect speed 0-255 (may be inverted on some devices)
+        persist: Whether to save the setting (0xF0) or not (0x0F)
+
+    Returns:
+        Wrapped command packet ready to send
+    """
+    raw_cmd = bytearray([
+        0x61,                           # Command opcode
+        effect_id & 0xFF,               # Effect ID
+        speed & 0xFF,                   # Speed (signed byte in Java)
+        0xF0 if persist else 0x0F,      # Persist flag
+    ])
+    raw_cmd.append(sum(raw_cmd) & 0xFF)  # Checksum
+
+    return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
+
+
+async def set_effect(device: BLEDevice, manu_data: 'ManufacturerData', effect_id: int, speed: int = 128) -> bool:
+    """
+    Set device effect with automatic protocol selection.
+
+    This function:
+    1. Determines the effect type based on product ID
+    2. Validates the effect ID is in the valid range
+    3. Selects the appropriate command format (0x38 or 0x61)
+
+    Protocol selection (from protocol_docs/09_effects_addressable_led_support.md):
+        - Symphony devices: Uses 0x38 command (Scene 1-44, Build 100-399)
+        - Simple RGB devices: Uses 0x61 command (effects 37-56)
+
+    Args:
+        device: BLEDevice to control
+        manu_data: Parsed manufacturer data with product ID
+        effect_id: Effect number to activate
+        speed: Effect speed 0-255 (default 128)
+
+    Returns:
+        True if command was sent successfully
+    """
+    product_id = manu_data.product_id
+    effect_type = get_effect_type(product_id)
+
+    print(f"\n  Setting effect for {device.name or device.address}...")
+    print(f"  Product ID: {product_id} (0x{product_id:02X})" if product_id else "  Product ID: unknown")
+    print(f"  Effect type: {effect_type}")
+
+    if effect_type == "none":
+        print("  Error: This device does not support effects")
+        return False
+
+    if effect_type == "unknown":
+        print("  Warning: Unknown device type, will try simple (0x61) command")
+        effect_type = "simple"  # Default to simple for unknown devices
+
+    # Validate effect ID range
+    min_id, max_id = get_effect_range(effect_type)
+    if effect_id < min_id or effect_id > max_id:
+        print(f"  Error: Effect ID {effect_id} out of range ({min_id}-{max_id}) for {effect_type} effects")
+        return False
+
+    effect_name = get_effect_name(effect_id, effect_type)
+    print(f"  Effect: {effect_id} - {effect_name}")
+    print(f"  Speed: {speed}")
+
+    # Build the appropriate command
+    if effect_type == "symphony":
+        print(f"  Using 0x38 (Symphony) command")
+        packet = build_effect_command_0x38(effect_id, speed)
+    else:  # simple
+        print(f"  Using 0x61 (legacy) command")
+        packet = build_effect_command_0x61(effect_id, speed)
+
+    try:
+        async with BleakClient(device.address, timeout=10.0, use_cached=False) as client:
+            print("  ✓ Connected")
+
+            # Find write characteristic
+            write_char = None
+            for service in client.services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == WRITE_CHARACTERISTIC_UUID.lower():
+                        write_char = char
+                        break
+
+            if not write_char:
+                print("  Error: Write characteristic not found")
+                return False
+
+            # Determine write method
+            use_response = FORCE_WRITE_WITH_RESPONSE or ("write" in write_char.properties and "write-without-response" not in write_char.properties)
+
+            print(f"  Sending: {format_bytes_hex(packet)}")
+            await client.write_gatt_char(write_char.uuid, packet, response=use_response)
+            # Delay to let device process before disconnect
+            await asyncio.sleep(0.3)
+            print(f"  ✓ Effect {effect_id} ({effect_name}) activated at speed {speed}")
+            return True
+
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+
+async def set_color(device: BLEDevice, manu_data: 'ManufacturerData', r: int, g: int, b: int) -> bool:
+    """
+    Set device color with automatic protocol selection.
+
+    This function:
+    1. Determines the appropriate command format based on BLE version
+    2. For BLE v5+: Converts RGB to HSV and uses 0x3B command
+    3. For BLE v1-4: Uses 0x31 RGB command
+
+    Protocol selection (from protocol_docs/07_control_commands.md):
+        - BLE v5+: Uses 0x3B HSV command
+        - BLE v1-4: Uses 0x31 RGB command
+
+    Args:
+        device: BLEDevice to control
+        manu_data: Parsed manufacturer data with BLE version
+        r, g, b: RGB color values (0-255)
+
+    Returns:
+        True if command was sent successfully
+    """
+    # Get BLE version - prefer from manu_data, fallback to device name
+    ble_version = manu_data.ble_version if manu_data.ble_version else extract_ble_version_from_name(device.name)
+
+    version_str = f"v{ble_version}" if ble_version else "unknown"
+    use_hsv = ble_version is None or ble_version >= 5
+
+    print(f"\n  Setting color for {device.name or device.address}...")
+    print(f"  RGB: ({r}, {g}, {b})")
+
+    if use_hsv:
+        hue, sat, val = rgb_to_hsv(r, g, b)
+        print(f"  HSV: ({hue}°, {sat}%, {val}%)")
+        print(f"  BLE version: {version_str} → using 0x3B (HSV) command")
+        packet = build_color_command_0x3B(r, g, b)
+    else:
+        print(f"  BLE version: {version_str} → using 0x31 (RGB) command")
+        packet = build_color_command_0x31(r, g, b, format_type="9byte")
+
+    try:
+        async with BleakClient(device.address, timeout=10.0, use_cached=False) as client:
+            print("  ✓ Connected")
+
+            # Find write characteristic
+            write_char = None
+            for service in client.services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == WRITE_CHARACTERISTIC_UUID.lower():
+                        write_char = char
+                        break
+
+            if not write_char:
+                print("  Error: Write characteristic not found")
+                return False
+
+            # Determine write method
+            # Use write-with-response if forced OR if characteristic only supports write (not write-without-response)
+            use_response = FORCE_WRITE_WITH_RESPONSE or ("write" in write_char.properties and "write-without-response" not in write_char.properties)
+
+            print(f"  Sending: {format_bytes_hex(packet)}")
+            await client.write_gatt_char(write_char.uuid, packet, response=use_response)
+            # Delay to let device process before disconnect
+            await asyncio.sleep(0.3)
+            print(f"  ✓ Color set to RGB({r}, {g}, {b})")
+            return True
+
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+
+# White temperature constants
+# Typical LED strip/bulb color temperature range
+MIN_KELVIN = 2700  # Warmest (full WW)
+MAX_KELVIN = 6500  # Coolest (full CW)
+
+
+def kelvin_to_ww_cw(kelvin: int, brightness: int = 255) -> Tuple[int, int]:
+    """
+    Convert Kelvin color temperature to WW/CW channel values.
+
+    The conversion maps the Kelvin range to a warm-cool blend:
+    - 2700K (warm) → WW=brightness, CW=0
+    - 6500K (cool) → WW=0, CW=brightness
+    - Values in between are linearly interpolated
+
+    Args:
+        kelvin: Color temperature in Kelvin (2700-6500)
+        brightness: Overall brightness (0-255)
+
+    Returns:
+        Tuple of (warm_white, cool_white) values (0-255)
+    """
+    # Clamp to valid range
+    kelvin = max(MIN_KELVIN, min(MAX_KELVIN, kelvin))
+
+    # Calculate cool ratio (0.0 at 2700K, 1.0 at 6500K)
+    cool_ratio = (kelvin - MIN_KELVIN) / (MAX_KELVIN - MIN_KELVIN)
+    warm_ratio = 1.0 - cool_ratio
+
+    # Apply brightness
+    ww = int(warm_ratio * brightness)
+    cw = int(cool_ratio * brightness)
+
+    return (ww, cw)
+
+
+def parse_kelvin_input(temp_str: str) -> Optional[int]:
+    """
+    Parse Kelvin temperature from various input formats.
+
+    Supported formats:
+        - 4000 (just the number)
+        - 4000K or 4000k (with K suffix)
+        - warm, cool, daylight (named presets)
+
+    Returns:
+        Kelvin value (2700-6500), or None if parsing fails
+    """
+    temp_str = temp_str.strip().lower()
+
+    # Named presets
+    presets = {
+        'warm': 2700,
+        'soft': 3000,
+        'neutral': 4000,
+        'daylight': 5000,
+        'cool': 6500,
+    }
+
+    if temp_str in presets:
+        return presets[temp_str]
+
+    # Try numeric with optional K suffix
+    match = re.match(r'^(\d+)k?$', temp_str)
+    if match:
+        kelvin = int(match.group(1))
+        if MIN_KELVIN <= kelvin <= MAX_KELVIN:
+            return kelvin
+        return None
+
+    return None
+
+
+def build_white_command_0x31(ww: int, cw: int, format_type: str = "9byte") -> bytearray:
+    """
+    Build a 0x31 white color command.
+
+    From protocol_docs/07_control_commands.md:
+    Sets white mode (sub-mode 0x0F) with WW/CW values.
+
+    Args:
+        ww: Warm white value (0-255)
+        cw: Cool white value (0-255)
+        format_type: Command format ("9byte" for most devices)
+
+    Returns:
+        Wrapped command packet ready to send
+    """
+    if format_type == "9byte":
+        # 9-byte format: [0x31, R, G, B, WW, CW, Mode(0x0F=white), Persist(0x0F), CS]
+        raw_cmd = bytearray([0x31, 0x00, 0x00, 0x00, ww & 0xFF, cw & 0xFF, 0x0F, 0x0F])
+        raw_cmd.append(sum(raw_cmd) & 0xFF)
+    else:
+        raise ValueError(f"Unknown format_type: {format_type}")
+
+    return wrap_command(raw_cmd, cmd_family=0x0b, seq=0)
+
+
+async def set_white_temperature(device: BLEDevice, manu_data: 'ManufacturerData', kelvin: int, brightness: int = 255) -> bool:
+    """
+    Set device white color temperature.
+
+    This function:
+    1. Checks if device supports white channels (WW and/or CW)
+    2. Converts Kelvin to WW/CW values
+    3. Sends the appropriate 0x31 command in white mode
+
+    Args:
+        device: BLEDevice to control
+        manu_data: Parsed manufacturer data with capabilities
+        kelvin: Color temperature in Kelvin (2700-6500)
+        brightness: Overall brightness (0-255)
+
+    Returns:
+        True if command was sent successfully
+    """
+    # Check device capabilities - first from product ID, then override with cached probed caps
+    caps = manu_data.capabilities
+    has_ww = caps.get('has_ww', False)
+    has_cw = caps.get('has_cw', False)
+
+    # Check cached capabilities from probing (these override product ID lookup)
+    cached_caps = get_cached_capabilities(device.address)
+    if cached_caps:
+        has_ww = cached_caps.has_ww
+        has_cw = cached_caps.has_cw
+
+    if not has_ww and not has_cw:
+        print(f"\n  Device {device.name or device.address} does not support white channels")
+        print(f"  Capabilities: {caps.get('name', 'Unknown')}")
+        if not cached_caps:
+            print("  Tip: Try probing the device first with 'p N' to detect capabilities")
+        return False
+
+    # Convert Kelvin to WW/CW
+    ww, cw = kelvin_to_ww_cw(kelvin, brightness)
+
+    # If device only has WW (no CW), put all brightness in WW
+    if has_ww and not has_cw:
+        ww = brightness
+        cw = 0
+        print(f"\n  Note: Device only has warm white, ignoring color temperature")
+
+    # If device only has CW (rare), put all brightness in CW
+    if has_cw and not has_ww:
+        ww = 0
+        cw = brightness
+        print(f"\n  Note: Device only has cool white, ignoring color temperature")
+
+    print(f"\n  Setting white temperature for {device.name or device.address}...")
+    print(f"  Temperature: {kelvin}K")
+    print(f"  WW: {ww}, CW: {cw}")
+
+    packet = build_white_command_0x31(ww, cw, format_type="9byte")
+
+    try:
+        async with BleakClient(device.address, timeout=10.0, use_cached=False) as client:
+            print("  ✓ Connected")
+
+            # Find write characteristic
+            write_char = None
+            for service in client.services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == WRITE_CHARACTERISTIC_UUID.lower():
+                        write_char = char
+                        break
+
+            if not write_char:
+                print("  Error: Write characteristic not found")
+                return False
+
+            # Determine write method
+            # Use write-with-response if forced OR if characteristic only supports write (not write-without-response)
+            use_response = FORCE_WRITE_WITH_RESPONSE or ("write" in write_char.properties and "write-without-response" not in write_char.properties)
+
+            print(f"  Sending: {format_bytes_hex(packet)}")
+            await client.write_gatt_char(write_char.uuid, packet, response=use_response)
+            # Delay to let device process before disconnect
+            await asyncio.sleep(0.3)
+            print(f"  ✓ White temperature set to {kelvin}K")
+            return True
+
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+
+async def monitor_notifications(device: BLEDevice) -> None:
+    """
+    Connect to device and monitor all notifications until Ctrl+C.
+
+    This function:
+    1. Connects to the device
+    2. Enables notifications on the notify characteristic
+    3. Prints all received notifications with decoded content where possible
+    4. Continues until Ctrl+C is pressed
+
+    Known notification types:
+    - 0x81: State response (14 bytes) - power, mode, RGB, WW, CW, brightness
+    - 0x63: LED settings response (12 bytes) - LED count, IC type, color order
+    - JSON-wrapped: {"result": "hex_payload"} format from some devices
+    """
+    print(f"\n  Connecting to {device.name or device.address} for notification monitoring...")
+    print("  Press Ctrl+C to stop monitoring and return to menu.\n")
+
+    notification_count = 0
+
+    def decode_notification(data: bytes) -> str:
+        """Try to decode the notification into a human-readable format."""
+        lines = []
+
+        # First try to extract from JSON wrapper
+        payload = extract_hex_payload_from_notification(data)
+        if payload is not None:
+            lines.append(f"    JSON-wrapped payload: {format_bytes_hex(payload)}")
+            data_to_parse = payload
+        else:
+            data_to_parse = data
+
+        if len(data_to_parse) == 0:
+            return "    (empty payload)"
+
+        header = data_to_parse[0]
+
+        # Try to decode based on header byte
+        if header == 0x81 and len(data_to_parse) >= 14:
+            # State response
+            state = parse_state_response(data)
+            if state and state.checksum_valid:
+                lines.append("    → STATE RESPONSE (0x81):")
+                lines.append(f"       Power: {'ON' if state.is_on else 'OFF'}")
+                lines.append(f"       Mode: {state.mode_name} (type={state.mode_type})")
+                if state.is_static_color:
+                    lines.append(f"       RGB: ({state.red}, {state.green}, {state.blue})")
+                    if state.warm_white > 0:
+                        lines.append(f"       Warm White: {state.warm_white}")
+                    if state.cool_white > 0:
+                        lines.append(f"       Cool White: {state.cool_white}")
+                lines.append(f"       Brightness: {state.brightness}")
+                if state.speed > 0:
+                    lines.append(f"       Speed: {state.speed}")
+            elif state:
+                lines.append("    → STATE RESPONSE (0x81) - CHECKSUM INVALID")
+
+        elif header == 0x63 and len(data_to_parse) >= 12:
+            # LED settings response
+            led_settings = parse_led_settings(data)
+            if led_settings and led_settings.valid:
+                lines.append("    → LED SETTINGS RESPONSE (0x63):")
+                lines.append(f"       LED Count: {led_settings.led_count}")
+                lines.append(f"       IC Type: {led_settings.ic_type_name}")
+                lines.append(f"       Color Order: {led_settings.color_order_name}")
+                lines.append(f"       Frequency: {led_settings.frequency} Hz")
+            elif led_settings:
+                lines.append("    → LED SETTINGS RESPONSE (0x63) - CHECKSUM INVALID")
+
+        elif header == 0x23:
+            lines.append("    → POWER ON indicator (0x23)")
+
+        elif header == 0x24:
+            lines.append("    → POWER OFF indicator (0x24)")
+
+        else:
+            # Unknown format - show hex breakdown
+            lines.append(f"    → Unknown format (header=0x{header:02X})")
+            if len(data_to_parse) <= 20:
+                # Show individual bytes for short messages
+                byte_str = " ".join(f"{b:02X}" for b in data_to_parse)
+                lines.append(f"       Bytes: {byte_str}")
+
+        return "\n".join(lines) if lines else "    (could not decode)"
+
+    def notification_handler(sender, data: bytearray):
+        """Handle incoming notifications."""
+        nonlocal notification_count
+        notification_count += 1
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+        print(f"  [{timestamp}] Notification #{notification_count} ({len(data)} bytes):")
+        print(f"    Raw: {format_bytes_hex(bytes(data))}")
+
+        # Try to decode as text (some devices send JSON)
+        try:
+            text = data.decode('utf-8', errors='ignore').strip()
+            if text and text.isprintable():
+                # Truncate long text
+                display_text = text[:100] + "..." if len(text) > 100 else text
+                print(f"    Text: {display_text}")
+        except Exception:
+            pass
+
+        # Try to decode the notification content
+        decoded = decode_notification(bytes(data))
+        if decoded:
+            print(decoded)
+
+        print()  # Blank line between notifications
+
+    try:
+        async with BleakClient(device.address, timeout=10.0, use_cached=False) as client:
+            print(f"  ✓ Connected to {device.name or device.address}")
+
+            # Find notify characteristic
+            notify_char = None
+            for service in client.services:
+                for char in service.characteristics:
+                    if char.uuid.lower() == NOTIFY_CHARACTERISTIC_UUID.lower():
+                        notify_char = char
+                        break
+
+            if not notify_char:
+                print("  Error: Notify characteristic not found")
+                return
+
+            print(f"  ✓ Found notify characteristic: {notify_char.uuid}")
+            print(f"  ✓ Starting notification monitoring...\n")
+            print("=" * 70)
+
+            # Enable notifications
+            await client.start_notify(notify_char.uuid, notification_handler)
+
+            # Wait indefinitely until cancelled
+            try:
+                while True:
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                pass
+
+    except asyncio.CancelledError:
+        print(f"\n  Monitoring cancelled. Received {notification_count} notifications.")
+    except Exception as e:
+        print(f"\n  Error: {e}")
+    finally:
+        print(f"\n  Stopped monitoring. Total notifications: {notification_count}")
 
 
 async def detect_capabilities_via_probe(
@@ -777,8 +1625,12 @@ async def detect_capabilities_via_probe(
         print("    Probing: Querying initial state...")
         initial_state = await query_state()
         if not initial_state:
-            print("    Probing: Could not get initial state, aborting probe")
-            caps.detection_method = "probe_failed"
+            print("    Probing: ⚠️ Could not get initial state response!")
+            print("    Probing: This device may not respond to state queries.")
+            print("    Probing: Some devices (like 0x53 ring lights) broadcast state")
+            print("             in BLE advertisements instead of responding to queries.")
+            print("    Probing: Use manufacturer data capabilities or product ID instead.")
+            caps.detection_method = "probe_failed_no_response"
             return caps
 
         print(f"    Probing: Initial state - RGB({initial_state.red},{initial_state.green},{initial_state.blue}) "
@@ -917,6 +1769,78 @@ def detect_capabilities_from_state(state: 'StateResponse', product_id: Optional[
     return caps
 
 
+def detect_capabilities_from_manu_data(manu_data: 'ManufacturerData') -> DeviceCapabilities:
+    """
+    Detect capabilities from manufacturer data in BLE advertisement.
+    
+    This is useful for devices that don't respond to state queries but
+    broadcast their state in the BLE advertisement (like model 0x53).
+    
+    Args:
+        manu_data: Parsed ManufacturerData from advertisement
+        
+    Returns:
+        DeviceCapabilities inferred from advertisement data
+    """
+    caps = DeviceCapabilities(
+        detection_method="manu_data",
+        product_id=manu_data.product_id
+    )
+    
+    # Check color mode from state_data
+    color_mode = manu_data.color_mode
+    if color_mode:
+        if "RGB" in color_mode:
+            caps.has_rgb = True
+        if "White" in color_mode or "CCT" in color_mode:
+            caps.has_ww = True
+            caps.has_cw = True  # CCT implies both WW and CW
+    
+    # Check RGB values from state
+    rgb = manu_data.state_rgb
+    if rgb and (rgb[0] > 0 or rgb[1] > 0 or rgb[2] > 0):
+        caps.has_rgb = True
+        caps.rgb_confirmed = True
+    
+    # Check WW/CW from state
+    ww = manu_data.state_ww
+    cw = manu_data.state_cw
+    if ww and ww > 0:
+        caps.has_ww = True
+        caps.ww_confirmed = True
+    if cw and cw > 0:
+        caps.has_cw = True
+        caps.cw_confirmed = True
+    
+    # Check brightness
+    brightness = manu_data.state_brightness
+    if brightness and brightness > 0:
+        caps.is_dimmable = True
+    
+    # Fill in from product ID capabilities
+    if manu_data.product_id in PRODUCT_ID_CAPABILITIES:
+        known_caps = PRODUCT_ID_CAPABILITIES[manu_data.product_id]
+        if not known_caps.get('is_stub'):
+            if not caps.has_rgb:
+                caps.has_rgb = known_caps.get('has_rgb', False)
+            if not caps.has_ww:
+                caps.has_ww = known_caps.get('has_ww', False)
+            if not caps.has_cw:
+                caps.has_cw = known_caps.get('has_cw', False)
+            # Check segment support
+            caps.has_segments = known_caps.get('has_segments', False)
+            caps.has_ic_config = known_caps.get('has_segments', False)
+    
+    # For sta=0x53, this is typically a ring light with RGB + CCT
+    if manu_data.sta == 0x53:
+        caps.has_rgb = True
+        caps.has_ww = True
+        caps.has_cw = True
+        caps.is_dimmable = True
+    
+    return caps
+
+
 @dataclass
 class ManufacturerData:
     """Parsed manufacturer data from BLE advertisement (Format B - 27 bytes)."""
@@ -1034,13 +1958,16 @@ class ManufacturerData:
     def state_rgb(self) -> Optional[tuple]:
         """
         Parse RGB values from state_data if available.
-        Based on protocol doc, RGB is at bytes 6-8 of state_data (bytes 20-22 overall).
+        For model 0x53 (ring lights), RGB is at state_data[4-6] (manu_data bytes 18-20).
+        For other models, it may be at different offsets.
         NOTE: This is the advertisement format, which may differ from state query response.
         """
-        if self.state_data and len(self.state_data) > 8:
-            r = self.state_data[6]
-            g = self.state_data[7]
-            b = self.state_data[8]
+        if self.state_data and len(self.state_data) > 6:
+            # For sta=0x53, RGB is at indices 4, 5, 6 within state_data
+            # (corresponding to manu_data bytes 18, 19, 20)
+            r = self.state_data[4]
+            g = self.state_data[5]
+            b = self.state_data[6]
             return (r, g, b)
         return None
 
@@ -1482,7 +2409,7 @@ async def connect_and_query_device(
         notification_event.set()
 
     try:
-        async with BleakClient(device.address, timeout=20.0) as client:
+        async with BleakClient(device.address, timeout=20.0, use_cached=False) as client:
             print("  ✓ Connected!")
 
             # List services and characteristics
@@ -1667,13 +2594,30 @@ async def connect_and_query_device(
                     client, write_char.uuid, notify_char.uuid, use_response, ble_version=ble_ver
                 )
 
-                if probed_caps.detection_method != "probe_failed":
+                if probed_caps.detection_method not in ("probe_failed", "probe_failed_no_response"):
                     detected_caps = probed_caps
                     # Cache the probed capabilities
                     cache_capabilities(device.address, detected_caps)
                     print(f"\n  ✓ Capabilities cached for {device.address}")
                 else:
-                    print("\n  ⚠️  Active probing failed - using passive detection results")
+                    print("\n  ⚠️  Active probing failed - device did not respond to state queries")
+                    # Try manufacturer data detection as fallback
+                    if manu_data:
+                        print("  Attempting capability detection from manufacturer data...")
+                        manu_caps = detect_capabilities_from_manu_data(manu_data)
+                        if manu_caps.has_rgb or manu_caps.has_ww or manu_caps.has_cw:
+                            print(f"  ✓ Capabilities from manufacturer data:")
+                            print(f"    RGB={manu_caps.has_rgb}, WW={manu_caps.has_ww}, CW={manu_caps.has_cw}")
+                            print(f"    Segments={manu_caps.has_segments}")
+                            detected_caps = manu_caps
+                            # Cache the manu_data capabilities
+                            cache_capabilities(device.address, detected_caps)
+                            print(f"  ✓ Capabilities cached for {device.address}")
+                        else:
+                            print("  Could not determine capabilities from manufacturer data")
+                            print("  Using passive detection or product ID defaults")
+                    else:
+                        print("  No manufacturer data available for fallback detection")
 
                 # Re-enable notifications for cleanup
                 await client.start_notify(notify_char.uuid, notification_handler)
@@ -2109,6 +3053,10 @@ async def interactive_mode(duration: float = 10.0):
 
         print("\nCommands:")
         print("  [pow N]   Toggle power for device N (auto-selects protocol)")
+        print("  [rgb N color]  Set color (e.g., rgb 1 red, rgb 1 255,0,0, rgb 1 #ff0000)")
+        print("  [ww N temp]    Set white temp (e.g., ww 1 4000, ww 1 warm, ww 1 cool)")
+        print("  [fx N id [speed]]  Set effect (e.g., fx 1 37, fx 1 48 200)")
+        print("  [mon N]   Monitor notifications from device N (Ctrl+C to stop)")
         print("  [1-N]     Connect to device and query state")
         print("  [p N]     Probe device N for capabilities (will change device color!)")
         print("  [c N]     Clear cached capabilities for device N")
@@ -2141,6 +3089,91 @@ async def interactive_mode(duration: float = 10.0):
                     print(f"Invalid device number. Enter 1-{len(found_devices)}")
             else:
                 print("Usage: pow N (where N is the device number)")
+        elif choice.startswith('rgb '):
+            # Set color for device
+            parts = choice.split(maxsplit=2)
+            if len(parts) >= 3 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                color_str = parts[2]
+                if 0 <= idx < len(found_devices):
+                    device, _, manu_data, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    rgb = parse_rgb_input(color_str)
+                    if rgb:
+                        r, g, b = rgb
+                        await set_color(device, manu_data, r, g, b)
+                    else:
+                        print(f"Invalid color format: '{color_str}'")
+                        print("Supported formats: red, #ff0000, ff0000, 255,0,0, rgb(255,0,0)")
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: rgb N color (e.g., rgb 1 red, rgb 1 255,0,0, rgb 1 #ff0000)")
+        elif choice.startswith('ww '):
+            # Set white temperature for device
+            parts = choice.split(maxsplit=2)
+            if len(parts) >= 3 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                temp_str = parts[2]
+                if 0 <= idx < len(found_devices):
+                    device, _, manu_data, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    kelvin = parse_kelvin_input(temp_str)
+                    if kelvin:
+                        await set_white_temperature(device, manu_data, kelvin)
+                    else:
+                        print(f"Invalid temperature format: '{temp_str}'")
+                        print(f"Supported: {MIN_KELVIN}-{MAX_KELVIN}, warm, soft, neutral, daylight, cool")
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: ww N temp (e.g., ww 1 4000, ww 1 warm, ww 1 cool)")
+        elif choice.startswith('fx '):
+            # Set effect for device
+            parts = choice.split()
+            if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
+                idx = int(parts[1]) - 1
+                effect_id = int(parts[2])
+                speed = int(parts[3]) if len(parts) >= 4 and parts[3].isdigit() else 128
+                if 0 <= idx < len(found_devices):
+                    device, _, manu_data, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    # Show available effects for this device
+                    effect_type = get_effect_type(manu_data.product_id)
+                    min_id, max_id = get_effect_range(effect_type)
+                    if effect_type == "none":
+                        print(f"  Device does not support effects (type: {effect_type})")
+                    elif effect_id < min_id or effect_id > max_id:
+                        print(f"  Effect ID {effect_id} out of range for {effect_type} effects ({min_id}-{max_id})")
+                        if effect_type == "simple":
+                            print("  Simple effects: 37-56 (e.g., 37=rainbow, 48=strobe)")
+                        elif effect_type == "symphony":
+                            print("  Symphony Scene: 1-44, Build: 100-399")
+                    else:
+                        await set_effect(device, manu_data, effect_id, speed)
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: fx N id [speed] (e.g., fx 1 37, fx 1 48 200)")
+                print("  Simple effects (non-Symphony): 37-56")
+                print("  Symphony Scene effects: 1-44")
+                print("  Symphony Build effects: 100-399")
+        elif choice.startswith('mon '):
+            # Monitor notifications from device
+            parts = choice.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                idx = int(parts[1]) - 1
+                if 0 <= idx < len(found_devices):
+                    device, _, manu_data, _ = found_devices[idx]
+                    selected_device_idx = idx
+                    try:
+                        await monitor_notifications(device)
+                    except KeyboardInterrupt:
+                        print("\n  Monitoring stopped by user.")
+                else:
+                    print(f"Invalid device number. Enter 1-{len(found_devices)}")
+            else:
+                print("Usage: mon N (where N is the device number)")
         elif choice.startswith('p ') or choice.startswith('p'):
             # Probe capabilities
             parts = choice.split()
@@ -2187,7 +3220,7 @@ async def interactive_mode(duration: float = 10.0):
             else:
                 print(f"Invalid choice. Enter 1-{len(found_devices)}")
         else:
-            print("Invalid choice. Enter 'pow N', 'p N', 'c N', a number, 'r', or 'q'.")
+            print("Invalid choice. Enter 'pow N', 'rgb N color', 'ww N temp', 'fx N id', 'mon N', 'p N', 'c N', a number, 'r', or 'q'.")
 
 
 def main():
@@ -2226,8 +3259,19 @@ def main():
         action="store_true",
         help="Clear all cached capabilities"
     )
+    parser.add_argument(
+        "--with-response",
+        action="store_true",
+        help="Force write-with-response mode (slower but more reliable)"
+    )
 
     args = parser.parse_args()
+
+    # Set global flag for write mode
+    global FORCE_WRITE_WITH_RESPONSE
+    if args.with_response:
+        FORCE_WRITE_WITH_RESPONSE = True
+        print("Using write-with-response mode (--with-response)")
 
     try:
         if args.clear_cache:
