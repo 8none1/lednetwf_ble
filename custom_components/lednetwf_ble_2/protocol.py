@@ -773,7 +773,7 @@ def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
             else:
                 _LOGGER.debug("Manu data unknown mode_type: 0x%02X", mode_type)
 
-        return {
+        result = {
             "product_id": product_id,
             "power_state": power_state,
             "ble_version": ble_version,
@@ -788,6 +788,25 @@ def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
             "effect_id": effect_id,
             "effect_speed": effect_speed,
         }
+
+        # Log comprehensive summary of parsed manufacturer data
+        _LOGGER.debug(
+            "Parsed manufacturer data: product_id=0x%02X (%d), ble_version=%d, "
+            "fw=%s, power=%s, mode=%s",
+            product_id, product_id, ble_version, fw_version,
+            "ON" if power_state else ("OFF" if power_state is False else "unknown"),
+            color_mode or "unknown",
+        )
+        if color_mode == "rgb":
+            _LOGGER.debug("  RGB state: rgb=%s", rgb)
+        elif color_mode == "cct":
+            _LOGGER.debug("  CCT state: temp_pct=%s%%, bright_pct=%s%%",
+                          color_temp_percent, brightness_percent)
+        elif color_mode == "effect":
+            _LOGGER.debug("  Effect state: id=%s, speed=%s, bright_pct=%s%%",
+                          effect_id, effect_speed, brightness_percent)
+
+        return result
 
     # No valid manufacturer data found
     _LOGGER.debug("No valid LEDnetWF manufacturer data found in: %s",

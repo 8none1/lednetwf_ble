@@ -1,8 +1,11 @@
 """Constants for LEDnetWF BLE v2 integration."""
+import logging
 from enum import IntEnum
 from typing import Final
 
-DOMAIN: Final = "lednetwf_ble_2"
+_LOGGER = logging.getLogger(__name__)
+
+DOMAIN: Final = "lednetwf_ble"
 
 # Configuration keys
 CONF_MODEL: Final = "model"
@@ -199,7 +202,7 @@ def get_device_capabilities(product_id: int | None) -> dict:
     Source: protocol_docs/04_device_identification_capabilities.md
     """
     if product_id is None:
-        return {
+        caps = {
             "name": "Unknown",
             "has_rgb": None,
             "has_ww": None,
@@ -207,15 +210,31 @@ def get_device_capabilities(product_id: int | None) -> dict:
             "effect_type": EffectType.NONE,
             "needs_probing": True,
         }
+        _LOGGER.debug(
+            "Device capabilities for product_id=None: %s (probing required)",
+            caps
+        )
+        return caps
 
     if product_id in PRODUCT_CAPABILITIES:
         caps = PRODUCT_CAPABILITIES[product_id].copy()
         caps["needs_probing"] = caps.get("is_stub", False)
+        _LOGGER.debug(
+            "Device capabilities for product_id=0x%02X (%d): name=%s, "
+            "has_rgb=%s, has_ww=%s, has_cw=%s, effect_type=%s, needs_probing=%s",
+            product_id, product_id,
+            caps.get("name"),
+            caps.get("has_rgb"),
+            caps.get("has_ww"),
+            caps.get("has_cw"),
+            caps.get("effect_type"),
+            caps.get("needs_probing"),
+        )
         return caps
 
     # Unknown product ID - needs capability probing
     # Per protocol docs: "For devices with unknown Product ID (0x00) or stub classes, probe capabilities"
-    return {
+    caps = {
         "name": f"Unknown_0x{product_id:02X}",
         "has_rgb": None,
         "has_ww": None,
@@ -223,6 +242,11 @@ def get_device_capabilities(product_id: int | None) -> dict:
         "effect_type": EffectType.SYMPHONY,  # Assume modern device with Symphony support
         "needs_probing": True,
     }
+    _LOGGER.debug(
+        "Device capabilities for UNKNOWN product_id=0x%02X (%d): %s (probing required)",
+        product_id, product_id, caps
+    )
+    return caps
 
 
 def is_supported_device(product_id: int | None) -> bool:

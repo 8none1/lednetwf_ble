@@ -89,6 +89,19 @@ class LEDNetWFDevice:
         # Cache capabilities
         self._capabilities = get_device_capabilities(product_id)
 
+        # Log initial device setup
+        _LOGGER.debug(
+            "Device initialized: %s (%s), product_id=0x%02X, "
+            "capabilities: has_rgb=%s, has_ww=%s, has_cw=%s, effect_type=%s, needs_probing=%s",
+            self._name, self._address,
+            product_id or 0,
+            self._capabilities.get("has_rgb"),
+            self._capabilities.get("has_ww"),
+            self._capabilities.get("has_cw"),
+            self._capabilities.get("effect_type"),
+            self._capabilities.get("needs_probing"),
+        )
+
         # Response waiting mechanism for probing
         self._pending_state_response: asyncio.Event | None = None
         self._last_state_response: dict | None = None
@@ -806,6 +819,18 @@ class LEDNetWFDevice:
         self._capabilities.update(detected)
         self._capabilities["needs_probing"] = False
         self._capabilities["probed"] = True
+
+        # Log final capabilities summary
+        _LOGGER.info(
+            "Final capabilities for %s: has_rgb=%s, has_ww=%s, has_cw=%s, "
+            "effect_type=%s, probed=%s",
+            self._name,
+            self._capabilities.get("has_rgb"),
+            self._capabilities.get("has_ww"),
+            self._capabilities.get("has_cw"),
+            self._capabilities.get("effect_type"),
+            self._capabilities.get("probed"),
+        )
 
         return detected
 
