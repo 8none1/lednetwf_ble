@@ -728,6 +728,51 @@ def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
             elif data[14] == 0x24:
                 power_state = False
 
+        # Parse state_data (bytes 14-24) for color/mode/brightness
+        # Source: model_0x53.py model_specific_manu_data()
+        # Byte 15 = mode type (0x61=color/white, 0x25=effect)
+        # Byte 16 = sub-mode (0xF0/0x01/0x0B=RGB, 0x0F=white) or effect ID
+        # Byte 17 = brightness % (white mode)
+        # Bytes 18-20 = RGB or brightness+speed (effect mode)
+        # Byte 21 = color temp % (white mode)
+        color_mode = None  # 'rgb', 'cct', 'effect'
+        rgb = None
+        color_temp_percent = None
+        brightness_percent = None
+        effect_id = None
+        effect_speed = None
+
+        if ble_version >= 5 and len(data) >= 22:
+            mode_type = data[15]  # 0x61=color/white, 0x25=effect
+            sub_mode = data[16]
+
+            if mode_type == 0x61:
+                # Color or white mode
+                if sub_mode in (0xF0, 0x01, 0x0B):
+                    # RGB mode (0xF0=RGB, 0x01/0x0B may be effects/music mode but show as RGB)
+                    color_mode = 'rgb'
+                    rgb = (data[18], data[19], data[20])
+                    _LOGGER.debug("Manu data RGB mode: rgb=%s", rgb)
+                elif sub_mode == 0x0F:
+                    # White/CCT mode
+                    color_mode = 'cct'
+                    brightness_percent = data[17]  # 0-100
+                    color_temp_percent = data[21]  # 0-100 (0=2700K, 100=6500K)
+                    _LOGGER.debug("Manu data CCT mode: temp_pct=%d, bright_pct=%d",
+                                  color_temp_percent, brightness_percent)
+                else:
+                    _LOGGER.debug("Manu data unknown sub-mode: 0x%02X", sub_mode)
+            elif mode_type == 0x25:
+                # Effect mode
+                color_mode = 'effect'
+                effect_id = sub_mode  # Effect ID in sub_mode byte
+                brightness_percent = data[18]  # 0-100
+                effect_speed = data[19]  # 0-100
+                _LOGGER.debug("Manu data effect mode: id=%d, bright_pct=%d, speed=%d",
+                              effect_id, brightness_percent, effect_speed)
+            else:
+                _LOGGER.debug("Manu data unknown mode_type: 0x%02X", mode_type)
+
         return {
             "product_id": product_id,
             "power_state": power_state,
@@ -735,6 +780,13 @@ def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
             "fw_version": fw_version,
             "manu_id": manu_id,
             "sta": sta,
+            # State fields from bytes 15-21
+            "color_mode": color_mode,
+            "rgb": rgb,
+            "color_temp_percent": color_temp_percent,
+            "brightness_percent": brightness_percent,
+            "effect_id": effect_id,
+            "effect_speed": effect_speed,
         }
 
     # No valid manufacturer data found

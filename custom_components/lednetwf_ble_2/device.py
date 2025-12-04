@@ -578,6 +578,13 @@ class LEDNetWFDevice:
     def update_from_advertisement(self, manu_data: dict[int, bytes]) -> bool:
         """Update state from manufacturer advertisement data.
 
+        Parses state_data bytes (14-24) which include:
+        - Power state (byte 14)
+        - Color mode (byte 15-16): RGB, CCT, or Effect
+        - RGB color (bytes 18-20 when in RGB mode)
+        - Brightness/CCT (bytes 17, 21 when in CCT mode)
+        - Effect ID/speed (bytes 16, 18-19 when in effect mode)
+
         Returns True if state was updated.
         """
         result = protocol.parse_manufacturer_data(manu_data)
@@ -586,13 +593,86 @@ class LEDNetWFDevice:
 
         changed = False
 
+        # Power state
         if result.get("power_state") is not None:
             if self._is_on != result["power_state"]:
                 self._is_on = result["power_state"]
                 changed = True
 
+        # Firmware version
         if result.get("fw_version"):
             self._fw_version = result["fw_version"]
+
+        # Color mode and associated values
+        color_mode = result.get("color_mode")
+
+        if color_mode == "rgb":
+            # RGB mode - update RGB color
+            rgb = result.get("rgb")
+            if rgb and rgb != self._rgb:
+                self._rgb = rgb
+                # Derive brightness from RGB (max component)
+                max_val = max(rgb)
+                if max_val > 0:
+                    self._brightness = max_val
+                self._color_temp_kelvin = None  # Clear CCT when in RGB mode
+                self._effect = None  # Clear effect when in RGB mode
+                changed = True
+                _LOGGER.debug("Advertisement updated RGB: %s, brightness: %d",
+                              self._rgb, self._brightness)
+
+        elif color_mode == "cct":
+            # CCT/White mode - update color temperature
+            temp_pct = result.get("color_temp_percent")
+            bright_pct = result.get("brightness_percent")
+
+            if temp_pct is not None:
+                # Convert percent to Kelvin
+                # Per protocol docs: 0% = cool/6500K, 100% = warm/2700K
+                # Same direction as command format (0x3B 0xB1)
+                new_kelvin = int(MAX_KELVIN - temp_pct * (MAX_KELVIN - MIN_KELVIN) / 100)
+                if self._color_temp_kelvin != new_kelvin:
+                    self._color_temp_kelvin = new_kelvin
+                    changed = True
+
+            if bright_pct is not None:
+                # Convert percent (0-100) to 0-255
+                new_brightness = int(bright_pct * 255 / 100)
+                if self._brightness != new_brightness:
+                    self._brightness = new_brightness
+                    changed = True
+
+            if changed:
+                self._rgb = None  # Clear RGB when in CCT mode
+                self._effect = None  # Clear effect when in CCT mode
+                _LOGGER.debug("Advertisement updated CCT: %dK, brightness: %d",
+                              self._color_temp_kelvin, self._brightness)
+
+        elif color_mode == "effect":
+            # Effect mode - update effect and speed
+            effect_id = result.get("effect_id")
+            effect_speed = result.get("effect_speed")
+            bright_pct = result.get("brightness_percent")
+
+            if effect_id is not None:
+                effect_name = self._effect_id_to_name(effect_id)
+                if effect_name and self._effect != effect_name:
+                    self._effect = effect_name
+                    changed = True
+
+            if effect_speed is not None and self._effect_speed != effect_speed:
+                self._effect_speed = effect_speed
+                changed = True
+
+            if bright_pct is not None:
+                new_brightness = int(bright_pct * 255 / 100)
+                if self._brightness != new_brightness:
+                    self._brightness = new_brightness
+                    changed = True
+
+            if changed:
+                _LOGGER.debug("Advertisement updated effect: %s, speed: %d, brightness: %d",
+                              self._effect, self._effect_speed, self._brightness)
 
         if changed:
             self._notify_callbacks()
