@@ -1,5 +1,5 @@
 {
-    "domain": "lednetwf_ble_2",
+    "domain": "lednetwf_ble",
     "name": "LEDnetWF BLE v2",
     "bluetooth": [
         {
