@@ -79,3 +79,49 @@ def parse_lednetwf_device_bleak(device, advertisement_data):
             }
     return None
 ```
+
+## State Data Parsing (Bytes 14-24, BLE v5+ only)
+
+Devices with BLE protocol version 5 or higher include 11 bytes of current device state in manufacturer data.
+
+**Format B offsets**: bytes 14-24 (11 bytes)
+**Format A offsets**: bytes 16-26 (11 bytes)
+
+| Offset in state_data | Format B byte | Field | Description |
+|---------------------|---------------|-------|-------------|
+| 0 | 14 | Power | 0x23=ON, 0x24=OFF |
+| 1 | 15 | Mode | 0x61=static, 0x25=effect |
+| 2 | 16 | Sub-mode | 0xF0=RGB, 0x0F=white, or effect# |
+| 3 | 17 | Value1 | White brightness (0-100) or effect param |
+| 4-6 | 18-20 | R, G, B | RGB values (0-255) |
+| 7 | 21 | Warm White | WW value (0-255) or color temp |
+| 8 | 22 | LED Version | Firmware/LED version (NOT brightness!) |
+| 9 | 23 | Cool White | CW value (0-255) |
+| 10 | 24 | Reserved | Device-specific |
+
+**IMPORTANT**: The state_data format matches the 0x81 state query response format (see file 08). Byte 8 (offset 22 in Format B) is LED version, NOT brightness. Brightness must be derived based on mode - see file 08 for brightness derivation formulas.
+
+### Python State Parsing Example
+
+```python
+def parse_state_from_mfr_data(payload):
+    """Parse state data from Format B manufacturer data (bleak)"""
+    if len(payload) < 25:
+        return None
+    if payload[1] < 5:  # BLE version check
+        return None  # No state data in older versions
+    
+    state = {
+        'power': payload[14],  # 0x23=ON, 0x24=OFF
+        'mode': payload[15],   # 0x61=static, 0x25=effect
+        'sub_mode': payload[16],  # 0xF0=RGB, 0x0F=white
+        'value1': payload[17],    # White brightness or param
+        'r': payload[18],
+        'g': payload[19],
+        'b': payload[20],
+        'ww': payload[21],
+        'led_version': payload[22],  # NOT brightness!
+        'cw': payload[23],
+    }
+    return state
+```

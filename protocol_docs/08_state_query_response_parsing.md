@@ -15,24 +15,98 @@ Command: `[0x81, 0x8A, 0x8B, 0x40]`
 
 ## State Response Format (14 bytes)
 
-Source: tc/b.java method c() lines 47-62
+Source: tc/b.java method c() lines 47-62, DeviceState.java
 
-| Byte | Field           | Description                      |
-|------|-----------------|----------------------------------|
-| 0    | Header          | 0x81 (response identifier)       |
-| 1    | Mode            | Current mode (0-255)             |
-| 2    | Power State     | 0x23 = ON, other = OFF           |
-| 3    | Mode Type       | 97/98/99 = static, other = effect|
-| 4    | Speed           | Effect speed (0-255)             |
-| 5    | Value1          | Device-specific                  |
-| 6    | Red (R)         | Red channel (0-255)              |
-| 7    | Green (G)       | Green channel (0-255)            |
-| 8    | Blue (B)        | Blue channel (0-255)             |
-| 9    | Warm White (WW) | Warm white (0-255)               |
-| 10   | Brightness      | Overall brightness (0-255)       |
-| 11   | Cool White (CW) | Cool white (0-255)               |
-| 12   | Reserved        | Device-specific                  |
-| 13   | Checksum        | Sum of bytes 0-12 mod 256        |
+| Byte | Field           | DeviceState Field | Description                      |
+|------|-----------------|-------------------|----------------------------------|
+| 0    | Header          | -                 | 0x81 (response identifier)       |
+| 1    | Mode            | f23859c (via g()) | Current mode (0-255)             |
+| 2    | Power State     | f23858b (via h()) | 0x23 = ON, other = OFF           |
+| 3    | Mode Type       | f23862f           | 97/98/99 = static, other = effect|
+| 4    | Sub-mode        | f23863g           | See mode table below             |
+| 5    | Value1          | f23864h           | White brightness (0-100) in white mode |
+| 6    | Red (R)         | f23865j           | Red channel (0-255)              |
+| 7    | Green (G)       | f23866k           | Green channel (0-255)            |
+| 8    | Blue (B)        | f23867l           | Blue channel (0-255)             |
+| 9    | Warm White (WW) | f23868m           | Warm white (0-255)               |
+| 10   | LED Version     | f23860d (via i()) | LED/firmware version - NOT brightness! |
+| 11   | Cool White (CW) | f23869n           | Cool white (0-255)               |
+| 12   | Reserved        | f23870p           | Device-specific                  |
+| 13   | Checksum        | -                 | Sum of bytes 0-12 mod 256        |
+
+### Byte 10 Clarification (LED Version, NOT Brightness)
+
+**IMPORTANT**: Byte 10 is stored as `ledVersionNum` in the Java app, NOT brightness!
+The app uses `u0()` to retrieve this value and checks it for firmware version features.
+Never use this byte for brightness calculations.
+
+### Mode Type (Byte 3) Values
+
+| Value | Hex  | Meaning                          |
+|-------|------|----------------------------------|
+| 97    | 0x61 | Static color/white mode          |
+| 98    | 0x62 | Music reactive mode              |
+| 99    | 0x63 | LED settings response (different format) |
+| 37    | 0x25 | Effect mode                      |
+
+### Sub-mode (Byte 4) Values (when Mode Type = 0x61)
+
+| Value | Hex  | Meaning                          |
+|-------|------|----------------------------------|
+| 240   | 0xF0 | RGB mode                         |
+| 15    | 0x0F | White/CCT mode                   |
+| 1     | 0x01 | RGB mode (variant)               |
+| 11    | 0x0B | Music mode (treated as RGB)      |
+
+### Brightness Derivation (Mode-Dependent)
+
+**The Java app derives brightness differently based on mode:**
+
+#### RGB Mode (sub-mode = 0xF0, 0x01, 0x0B)
+
+Brightness is extracted from the RGB color using HSV conversion:
+
+```java
+// From g2/d.java method a():
+float[] fArr = new float[3];
+Color.colorToHSV(rgbColor, fArr);
+float brightness = fArr[2];  // Value component (0.0-1.0)
+```
+
+In Python:
+```python
+import colorsys
+r, g, b = response[6], response[7], response[8]
+_, _, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+brightness = int(v * 255)  # 0-255 scale
+```
+
+#### White/CCT Mode (sub-mode = 0x0F)
+
+Brightness comes from byte 5 (Value1), scaled from 0-100 to 0-255:
+
+```java
+// From model_0x53.py observation, confirmed by Java patterns
+brightness = (byte5 * 255) / 100
+```
+
+In Python:
+```python
+if response[4] == 0x0F:  # White mode
+    brightness = int(response[5] * 255 / 100)
+```
+
+#### Effect Mode (mode_type = 0x25)
+
+Effect mode repurposes RGB bytes for effect parameters:
+- Byte 6: Brightness (0-100, scale to 0-255)
+- Byte 7: Effect speed (0-100)
+
+```python
+if response[3] == 0x25:  # Effect mode
+    brightness = int(response[6] * 255 / 100)
+    effect_speed = response[7]
+```
 
 ## Python Response Parser
 
@@ -59,26 +133,27 @@ def parse_state_response(response: bytes) -> dict:
     }
 ```
 
-## State in Manufacturer Data (Alternative Method)
+## Optimized State Detection
 
-Some devices broadcast their current state in BLE advertisement manufacturer data,
-which can be read passively without connecting. This is useful for:
-- Quick status checks without connection overhead
-- Devices where BLE stack issues prevent receiving notifications
-- Real-time state monitoring via advertisement scanning
+For Home Assistant or other polling applications:
 
-State is embedded in the BLE advertisement:
+1. **Use BLE advertisements for state (BLE v5+ devices)**:
+   - Check if state_data is present in manufacturer data advertisement
+   - Parse state from manufacturer data (see file 03 for format details)
+   - No need to connect/query for every state update
+   - Only connect when sending commands
 
-| Byte | Field             | Description                      |
-|------|-------------------|----------------------------------|
-| 14   | Power State       | 0x23 = ON, 0x24 = OFF            |
-| 15   | Mode              | 0x61 = color/white, 0x25 = effect|
-| 16   | Sub-mode          | 0xF0 = RGB, 0x0F = white, effect#|
-| 17   | Brightness (white)| Brightness 0-100 (white mode)    |
-| 18   | Red               | Red channel 0-255                |
-| 19   | Green             | Green channel 0-255              |
-| 20   | Blue              | Blue channel 0-255               |
-| 21   | Color Temp        | Color temperature 0-100          |
+2. **Query state only when needed (older devices)**:
+   - Send 0x81 query command
+   - Wait for 14-byte response
+   - Parse state fields
+
+3. **Cache capabilities**:
+   - Device capabilities don't change after initial detection
+   - No need to re-query chip_type, led_count, color_order
+   - Store these in device configuration
+
+**Cross-reference**: See file 03 (Manufacturer Data Parsing) for details on state_data embedded in BLE advertisements (bytes 14-24 in Format B).
 
 ### Detection Strategy for Unknown Devices
 

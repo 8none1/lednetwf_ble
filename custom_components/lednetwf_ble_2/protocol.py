@@ -499,32 +499,40 @@ def parse_state_response(data: bytes) -> dict | None:
     """
     Parse state query response (0x81 format).
 
-    Source: tc/b.java method c() lines 47-62
+    Source: tc/b.java method c() lines 47-62, DeviceState.java
     Source: protocol_docs/08_state_query_response_parsing.md
 
     Response format (14 bytes):
         Byte 0: Header (0x81)
-        Byte 1: Mode
-        Byte 2: Power State (0x23 = ON)
-        Byte 3: Mode Type (97/98/99 = static, other = effect ID)
-        Byte 4: Speed (effect speed 0-255)
-        Byte 5: Value1 (device-specific)
-        Byte 6-8: RGB
-        Byte 9: Warm White
-        Byte 10: Brightness
-        Byte 11: Cool White
-        Byte 12: Reserved
+        Byte 1: Mode (f23859c)
+        Byte 2: Power State (0x23 = ON) (f23858b)
+        Byte 3: Mode Type (0x61=static, 0x25=effect) (f23862f)
+        Byte 4: Sub-mode (0xF0/0x0B=RGB, 0x0F=white, or effect ID) (f23863g)
+        Byte 5: Value1 (brightness 0-100 for white mode) (f23864h)
+        Byte 6-8: RGB (f23865j, f23866k, f23867l)
+        Byte 9: Warm White / Color Temp (f23868m)
+        Byte 10: LED Version - NOT brightness! (f23860d via i())
+        Byte 11: Cool White (f23869n)
+        Byte 12: Reserved (f23870p)
         Byte 13: Checksum
+
+    Brightness derivation (mode-dependent per Java source):
+        - RGB mode: derive from RGB via HSV (V component)
+        - White mode: from value1 (byte 5), scaled 0-100 → 0-255
+        - Effect mode: from byte 6 (R position), scaled 0-100 → 0-255
 
     Returns dict with:
         - is_on: bool
-        - mode_type: int (mode type byte)
-        - speed: int (effect speed)
+        - mode_type: int (0x61=static, 0x25=effect)
+        - sub_mode: int (0xF0/0x0B=RGB, 0x0F=white, or effect ID)
+        - value1: int (byte 5 - brightness for white mode, 0-100)
         - r, g, b: int (0-255)
         - ww, cw: int (0-255)
-        - brightness: int (0-255)
+        - led_version: int (byte 10 - firmware version, NOT brightness)
         - effect_id: int | None (if in effect mode)
         - is_effect_mode: bool
+        - is_rgb_mode: bool
+        - is_white_mode: bool
     """
     if len(data) < 14 or data[0] != 0x81:
         return None
@@ -533,37 +541,54 @@ def parse_state_response(data: bytes) -> dict | None:
     is_on = data[2] == 0x23
 
     # Byte 3: Mode type
-    # 97 (0x61), 98 (0x62), 99 (0x63) = static color mode
-    # Other values = effect mode (value is effect ID)
+    # 0x61 (97) = static color/white mode
+    # 0x25 (37) = effect mode
     mode_type = data[3]
-    is_static_mode = mode_type in (0x61, 0x62, 0x63)  # 97, 98, 99
+    is_effect_mode = mode_type == 0x25
 
-    # Byte 4: Speed
-    speed = data[4]
+    # Byte 4: Sub-mode
+    # In static mode: 0xF0/0x01/0x0B = RGB, 0x0F = white
+    # In effect mode: effect ID
+    sub_mode = data[4]
 
-    # Bytes 6-8: RGB
+    # Determine color mode from sub_mode (when in static mode)
+    is_rgb_mode = False
+    is_white_mode = False
+    if mode_type == 0x61:  # Static mode
+        if sub_mode in (0xF0, 0x01, 0x0B):
+            is_rgb_mode = True
+        elif sub_mode == 0x0F:
+            is_white_mode = True
+
+    # Byte 5: Value1 (brightness 0-100 for white mode, other uses for RGB)
+    value1 = data[5]
+
+    # Bytes 6-8: RGB (or brightness/speed in effect mode)
     r, g, b = data[6], data[7], data[8]
 
-    # Byte 9: WW, Byte 10: Brightness, Byte 11: CW
+    # Byte 9: WW / Color Temp, Byte 10: LED Version (NOT brightness!), Byte 11: CW
     ww = data[9]
-    brightness = data[10]
+    led_version = data[10]  # This is LED/firmware version, NOT brightness
     cw = data[11]
 
-    # Effect ID is mode_type when NOT in static mode
-    effect_id = None if is_static_mode else mode_type
+    # Effect ID is sub_mode when in effect mode
+    effect_id = sub_mode if is_effect_mode else None
 
     return {
         "is_on": is_on,
         "mode_type": mode_type,
-        "speed": speed,
+        "sub_mode": sub_mode,
+        "value1": value1,
         "r": r,
         "g": g,
         "b": b,
         "ww": ww,
         "cw": cw,
-        "brightness": brightness,
+        "led_version": led_version,  # NOT brightness - it's firmware version
         "effect_id": effect_id,
-        "is_effect_mode": not is_static_mode,
+        "is_effect_mode": is_effect_mode,
+        "is_rgb_mode": is_rgb_mode,
+        "is_white_mode": is_white_mode,
     }
 
 

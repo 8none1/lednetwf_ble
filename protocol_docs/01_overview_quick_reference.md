@@ -3,13 +3,15 @@
 ## Quick Reference - Essential Commands
 
 | Purpose          | Command Bytes                                    | Response |
-|------------------|--------------------------------------------------|----------|
+|------------------|--------------------------------------------------|---------|
 | Query State      | [0x81, 0x8A, 0x8B, 0x40]                         | 14 bytes |
 | Set RGBCW        | [0x31, R, G, B, WW, CW, 0x5A, persist, checksum] | None     |
-| Power ON         | [0x11, 0x1A, 0x1B, 0xF0, 0xE6]                   | None     |
-| Power OFF        | [0x11, 0x1A, 0x1B, 0x0F, 0x55]                   | None     |
+| Power ON (modern)| [0x3B, 0x23, ...] (BLE v5+) or [0x71, 0x23, 0x0F, 0xA3] (legacy) | None     |
+| Power OFF (modern)| [0x3B, 0x24, ...] (BLE v5+) or [0x71, 0x24, 0x0F, 0xA4] (legacy) | None     |
 | Set Brightness   | [0x47, brightness, checksum]                     | None     |
 | Set Effect       | [0x38, effect_id, speed, param, checksum]        | None     |
+
+**Note**: Power command format depends on BLE version. See section 07 for details.
 
 ## BLE Service and Characteristic UUIDs
 

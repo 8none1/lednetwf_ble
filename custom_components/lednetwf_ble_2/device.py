@@ -332,7 +332,13 @@ class LEDNetWFDevice:
             _LOGGER.debug("Unknown notification type: 0x%02X", payload[0])
 
     def _parse_state_response(self, data: bytes) -> None:
-        """Parse 0x81 state response."""
+        """Parse 0x81 state response.
+
+        Brightness handling per mode (from model_0x53.py):
+        - RGB mode: derive from RGB via HSV conversion (V component)
+        - White mode: from value1 (byte 5), scaled 0-100 → 0-255
+        - Effect mode: from byte 6 (R position), scaled 0-100 → 0-255
+        """
         result = protocol.parse_state_response(data)
         if not result:
             return
@@ -345,33 +351,55 @@ class LEDNetWFDevice:
             self._pending_state_response.set()
 
         self._is_on = result["is_on"]
-        self._rgb = (result["r"], result["g"], result["b"])
 
-        # Use brightness from response if available
-        if result.get("brightness", 0) > 0:
-            self._brightness = result["brightness"]
-
-        # Check if in effect mode
-        if result.get("is_effect_mode") and result.get("effect_id"):
+        # Handle different modes
+        if result.get("is_effect_mode"):
+            # Effect mode
             self._effect = self._effect_id_to_name(result["effect_id"])
-            # Update effect speed from response
-            if result.get("speed", 0) > 0:
-                # Convert 0-255 to 0-100
-                self._effect_speed = int(result["speed"] * 100 / 255)
-        else:
-            # Not in effect mode - check for color temp vs RGB mode
+            self._color_temp_kelvin = None
+            # Brightness from byte 6 (R position), scaled 0-100 → 0-255
+            self._brightness = int(result["r"] * 255 / 100) if result["r"] <= 100 else result["r"]
+            # Speed from byte 7 (G position)
+            self._effect_speed = result["g"] if result["g"] <= 100 else int(result["g"] * 100 / 255)
+            _LOGGER.debug("Effect mode: effect_id=%s, brightness=%d, speed=%d",
+                          result["effect_id"], self._brightness, self._effect_speed)
+
+        elif result.get("is_white_mode"):
+            # White/CCT mode - brightness from value1 (byte 5), scaled 0-100 → 0-255
             self._effect = None
-            if result["ww"] > 0 or result["cw"] > 0:
-                # White/CCT mode - estimate color temp from WW/CW ratio
-                total = result["ww"] + result["cw"]
-                if total > 0:
-                    cw_ratio = result["cw"] / total
-                    self._color_temp_kelvin = int(MIN_KELVIN + cw_ratio * (MAX_KELVIN - MIN_KELVIN))
-                    self._brightness = min(255, total)
-                    self._rgb = None  # Clear RGB when in CCT mode
-            elif result["r"] > 0 or result["g"] > 0 or result["b"] > 0:
-                # RGB mode
-                self._color_temp_kelvin = None
+            self._rgb = None
+            self._brightness = int(result["value1"] * 255 / 100)
+            # Color temp from byte 9 (ww position), 0-100%
+            # Per protocol: 0% = 2700K (warm), 100% = 6500K (cool)
+            temp_pct = result["ww"]
+            self._color_temp_kelvin = int(MIN_KELVIN + temp_pct * (MAX_KELVIN - MIN_KELVIN) / 100)
+            _LOGGER.debug("White mode: brightness=%d (value1=%d), color_temp=%dK (pct=%d)",
+                          self._brightness, result["value1"], self._color_temp_kelvin, temp_pct)
+
+        elif result.get("is_rgb_mode"):
+            # RGB mode - brightness derived from RGB via HSV conversion
+            self._effect = None
+            self._color_temp_kelvin = None
+            r, g, b = result["r"], result["g"], result["b"]
+            self._rgb = (r, g, b)
+            # Derive brightness from V component of HSV
+            _, _, v = protocol.rgb_to_hsv(r, g, b)
+            # v is 0-100, convert to 0-255
+            self._brightness = int(v * 255 / 100)
+            _LOGGER.debug("RGB mode: rgb=%s, brightness=%d (from HSV v=%d)",
+                          self._rgb, self._brightness, v)
+
+        else:
+            # Unknown mode - use raw values
+            self._effect = None
+            r, g, b = result["r"], result["g"], result["b"]
+            self._rgb = (r, g, b)
+            # For unknown mode, try to derive brightness from RGB
+            # Note: byte 10 is LED version, NOT brightness per Java source
+            _, _, v = protocol.rgb_to_hsv(r, g, b)
+            self._brightness = int(v * 255 / 100) if v > 0 else 255
+            _LOGGER.debug("Unknown mode (0x%02X/0x%02X): rgb=%s, brightness=%d (derived from RGB)",
+                          result["mode_type"], result["sub_mode"], self._rgb, self._brightness)
 
         _LOGGER.debug("Parsed state: on=%s, rgb=%s, cct=%s, effect=%s, brightness=%s",
                       self._is_on, self._rgb, self._color_temp_kelvin, self._effect, self._brightness)
