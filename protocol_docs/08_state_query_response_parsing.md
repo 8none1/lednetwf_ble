@@ -47,7 +47,19 @@ Never use this byte for brightness calculations.
 | 97    | 0x61 | Static color/white mode          |
 | 98    | 0x62 | Music reactive mode              |
 | 99    | 0x63 | LED settings response (different format) |
-| 37    | 0x25 | Effect mode                      |
+| 37    | 0x25 | Effect mode (Symphony/Addressable - effect ID in sub-mode) |
+| 37-56 | 0x25-0x38 | SIMPLE effect mode - mode_type IS the effect ID |
+
+**SIMPLE Effect Mode (mode_type 37-56):**
+For SIMPLE devices (e.g., product_id 0x33), when running effects like "Yellow gradual change"
+(effect 41 = 0x29), the mode_type byte directly contains the effect ID rather than a mode
+indicator. The sub-mode byte may contain speed or other parameters.
+
+Example: Device running "Yellow gradual change" reports:
+
+- mode_type = 0x29 (41) = effect ID
+- sub_mode = 0x23 (35) = possibly speed
+- byte 17 = brightness percentage
 
 ### Sub-mode (Byte 4) Values (when Mode Type = 0x61)
 

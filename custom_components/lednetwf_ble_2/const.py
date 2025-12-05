@@ -75,6 +75,16 @@ class EffectType(IntEnum):
     ADDRESSABLE_0x53 = 3    # 0x38 command NO checksum (4 bytes), brightness in byte 3
 
 
+class ValueScale(IntEnum):
+    """Value scale for brightness/speed in advertisement data.
+
+    Determines how to convert raw advertisement values to internal 0-255/0-100 format.
+    """
+    PERCENT = 0         # 0-100 percentage scale (default for most devices)
+    RAW_255 = 1         # 0-255 raw scale (some newer devices)
+    INVERTED_31 = 2     # 0x01-0x1F inverted scale (0x54, 0x55, 0x62 devices)
+
+
 # Simple effects (0x61 command) - IDs 37-56 for non-Symphony RGB devices
 SIMPLE_EFFECTS: Final = {
     37: "Seven color cross fade",
@@ -97,6 +107,32 @@ SIMPLE_EFFECTS: Final = {
     54: "Purple strobe flash",
     55: "White strobe flash",
     56: "Seven color jumping change",
+}
+
+# Static effects for devices with background color support (0x56, 0x80)
+# These effects support both foreground and background colors using the 0x41 command
+# Effect ID 1 is "Solid Color" which is just foreground, no background
+# Effects 2-10 are "Static Effects" with foreground + background
+STATIC_EFFECTS_WITH_BG: Final = {
+    2: "Static Effect 2",
+    3: "Static Effect 3",
+    4: "Static Effect 4",
+    5: "Static Effect 5",
+    6: "Static Effect 6",
+    7: "Static Effect 7",
+    8: "Static Effect 8",
+    9: "Static Effect 9",
+    10: "Static Effect 10",
+}
+
+# Regular effects for 0x56/0x80 devices (0x42 command) - IDs 1-99
+STRIP_EFFECTS: Final = {
+    i: f"Effect {i}" for i in range(1, 100)
+}
+
+# Sound reactive effects for 0x56/0x80 devices (0x73 command)
+SOUND_REACTIVE_EFFECTS: Final = {
+    i: f"Sound Reactive {i}" for i in range(1, 16)
 }
 
 # Symphony Scene effects (0x38 command) - IDs 1-44
@@ -242,9 +278,14 @@ ADDRESSABLE_0x53_EFFECTS: Final = {
     255: "Cycle Through All Modes",  # Special effect ID 0xFF
 }
 
+# Product IDs with special speed encoding (inverted 0x01-0x1F scale)
+# Source: model_0x54.py - these devices use inverted speed where 0x01=fastest, 0x1F=slowest
+INVERTED_SPEED_PRODUCT_IDS: Final = {0x54, 0x55, 0x62, 0x5B}
+
 # Product ID to capabilities mapping
 # Source: protocol_docs/04_device_identification_capabilities.md
 # Source: protocol_docs/09_effects_addressable_led_support.md
+# Note: brightness_scale and speed_scale default to PERCENT if not specified
 PRODUCT_CAPABILITIES: Final = {
     # Controllers with RGB + White (RGBWBoth / RGBCWBoth)
     4:   {"name": "Ctrl_RGBW_UFO", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
@@ -414,42 +455,186 @@ def needs_capability_probing(product_id: int | None) -> bool:
     return PRODUCT_CAPABILITIES[product_id].get("is_stub", False)
 
 
-def get_effect_list(effect_type: EffectType) -> list[str]:
-    """Get list of effect names for the given effect type."""
+def get_effect_list(effect_type: EffectType, has_bg_color: bool = False) -> list[str]:
+    """Get list of effect names for the given effect type.
+
+    Args:
+        effect_type: The effect command type for the device
+        has_bg_color: If True, include static effects that support background color
+
+    Returns:
+        List of effect names
+    """
     if effect_type == EffectType.SIMPLE:
         return list(SIMPLE_EFFECTS.values())
     elif effect_type == EffectType.SYMPHONY:
-        # Scene effects (1-44) + Build effects (100-399)
-        effects = list(SYMPHONY_SCENE_EFFECTS.values())
-        # Add build effects as numbered entries
-        for i in range(100, 400):
-            effects.append(f"Build Effect {i - 99}")
-        return effects
+        if has_bg_color:
+            # 0x56/0x80 devices: Static effects + Regular effects + Sound reactive
+            effects = list(STATIC_EFFECTS_WITH_BG.values())
+            effects.extend(list(STRIP_EFFECTS.values()))
+            effects.extend(list(SOUND_REACTIVE_EFFECTS.values()))
+            effects.append("Cycle Modes")
+            return effects
+        else:
+            # Other Symphony devices: Scene effects + Build effects
+            effects = list(SYMPHONY_SCENE_EFFECTS.values())
+            # Add build effects as numbered entries
+            for i in range(100, 400):
+                effects.append(f"Build Effect {i - 99}")
+            return effects
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         # 0x53 Ring Light effects (113 effects + Cycle All)
         return list(ADDRESSABLE_0x53_EFFECTS.values())
     return []
 
 
-def get_effect_id(effect_name: str, effect_type: EffectType) -> int | None:
-    """Get effect ID from name."""
+def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool = False) -> int | None:
+    """Get effect ID from name.
+
+    Args:
+        effect_name: Effect name to look up
+        effect_type: The effect command type for the device
+        has_bg_color: If True, check static effects that support background color
+
+    Returns:
+        Effect ID or None if not found
+    """
     if effect_type == EffectType.SIMPLE:
         for eid, name in SIMPLE_EFFECTS.items():
             if name == effect_name:
                 return eid
     elif effect_type == EffectType.SYMPHONY:
-        for eid, name in SYMPHONY_SCENE_EFFECTS.items():
-            if name == effect_name:
-                return eid
-        # Check build effects
-        if effect_name.startswith("Build Effect "):
-            try:
-                num = int(effect_name.replace("Build Effect ", ""))
-                return num + 99  # Convert back to protocol ID
-            except ValueError:
-                pass
+        if has_bg_color:
+            # 0x56/0x80 devices: Check static effects, strip effects, sound reactive
+            for eid, name in STATIC_EFFECTS_WITH_BG.items():
+                if name == effect_name:
+                    # Static effects use ID << 8 to distinguish from regular effects
+                    return eid << 8
+            for eid, name in STRIP_EFFECTS.items():
+                if name == effect_name:
+                    return eid
+            for eid, name in SOUND_REACTIVE_EFFECTS.items():
+                if name == effect_name:
+                    # Sound reactive effects use (eid + 0x32) << 8
+                    return (eid + 0x32) << 8
+            if effect_name == "Cycle Modes":
+                return 255
+        else:
+            # Other Symphony devices: Scene effects + Build effects
+            for eid, name in SYMPHONY_SCENE_EFFECTS.items():
+                if name == effect_name:
+                    return eid
+            # Check build effects
+            if effect_name.startswith("Build Effect "):
+                try:
+                    num = int(effect_name.replace("Build Effect ", ""))
+                    return num + 99  # Convert back to protocol ID
+                except ValueError:
+                    pass
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         for eid, name in ADDRESSABLE_0x53_EFFECTS.items():
             if name == effect_name:
                 return eid
     return None
+
+
+def get_brightness_scale(product_id: int | None) -> ValueScale:
+    """Get the brightness value scale for a product ID.
+
+    Most devices report brightness as 0-100 percentage in manufacturer data.
+    Some newer devices may report 0-255 directly.
+
+    Args:
+        product_id: Device product ID
+
+    Returns:
+        ValueScale indicating how to interpret brightness values
+    """
+    # Currently all known devices use percentage scale for brightness
+    # The > 100 values we saw were likely bugs or malformed data
+    # Per protocol docs and old integration, manufacturer data should be 0-100
+    return ValueScale.PERCENT
+
+
+def get_speed_scale(product_id: int | None) -> ValueScale:
+    """Get the effect speed value scale for a product ID.
+
+    Most devices report speed as 0-100 percentage.
+    0x54, 0x55, 0x62, 0x5B devices use inverted 0x01-0x1F scale.
+
+    Args:
+        product_id: Device product ID
+
+    Returns:
+        ValueScale indicating how to interpret speed values
+    """
+    if product_id is not None and product_id in INVERTED_SPEED_PRODUCT_IDS:
+        return ValueScale.INVERTED_31
+    return ValueScale.PERCENT
+
+
+def convert_brightness_from_adv(raw_value: int, product_id: int | None) -> int:
+    """Convert advertisement brightness value to Home Assistant 0-255 scale.
+
+    Args:
+        raw_value: Raw brightness value from advertisement data
+        product_id: Device product ID
+
+    Returns:
+        Brightness value in 0-255 range
+    """
+    scale = get_brightness_scale(product_id)
+
+    if scale == ValueScale.RAW_255:
+        # Value is already 0-255
+        return max(0, min(255, raw_value))
+    elif scale == ValueScale.PERCENT:
+        # Value is 0-100 percentage, convert to 0-255
+        # Handle potential overflow (device reporting 0-255 when we expect 0-100)
+        if raw_value > 100:
+            _LOGGER.debug(
+                "Brightness %d exceeds expected 0-100 range for product_id=0x%02X, "
+                "treating as raw 0-255 value",
+                raw_value, product_id or 0
+            )
+            return max(0, min(255, raw_value))
+        return int(raw_value * 255 / 100)
+
+    return max(0, min(255, raw_value))
+
+
+def convert_speed_from_adv(raw_value: int, product_id: int | None) -> int:
+    """Convert advertisement speed value to 0-100 percentage scale.
+
+    Args:
+        raw_value: Raw speed value from advertisement data
+        product_id: Device product ID
+
+    Returns:
+        Speed value in 0-100 range
+    """
+    scale = get_speed_scale(product_id)
+
+    if scale == ValueScale.INVERTED_31:
+        # 0x54/0x55/0x62/0x5B: inverted 0x01-0x1F scale
+        # 0x01 = 100% (fastest), 0x1F = ~3% (slowest)
+        # Formula from model_0x54.py: speed% = round((0x1f - speed_raw) * (100 - 1) / (0x1f - 0x01) + 1)
+        if raw_value < 0x01:
+            raw_value = 0x01
+        elif raw_value > 0x1F:
+            raw_value = 0x1F
+        speed_pct = round((0x1F - raw_value) * 99 / 30 + 1)
+        return max(0, min(100, speed_pct))
+    elif scale == ValueScale.PERCENT:
+        # Value is 0-100 percentage
+        # Handle potential overflow (device reporting 0-255 when we expect 0-100)
+        if raw_value > 100:
+            _LOGGER.debug(
+                "Speed %d exceeds expected 0-100 range for product_id=0x%02X, "
+                "converting from 0-255 to 0-100",
+                raw_value, product_id or 0
+            )
+            return int(raw_value * 100 / 255)
+        return max(0, min(100, raw_value))
+
+    return max(0, min(100, raw_value))

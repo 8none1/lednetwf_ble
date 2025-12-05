@@ -65,7 +65,7 @@ def _parse_discovery(discovery: BluetoothServiceInfoBleak) -> dict | None:
         return None
 
     # Parse manufacturer data
-    manu_data = protocol.parse_manufacturer_data(discovery.manufacturer_data)
+    manu_data = protocol.parse_manufacturer_data(discovery.manufacturer_data, name)
     if not manu_data:
         return None
 

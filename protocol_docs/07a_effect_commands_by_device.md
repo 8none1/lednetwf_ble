@@ -27,7 +27,7 @@ Effect commands vary significantly by device type. Using the wrong format will c
 | 0x56, 0x80 | Music Strip | 0x42 | `[0x42, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct |
 | 0x5B | Strip Controller | 0x38 | `[0x38, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct |
 | **0xA1-0xA9** | **Symphony Devices** | **0x38** | `[0x38, effect, speed, bright, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
-| 0x33, 0x06, 0x04 | RGB Controllers | 0x61 | `[0x61, effect, speed, persist, chk]` | 5 | YES | 0-255 | Varies |
+| **0x33, 0x06, 0x04** | **Legacy RGB** | **0x61** | `[0x61, effect, speed, persist, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
 
 ---
 
@@ -644,6 +644,20 @@ def build_music_mode(on: bool, effect_id: int, fg_rgb: tuple, bg_rgb: tuple,
 - **Effects**: Simple effects (IDs 37-56)
 - **No addressable LED support**
 
+### Product ID 0x33 (Ctrl_Mini_RGB) Effect Support
+
+**Product ID 0x33 DOES support effects!** The effects are the simple 0x61 effects (IDs 37-56),
+NOT the addressable Symphony effects.
+
+**Note**: The `s0()` method returns empty for 0x33 because it only returns *addressable/Symphony*
+effects. The simple effects (37-56) are provided by `dd.g.k()` and are available via the
+Dynamic Mode UI in the Android app.
+
+**Effect Command Path (from Java source):**
+1. `ActivityCMDBase.x0()` calls `Protocol.n` constructor
+2. `Protocol.n` checks device type and calls `tc.b.c()` for non-Symphony devices
+3. `tc.b.c()` builds the 5-byte 0x61 command with speed 1-31 (inverted)
+
 ### Effect Command Format (0x61) - 5 bytes WITH checksum
 
 ```
@@ -654,33 +668,105 @@ Raw command: [0x61, effect_id, speed, persist, checksum]
 |------|-------|-------|-------|
 | 0 | Command opcode | 0x61 | Fixed value |
 | 1 | Effect ID | 37-56 | 20 simple effects |
-| 2 | Speed | 0-255 | Speed encoding varies by device |
+| 2 | Speed | **1-31** | **INVERTED: 1=fastest, 31=slowest** |
 | 3 | Persist | 0xF0/0x0F | 0xF0=save, 0x0F=temporary |
 | 4 | Checksum | calculated | Sum of bytes 0-3 |
+
+### Speed Encoding (CRITICAL - From Java Source!)
+
+**From `COMM/Protocol/n.java` line 23:**
+```java
+tc.b.c(i10, ad.e.a(f10, 1, 31), false)
+```
+
+**From `ad/e.java` line 32-34:**
+```java
+public static byte a(float f10, int i10, int i11) {
+    return (byte) (i10 + ((i11 - i10) * (1.0f - f10)));
+}
+```
+
+This means:
+- **Speed range is 1-31 (NOT 0-255!)**
+- **Speed is INVERTED: lower values = faster**
+- UI 100% (fastest) → protocol value 1
+- UI 50% (medium) → protocol value 16
+- UI 0% (slowest) → protocol value 31
+
+```python
+def map_ui_speed_to_legacy_protocol(ui_speed: int) -> int:
+    """
+    Convert UI speed (0-100, 0=slow, 100=fast) to protocol speed (1-31, inverted).
+
+    From ad/e.java: result = min + ((max-min) * (1.0 - normalized_speed))
+    With min=1, max=31: result = 1 + (30 * (1.0 - speed/100))
+    """
+    ui_speed = max(0, min(100, ui_speed))
+    normalized = ui_speed / 100.0
+    protocol_speed = 1 + int(30 * (1.0 - normalized))
+    return max(1, min(31, protocol_speed))
+
+# Examples:
+# UI 100% (fast)  → 1 + (30 * 0.0)  = 1  (fastest)
+# UI 50% (medium) → 1 + (30 * 0.5)  = 16 (medium)
+# UI 0% (slow)    → 1 + (30 * 1.0)  = 31 (slowest)
+```
+
+### NO Brightness Byte!
+
+**Important**: The 0x61 command does NOT have a brightness byte!
+Brightness for legacy RGB controllers is controlled separately via the 0x31
+static color command or is inherent to the effect.
 
 ### Python Implementation
 
 ```python
-def build_effect_legacy(effect_id: int, speed: int, persist: bool = False) -> bytes:
+def build_effect_legacy(effect_id: int, ui_speed: int, persist: bool = False) -> bytes:
     """
     Build legacy RGB effect command.
-    
+
     Args:
         effect_id: 37-56 (simple effects)
-        speed: 0-255 (encoding varies)
+        ui_speed: 0-100 (0=slowest, 100=fastest - will be inverted internally)
         persist: Save to flash memory
+
+    Note: NO brightness parameter - brightness controlled separately via 0x31
     """
     effect_id = max(37, min(56, effect_id))
-    speed = max(0, min(255, speed))
-    
+
+    # Convert UI speed (0-100) to protocol speed (1-31, inverted)
+    normalized = max(0, min(100, ui_speed)) / 100.0
+    protocol_speed = 1 + int(30 * (1.0 - normalized))
+    protocol_speed = max(1, min(31, protocol_speed))
+
     cmd = bytearray([
         0x61,
         effect_id & 0xFF,
-        speed & 0xFF,
+        protocol_speed & 0xFF,
         0xF0 if persist else 0x0F
     ])
     cmd.append(sum(cmd) & 0xFF)
     return bytes(cmd)
+```
+
+### Common Mistake: Wrong Speed Range
+
+**BAD (what user sent):**
+```
+61 29 BA 0F 53
+      ^^
+      Speed=186 (0xBA) - WRONG! Outside valid range 1-31!
+```
+
+This causes undefined behavior because the device expects 1-31, not 0-255.
+
+**CORRECT (same effect at ~73% UI speed):**
+```python
+# Effect 41 (Yellow gradual change), 73% speed, temporary
+# UI speed 73% → protocol speed: 1 + (30 * 0.27) = 9
+cmd = [0x61, 0x29, 0x09, 0x0F]
+checksum = (0x61 + 0x29 + 0x09 + 0x0F) & 0xFF  # = 0xA2
+final = [0x61, 0x29, 0x09, 0x0F, 0xA2]
 ```
 
 ### Simple Effect List (IDs 37-56)

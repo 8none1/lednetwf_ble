@@ -318,6 +318,84 @@ def build_cct_command_0x35(temp_percent: int, brightness_percent: int, duration_
 
 
 # =============================================================================
+# STATIC EFFECT COMMANDS (with background color support)
+# =============================================================================
+
+def build_static_effect_command_0x41(
+    effect_id: int,
+    fg_rgb: tuple[int, int, int],
+    bg_rgb: tuple[int, int, int],
+    speed: int = 50,
+) -> bytearray:
+    """
+    Build static effect command with foreground and background colors.
+
+    Used for 0x56 and 0x80 devices that support background color.
+    This command format includes both foreground and background RGB colors.
+
+    Source: model_0x56.py set_color() and set_effect() methods
+
+    Format (13 bytes + checksum):
+    [0x41, effect_id, FG_R, FG_G, FG_B, BG_R, BG_G, BG_B, speed, 0x00, 0x00, 0xF0, checksum]
+
+    Static Effect IDs:
+    - 0 = No change to current effect (useful for just changing colors)
+    - 1 = Solid Color (foreground only, no background)
+    - 2-10 = Static Effects with foreground + background
+
+    Args:
+        effect_id: Static effect ID (0-10)
+        fg_rgb: Foreground RGB color tuple (0-255)
+        bg_rgb: Background RGB color tuple (0-255)
+        speed: Effect speed (0-100)
+
+    Returns:
+        Complete command packet wrapped in transport layer
+    """
+    fg_r, fg_g, fg_b = fg_rgb
+    bg_r, bg_g, bg_b = bg_rgb
+    speed = max(0, min(100, speed))
+
+    raw_cmd = bytearray([
+        0x41,                      # Command opcode
+        effect_id & 0xFF,          # Static effect ID (0-10)
+        fg_r & 0xFF,               # Foreground R
+        fg_g & 0xFF,               # Foreground G
+        fg_b & 0xFF,               # Foreground B
+        bg_r & 0xFF,               # Background R
+        bg_g & 0xFF,               # Background G
+        bg_b & 0xFF,               # Background B
+        speed & 0xFF,              # Effect speed
+        0x00, 0x00,                # Reserved/unknown
+        0xF0,                      # Mode flag
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+
+
+def build_bg_color_command_0x41(
+    fg_rgb: tuple[int, int, int],
+    bg_rgb: tuple[int, int, int],
+    speed: int = 50,
+) -> bytearray:
+    """
+    Build background color command (0x41 with effect_id=0).
+
+    This sets the background color without changing the current static effect.
+    Effect ID 0 means "keep current effect, just update colors".
+
+    Args:
+        fg_rgb: Foreground RGB color tuple (0-255)
+        bg_rgb: Background RGB color tuple (0-255)
+        speed: Effect speed (0-100)
+
+    Returns:
+        Complete command packet wrapped in transport layer
+    """
+    return build_static_effect_command_0x41(0, fg_rgb, bg_rgb, speed)
+
+
+# =============================================================================
 # EFFECT COMMANDS
 # =============================================================================
 
@@ -404,33 +482,97 @@ def build_effect_command_0x61(effect_id: int, speed: int = 128, persist: bool = 
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
+def build_effect_command_0x42(effect_id: int, speed: int = 50, brightness: int = 100) -> bytearray:
+    """
+    Build strip effect command (0x42) for 0x56/0x80 devices.
+
+    Used for regular (dynamic) effects on strip controllers.
+    Effect IDs: 1-99, or 255 for cycle modes
+
+    Format (5 bytes + checksum): [0x42, effect_id, speed, brightness, checksum]
+
+    Args:
+        effect_id: Effect ID (1-99 or 255)
+        speed: Effect speed (0-100)
+        brightness: Effect brightness (0-100)
+    """
+    speed = max(0, min(100, speed))
+    brightness = max(1, min(100, brightness))
+
+    raw_cmd = bytearray([
+        0x42,
+        effect_id & 0xFF,
+        speed & 0xFF,
+        brightness & 0xFF,
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+
+
 def build_effect_command(
     effect_type: EffectType,
     effect_id: int,
     speed: int = 50,
     brightness: int = 100,
+    has_bg_color: bool = False,
+    fg_rgb: tuple[int, int, int] | None = None,
+    bg_rgb: tuple[int, int, int] | None = None,
 ) -> bytearray | None:
     """
     Build effect command based on device effect type.
 
     Args:
         effect_type: SIMPLE, SYMPHONY, or ADDRESSABLE_0x53
-        effect_id: Effect ID
+        effect_id: Effect ID (can be encoded for special effect types)
         speed: Effect speed (0-100)
         brightness: Effect brightness (0-100)
+        has_bg_color: If True, use 0x56/0x80 effect commands
+        fg_rgb: Foreground RGB for static effects (optional)
+        bg_rgb: Background RGB for static effects (optional)
 
     Returns:
         Command packet or None if effect type is NONE
+
+    Effect ID encoding for has_bg_color devices:
+        - Static effects: (effect_id >> 8) where result is 2-10
+        - Sound reactive: (effect_id >> 8) where result is 0x33-0x41
+        - Regular effects: effect_id directly (1-99, 255)
     """
     if effect_type == EffectType.ADDRESSABLE_0x53:
         # 4 bytes, NO checksum - brightness is critical!
         return build_effect_command_0x53(effect_id, speed, brightness)
     elif effect_type == EffectType.SYMPHONY:
-        # 5 bytes WITH checksum
-        return build_effect_command_0x38(effect_id, speed, brightness)
+        if has_bg_color and effect_id >= 0x100:
+            # Encoded effect ID for 0x56/0x80 devices
+            decoded_id = effect_id >> 8
+            if decoded_id <= 10:
+                # Static effect (2-10) - use 0x41 command
+                # These effects need FG and BG colors
+                if fg_rgb is None:
+                    fg_rgb = (255, 255, 255)  # Default white
+                if bg_rgb is None:
+                    bg_rgb = (0, 0, 0)  # Default black
+                return build_static_effect_command_0x41(
+                    decoded_id, fg_rgb, bg_rgb, speed
+                )
+            elif decoded_id >= 0x33:
+                # Sound reactive effect - would need 0x73 command
+                # For now, just log and return None (not yet implemented)
+                _LOGGER.warning(
+                    "Sound reactive effects not yet implemented (id=%d)",
+                    effect_id
+                )
+                return None
+        elif has_bg_color:
+            # Regular strip effect (1-99 or 255) - use 0x42 command
+            return build_effect_command_0x42(effect_id, speed, brightness)
+        else:
+            # Standard Symphony effect - 5 bytes WITH checksum
+            return build_effect_command_0x38(effect_id, speed, brightness)
     elif effect_type == EffectType.SIMPLE:
-        # 0x61 command
-        return build_effect_command_0x61(effect_id, speed)
+        # 0x61 command - speed needs to be 0-255, convert from 0-100
+        speed_byte = int(speed * 255 / 100)
+        return build_effect_command_0x61(effect_id, speed_byte)
     return None
 
 
@@ -740,7 +882,10 @@ def parse_led_settings_response_a3(data: bytes) -> dict | None:
     }
 
 
-def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
+def parse_manufacturer_data(
+    manu_data: dict[int, bytes],
+    device_name: str | None = None
+) -> dict | None:
     """
     Parse manufacturer data from BLE advertisement (Format B - bleak).
 
@@ -758,6 +903,10 @@ def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
         Bytes 14-24: state_data (if ble_version >= 5)
         Bytes 25-26: rfu
 
+    Args:
+        manu_data: Manufacturer data dict from BLE advertisement
+        device_name: Optional device name for log message context
+
     Returns dict with:
         - product_id: int
         - power_state: bool | None
@@ -765,6 +914,8 @@ def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
         - fw_version: str
         - manu_id: int (company ID)
     """
+    # Log prefix for device identification
+    log_prefix = f"[{device_name}] " if device_name else ""
     if not manu_data:
         return None
 
@@ -829,26 +980,63 @@ def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
                     # RGB mode (0xF0=RGB, 0x01/0x0B may be effects/music mode but show as RGB)
                     color_mode = 'rgb'
                     rgb = (data[18], data[19], data[20])
-                    _LOGGER.debug("Manu data RGB mode: rgb=%s", rgb)
+                    _LOGGER.debug("%sManu data RGB mode: rgb=%s", log_prefix, rgb)
                 elif sub_mode == 0x0F:
                     # White/CCT mode
                     color_mode = 'cct'
                     brightness_percent = data[17]  # 0-100
                     color_temp_percent = data[21]  # 0-100 (0=2700K, 100=6500K)
-                    _LOGGER.debug("Manu data CCT mode: temp_pct=%d, bright_pct=%d",
-                                  color_temp_percent, brightness_percent)
+                    _LOGGER.debug("%sManu data CCT mode: temp_pct=%d, bright_pct=%d",
+                                  log_prefix, color_temp_percent, brightness_percent)
+                elif sub_mode == 0x23:
+                    # Power ON state - device on but no specific color mode
+                    # 0x23 (35) = PowerType_PowerON per protocol docs
+                    color_mode = 'standby'
+                    _LOGGER.debug("%sManu data standby mode (0x23 power on)", log_prefix)
+                elif sub_mode == 0x24:
+                    # Power OFF state
+                    # 0x24 (36) = PowerType_PowerOFF per protocol docs
+                    color_mode = 'off'
+                    _LOGGER.debug("%sManu data power off mode (0x24)", log_prefix)
                 else:
-                    _LOGGER.debug("Manu data unknown sub-mode: 0x%02X", sub_mode)
+                    # Log full state bytes for debugging unknown sub-modes
+                    state_bytes = ' '.join(f'{b:02X}' for b in data[14:min(25, len(data))])
+                    _LOGGER.debug(
+                        "%sManu data unknown sub-mode: 0x%02X (mode_type=0x61), "
+                        "state_bytes[14:24]: %s",
+                        log_prefix, sub_mode, state_bytes
+                    )
             elif mode_type == 0x25:
-                # Effect mode
+                # Effect mode (Symphony/Addressable devices)
+                # Effect ID is in sub_mode byte
                 color_mode = 'effect'
                 effect_id = sub_mode  # Effect ID in sub_mode byte
                 brightness_percent = data[18]  # 0-100
                 effect_speed = data[19]  # 0-100
-                _LOGGER.debug("Manu data effect mode: id=%d, bright_pct=%d, speed=%d",
-                              effect_id, brightness_percent, effect_speed)
+                _LOGGER.debug("%sManu data effect mode (0x25): id=%d, bright_pct=%d, speed=%d",
+                              log_prefix, effect_id, brightness_percent, effect_speed)
+            elif 37 <= mode_type <= 56:
+                # SIMPLE effect mode - mode_type IS the effect ID (37-56)
+                # For SIMPLE devices (0x33, etc.), when running effects like
+                # "Yellow gradual change" (41), the mode_type contains the effect ID directly
+                color_mode = 'effect'
+                effect_id = mode_type  # Effect ID is in mode_type, not sub_mode
+                # sub_mode may contain speed or other param (0x23 observed)
+                # Bytes 17-20 interpretation for SIMPLE effects may differ
+                # For now, try to extract brightness from common positions
+                brightness_percent = data[17] if data[17] <= 100 else None
+                effect_speed = sub_mode if sub_mode <= 100 else None
+                _LOGGER.debug("%sManu data SIMPLE effect mode: id=%d (0x%02X), "
+                              "sub_mode=0x%02X, bright_pct=%s",
+                              log_prefix, effect_id, mode_type, sub_mode, brightness_percent)
             else:
-                _LOGGER.debug("Manu data unknown mode_type: 0x%02X", mode_type)
+                # Log full state bytes for debugging unknown modes
+                state_bytes = ' '.join(f'{b:02X}' for b in data[14:min(25, len(data))])
+                _LOGGER.debug(
+                    "%sManu data unknown mode_type: 0x%02X, sub_mode: 0x%02X, "
+                    "state_bytes[14:24]: %s",
+                    log_prefix, mode_type, sub_mode, state_bytes
+                )
 
         result = {
             "product_id": product_id,
@@ -868,24 +1056,24 @@ def parse_manufacturer_data(manu_data: dict[int, bytes]) -> dict | None:
 
         # Log comprehensive summary of parsed manufacturer data
         _LOGGER.debug(
-            "Parsed manufacturer data: product_id=0x%02X (%d), ble_version=%d, "
+            "%sParsed manu data: product_id=0x%02X (%d), ble_version=%d, "
             "fw=%s, power=%s, mode=%s",
-            product_id, product_id, ble_version, fw_version,
+            log_prefix, product_id, product_id, ble_version, fw_version,
             "ON" if power_state else ("OFF" if power_state is False else "unknown"),
             color_mode or "unknown",
         )
         if color_mode == "rgb":
-            _LOGGER.debug("  RGB state: rgb=%s", rgb)
+            _LOGGER.debug("%s  RGB state: rgb=%s", log_prefix, rgb)
         elif color_mode == "cct":
-            _LOGGER.debug("  CCT state: temp_pct=%s%%, bright_pct=%s%%",
-                          color_temp_percent, brightness_percent)
+            _LOGGER.debug("%s  CCT state: temp_pct=%s%%, bright_pct=%s%%",
+                          log_prefix, color_temp_percent, brightness_percent)
         elif color_mode == "effect":
-            _LOGGER.debug("  Effect state: id=%s, speed=%s, bright_pct=%s%%",
-                          effect_id, effect_speed, brightness_percent)
+            _LOGGER.debug("%s  Effect state: id=%s, speed=%s, bright_pct=%s%%",
+                          log_prefix, effect_id, effect_speed, brightness_percent)
 
         return result
 
     # No valid manufacturer data found
-    _LOGGER.debug("No valid LEDnetWF manufacturer data found in: %s",
-                  {hex(k): len(v) for k, v in manu_data.items()})
+    _LOGGER.debug("%sNo valid LEDnetWF manufacturer data found in: %s",
+                  log_prefix, {hex(k): len(v) for k, v in manu_data.items()})
     return None
