@@ -492,15 +492,18 @@ def build_effect_command_0x61(effect_id: int, speed: int = 16, persist: bool = F
 
 def build_effect_command_0x42(effect_id: int, speed: int = 50, brightness: int = 100) -> bytearray:
     """
-    Build strip effect command (0x42) for 0x56/0x80 devices.
+    Build effect command (0x42) for Symphony and strip devices.
 
-    Used for regular (dynamic) effects on strip controllers.
-    Effect IDs: 1-99, or 255 for cycle modes
+    Used for:
+    - Symphony Function Mode effects (0xA1-0xAD): IDs 1-100 (numbered only, no names)
+    - 0x56/0x80 strip effects: IDs 1-99, or 255 for cycle modes
 
-    Format (5 bytes + checksum): [0x42, effect_id, speed, brightness, checksum]
+    Source: FunctionModeFragment.java - Protocol.m class
+
+    Format (5 bytes): [0x42, effect_id, speed, brightness, checksum]
 
     Args:
-        effect_id: Effect ID (1-99 or 255)
+        effect_id: Effect ID (1-100 for Symphony, 1-99 or 255 for strips)
         speed: Effect speed (0-100)
         brightness: Effect brightness (0-100)
     """
@@ -554,23 +557,10 @@ def build_effect_command(
     elif effect_type == EffectType.SYMPHONY:
         # True Symphony devices (0xA1-0xAD) with has_ic_config=True
         if has_ic_config:
-            if has_bg_color and effect_id in SYMPHONY_BG_COLOR_EFFECTS:
-                # Symphony effects 5-18 support FG+BG colors via 0x41 command
-                # Source: protocol_docs/14_symphony_background_colors.md
-                if fg_rgb is None:
-                    fg_rgb = (255, 255, 255)  # Default white
-                if bg_rgb is None:
-                    bg_rgb = (0, 0, 0)  # Default black
-                _LOGGER.debug(
-                    "Using 0x41 command for Symphony effect %d with FG=%s, BG=%s",
-                    effect_id, fg_rgb, bg_rgb
-                )
-                return build_static_effect_command_0x41(
-                    effect_id, fg_rgb, bg_rgb, speed
-                )
-            else:
-                # Standard Symphony effect (1-44) - use 0x38 command
-                return build_effect_command_0x38(effect_id, speed, brightness)
+            # Symphony Function Mode effects (1-100) use 0x42 command
+            # Source: FunctionModeFragment.java - effects are numbered 1-100
+            # Format: [0x42, effect_id, speed, brightness, checksum]
+            return build_effect_command_0x42(effect_id, speed, brightness)
         # 0x56/0x80 devices (has_bg_color but not has_ic_config)
         elif has_bg_color and effect_id >= 0x100:
             # Encoded effect ID for 0x56/0x80 devices (static effects use ID << 8)

@@ -630,18 +630,38 @@ class LEDNetWFDevice:
                       self._led_count, self._led_type, self._color_order)
 
     def _effect_id_to_name(self, effect_id: int) -> str | None:
-        """Convert effect ID to name."""
+        """Convert effect ID to name.
+
+        Must be consistent with get_effect_list() and get_effect_id() in const.py.
+        """
         eff_type = self.effect_type
 
         if eff_type == EffectType.SIMPLE:
             from .const import SIMPLE_EFFECTS
             return SIMPLE_EFFECTS.get(effect_id)
         elif eff_type == EffectType.SYMPHONY:
-            from .const import SYMPHONY_SCENE_EFFECTS
-            if effect_id <= 44:
-                return SYMPHONY_SCENE_EFFECTS.get(effect_id)
-            elif effect_id >= 100:
-                return f"Build Effect {effect_id - 99}"
+            if self.has_ic_config:
+                # True Symphony devices (0xA1-0xAD): Function Mode effects (1-100)
+                from .const import SYMPHONY_EFFECTS
+                return SYMPHONY_EFFECTS.get(effect_id)
+            elif self.has_bg_color:
+                # 0x56/0x80 devices: Static effects, strip effects, or sound reactive
+                from .const import STATIC_EFFECTS_WITH_BG, STRIP_EFFECTS, SOUND_REACTIVE_EFFECTS
+                if effect_id <= 10:
+                    return STATIC_EFFECTS_WITH_BG.get(effect_id)
+                elif effect_id <= 99:
+                    return STRIP_EFFECTS.get(effect_id)
+                elif effect_id == 255:
+                    return "Cycle Modes"
+                # Sound reactive would be decoded differently, but we store raw ID
+                return f"Effect {effect_id}"
+            else:
+                # Fallback: use Scene Effects (named effects 1-44)
+                from .const import SYMPHONY_SCENE_EFFECTS
+                if effect_id <= 44:
+                    return SYMPHONY_SCENE_EFFECTS.get(effect_id)
+                elif effect_id >= 100:
+                    return f"Build Effect {effect_id - 99}"
         elif eff_type == EffectType.ADDRESSABLE_0x53:
             from .const import ADDRESSABLE_0x53_EFFECTS
             return ADDRESSABLE_0x53_EFFECTS.get(effect_id)

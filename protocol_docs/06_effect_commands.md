@@ -20,16 +20,18 @@ Effect commands vary significantly by device type. Using the wrong format will c
 
 ## Quick Reference Table
 
-| Product ID | Device Type | Command | Format | Bytes | Checksum | Speed Range | Speed Encoding |
-|------------|-------------|---------|--------|-------|----------|-------------|----------------|
-| **0x1D (29)** | **FillLight/Ring Light** | **0x38** | `[0x38, effect, speed, bright]` | **4** | **NO** | 0-100 | Direct |
-| 0x54, 0x55, 0x62 | Addressable Strip | 0x38 | `[0x38, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct |
-| 0x56, 0x80 | Music Strip | 0x42 | `[0x42, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct |
-| 0x5B | Strip Controller | 0x38 | `[0x38, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct |
-| **0xA1-0xA9** | **Symphony Devices** | **0x38** | `[0x38, effect, speed, bright, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
-| **0xAA, 0xAB** | **Symphony Strip** | **0x38** | `[0x38, effect, speed, bright, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
-| **0xAC, 0xAD (172, 173)** | **LED Curtain Light** | **0x38** | `[0x38, effect, speed, bright, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
-| **0x33, 0x06, 0x04** | **Legacy RGB** | **0x61** | `[0x61, effect, speed, persist, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
+| Product ID | Device Type | Command | Format | Bytes | Checksum | Speed Range | Speed Encoding | Effects |
+|------------|-------------|---------|--------|-------|----------|-------------|----------------|---------|
+| **0x1D (29)** | **FillLight/Ring Light** | **0x38** | `[0x38, effect, speed, bright]` | **4** | **NO** | 0-100 | Direct | 1-113 |
+| 0x54, 0x55, 0x62 | Addressable Strip | 0x38 | `[0x38, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct | 1-44 |
+| 0x56, 0x80 | Music Strip | 0x42 | `[0x42, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct | 1-99 |
+| 0x5B | Strip Controller | 0x38 | `[0x38, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct | 1-44 |
+| **0xA1-0xA9** | **Symphony Devices** | **0x42** | `[0x42, effect, speed, bright, chk]` | **5** | **YES** | **0-100** | **Direct** | **1-100** |
+| **0xAA, 0xAB** | **Symphony Strip** | **0x42** | `[0x42, effect, speed, bright, chk]` | **5** | **YES** | **0-100** | **Direct** | **1-100** |
+| **0xAC, 0xAD (172, 173)** | **LED Curtain Light** | **0x42** | `[0x42, effect, speed, bright, chk]` | **5** | **YES** | **0-100** | **Direct** | **1-100** |
+| **0x33, 0x06, 0x04** | **Legacy RGB** | **0x61** | `[0x61, effect, speed, persist, chk]` | **5** | **YES** | **1-31** | **INVERTED** | 37-56 |
+
+**Note**: Symphony devices (0xA1-0xAD) use the 0x42 command for "Function Mode" effects, which are numbered 1-100 without names. Source: `FunctionModeFragment.java`
 
 ---
 
@@ -67,33 +69,35 @@ def get_device_info(advertisement_data):
 def get_effect_command_type(product_id: int) -> str:
     """
     Determine effect command format from product_id.
-    
+
     Returns:
-        'filllight_4byte': FillLight devices (no checksum)
-        'symphony_5byte': Symphony devices (inverted speed, 1-31 range)
-        'standard_5byte': Standard addressable strips (direct speed, 0-100)
-        'legacy_rgb': Non-addressable RGB controllers
+        'filllight_4byte': FillLight devices (no checksum, 0x38)
+        'symphony_5byte': Symphony devices (0x42, effects 1-100)
+        'standard_5byte': Standard addressable strips (0x38, effects 1-44)
+        'music_5byte': Music strips (0x42, effects 1-99)
+        'legacy_rgb': Non-addressable RGB controllers (0x61)
     """
     # FillLight - 4-byte format, NO checksum
     if product_id == 0x1D:  # 29 decimal
         return 'filllight_4byte'
-    
-    # Symphony - 5-byte format WITH checksum, INVERTED speed (1-31)
-    if product_id in [0xA1, 0xA2, 0xA3, 0xA4, 0xA6, 0xA7, 0xA9]:  # 161-169
+
+    # Symphony devices - 0x42 command, 100 numbered effects
+    # Source: FunctionModeFragment.java - effects are numbered 1-100
+    if product_id in range(0xA1, 0xAE):  # 161-173 (0xA1-0xAD)
         return 'symphony_5byte'
-    
+
     # Standard addressable - 5-byte format WITH checksum, DIRECT speed (0-100)
     if product_id in [0x54, 0x55, 0x62, 0x5B]:
         return 'standard_5byte'
-    
-    # Music-reactive strips - Different opcode but similar format
+
+    # Music-reactive strips - Uses 0x42 command
     if product_id in [0x56, 0x80]:
-        return 'music_5byte'  # Uses 0x42 instead of 0x38
-    
-    # Legacy RGB controllers
+        return 'music_5byte'
+
+    # Legacy RGB controllers - Uses 0x61 command
     if product_id in [0x33, 0x06, 0x04, 0x44]:
         return 'legacy_rgb'
-    
+
     return 'unknown'
 ```
 
@@ -230,73 +234,56 @@ public class FillLight0x1D extends BaseDeviceInfo {
 
 ---
 
-## Format B: Symphony Devices (Product IDs 0xA1-0xA9)
+## Format B: Symphony Devices (Product IDs 0xA1-0xAD)
 
 ### Device Characteristics
 
-- **Product IDs**: 0xA1-0xA9 (161-169 decimal)
-- **Device Classes**: 
+- **Product IDs**: 0xA1-0xAD (161-173 decimal)
+- **Device Classes**:
   - Ctrl_Mini_RGB_Symphony_0xa1 (0xA1/161)
-  - Ctrl_Mini_RGB_Symphony_new_0xa2 through 0xa9 (162-169)
-- **Common Names**: Symphony LED Strip Controllers, Addressable LED Controllers
-- **Effects**: 44 Symphony Scene effects + 300 Build effects
+  - Ctrl_Mini_RGB_Symphony_new_0xa2 through 0xAD (162-173)
+- **Common Names**: Symphony LED Strip Controllers, LED Curtain Lights
+- **Effects**: 100 numbered effects (Function Mode) - effects are NOT named in the app
 
-### Effect Command Format (0x38) - 5 bytes WITH checksum
+### Effect Command Format (0x42) - 5 bytes WITH checksum
+
+**Source**: `FunctionModeFragment.java` and `Protocol/m.java`
+
+The official Zengge app uses the **0x42 command** for Symphony "Function Mode" effects:
 
 ```
-Raw command: [0x38, effect_id, speed, brightness, checksum]
+Raw command: [0x42, effect_id, speed, brightness, checksum]
 ```
 
 | Byte | Field | Range | Notes |
 |------|-------|-------|-------|
-| 0 | Command opcode | 0x38 | Fixed value |
-| 1 | Effect ID | 1-44 | Symphony Scene effects (or 1-300 Build) |
-| 2 | Speed | 1-31 | **INVERTED**: 1=fastest, 31=slowest |
+| 0 | Command opcode | 0x42 | Fixed value |
+| 1 | Effect ID | 1-100 | Numbered effects (no names in app) |
+| 2 | Speed | 0-100 | **Direct**: 0=slowest, 100=fastest |
 | 3 | Brightness | 1-100 | **Percent scale**: NEVER use 0 (powers OFF!) |
 | 4 | Checksum | calculated | Sum of bytes 0-3, masked with 0xFF |
 
-**CRITICAL Differences from FillLight:**
-1. **Has checksum** (5 bytes total)
-2. **Speed is INVERTED**: lower values = faster
-3. **Speed range 1-31**: NOT 0-100!
-4. **Different state response format**
+**Note**: Different Symphony variants have different effect counts:
+- 0xA3 and most devices: 100 effects (IDs 1-100)
+- 0xA6 devices: 227 effects
+- 0xA9 devices: 131 effects
 
-### Speed Encoding (INVERTED!)
+### Speed Encoding (DIRECT)
 
-The Symphony devices use an inverted speed scale mapped to 1-31 range:
+Symphony Function Mode uses direct speed values (0-100):
 
 ```python
 def map_speed_to_symphony(ui_speed: int) -> int:
     """
-    Map UI speed (0-100, where 0=slow, 100=fast) to Symphony protocol (1-31, inverted).
-    
+    Map UI speed (0-100) directly to protocol speed (0-100).
+
     Args:
         ui_speed: 0-100 (0=slowest, 100=fastest)
-    
+
     Returns:
-        1-31 (1=fastest, 31=slowest) - INVERTED!
+        0-100 (direct mapping)
     """
-    # Clamp to valid range
-    ui_speed = max(0, min(100, ui_speed))
-    
-    # Map 0-100 to 31-1 (inverted)
-    # Formula: 31 - (speed * 30 / 100)
-    protocol_speed = 31 - int(ui_speed * 30 / 100)
-    
-    # Ensure in valid range 1-31
-    return max(1, min(31, protocol_speed))
-
-# Examples:
-# UI speed 0   (slowest) → 31 (slowest)
-# UI speed 50  (medium)  → 16 (medium)
-# UI speed 100 (fastest) → 1  (fastest)
-```
-
-**Why is it inverted?** The Android app code in `tc/d.java` uses this formula:
-```java
-// From FragmentUniteControl.java lines 1185-1189
-int speed = Math.round(g2.d.f(100.0f, 0.0f, 31.0f, 1.0f, seekBarValue));
-// This maps 0-100 → 31-1 (reversed range)
+    return max(0, min(100, ui_speed))
 ```
 
 ### Brightness Rules
@@ -318,34 +305,35 @@ def safe_brightness(brightness: int) -> int:
 ```python
 def build_effect_symphony(effect_id: int, speed: int, brightness: int) -> bytes:
     """
-    Build Symphony effect command (5 bytes WITH checksum).
-    
+    Build Symphony Function Mode effect command (5 bytes WITH checksum).
+
+    Source: FunctionModeFragment.java, Protocol/m.java
+
     Args:
-        effect_id: 1-44 for Scene effects, 1-300 for Build effects
-        speed: 0-100 UI scale (will be mapped to 1-31 inverted)
+        effect_id: 1-100 (numbered effects, no names)
+        speed: 0-100 (direct mapping)
         brightness: 1-100 (NEVER 0!)
-    
+
     Returns:
         5-byte command with checksum (no transport wrapper)
     """
     # Validate effect ID
-    effect_id = max(1, min(300, effect_id))
-    
-    # Map UI speed (0-100) to protocol speed (1-31 inverted)
-    protocol_speed = 31 - int(speed * 30 / 100)
-    protocol_speed = max(1, min(31, protocol_speed))
-    
+    effect_id = max(1, min(100, effect_id))
+
+    # Speed is direct (0-100)
+    speed = max(0, min(100, speed))
+
     # Ensure brightness is never 0
     brightness = max(1, min(100, brightness))
-    
+
     # Build command
     cmd = bytearray([
-        0x38,
+        0x42,
         effect_id & 0xFF,
-        protocol_speed & 0xFF,
+        speed & 0xFF,
         brightness & 0xFF
     ])
-    
+
     # Add checksum
     cmd.append(sum(cmd) & 0xFF)
     

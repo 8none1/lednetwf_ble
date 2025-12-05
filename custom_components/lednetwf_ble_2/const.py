@@ -135,8 +135,17 @@ SOUND_REACTIVE_EFFECTS: Final = {
     i: f"Sound Reactive {i}" for i in range(1, 16)
 }
 
+# Symphony Function Mode effects (0x42 command) - IDs 1-100
+# Source: FunctionModeFragment.java - effects are numbered only, no names in the app
+# Format: 0x42 [effect_id] [speed] [brightness] [checksum]
+# Note: 0xA6 devices have 227 effects, 0xA9 have 131 effects, others have 100
+SYMPHONY_EFFECTS: Final = {
+    i: f"Effect {i}" for i in range(1, 101)
+}
+
 # Symphony Scene effects (0x38 command) - IDs 1-44
-# Source: protocol_docs/12_symphony_effect_names.md (extracted from Android APK strings.xml)
+# Source: protocol_docs/07_effect_names.md (extracted from Android APK strings.xml)
+# These are named effects available in "Scene Mode" - NOT used by most Symphony devices
 # UI Type determines which color pickers are available
 SYMPHONY_SCENE_EFFECTS: Final = {
     # StartColor_EndColor effects (1-4)
@@ -521,9 +530,9 @@ def get_effect_list(effect_type: EffectType, has_bg_color: bool = False, has_ic_
         return list(SIMPLE_EFFECTS.values())
     elif effect_type == EffectType.SYMPHONY:
         if has_ic_config:
-            # True Symphony devices (0xA1-0xAD): Only Scene effects (1-44)
-            # Build effects removed - they don't work on these devices
-            return list(SYMPHONY_SCENE_EFFECTS.values())
+            # True Symphony devices (0xA1-0xAD): Function Mode effects (1-100)
+            # Uses 0x42 command - effects are numbered only, no names in the app
+            return list(SYMPHONY_EFFECTS.values())
         elif has_bg_color:
             # 0x56/0x80 devices: Static effects + Regular effects + Sound reactive
             effects = list(STATIC_EFFECTS_WITH_BG.values())
@@ -532,8 +541,8 @@ def get_effect_list(effect_type: EffectType, has_bg_color: bool = False, has_ic_
             effects.append("Cycle Modes")
             return effects
         else:
-            # Fallback for unknown Symphony-type devices: just Scene effects
-            return list(SYMPHONY_SCENE_EFFECTS.values())
+            # Fallback for unknown Symphony-type devices: numbered effects
+            return list(SYMPHONY_EFFECTS.values())
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         # 0x53 Ring Light effects (113 effects + Cycle All)
         return list(ADDRESSABLE_0x53_EFFECTS.values())
@@ -558,8 +567,8 @@ def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool 
                 return eid
     elif effect_type == EffectType.SYMPHONY:
         if has_ic_config:
-            # True Symphony devices (0xA1-0xAD): Only Scene effects (1-44)
-            for eid, name in SYMPHONY_SCENE_EFFECTS.items():
+            # True Symphony devices (0xA1-0xAD): Function Mode effects (1-100)
+            for eid, name in SYMPHONY_EFFECTS.items():
                 if name == effect_name:
                     return eid
         elif has_bg_color:
@@ -578,8 +587,8 @@ def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool 
             if effect_name == "Cycle Modes":
                 return 255
         else:
-            # Fallback for unknown Symphony-type devices: just Scene effects
-            for eid, name in SYMPHONY_SCENE_EFFECTS.items():
+            # Fallback for unknown Symphony-type devices: numbered effects
+            for eid, name in SYMPHONY_EFFECTS.items():
                 if name == effect_name:
                     return eid
     elif effect_type == EffectType.ADDRESSABLE_0x53:
