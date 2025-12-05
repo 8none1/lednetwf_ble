@@ -363,10 +363,16 @@ class LEDNetWFDevice:
             self._color_temp_kelvin = None
             # Brightness from byte 6 (R position), scaled 0-100 → 0-255
             self._brightness = int(result["r"] * 255 / 100) if result["r"] <= 100 else result["r"]
-            # Speed from byte 7 (G position)
-            self._effect_speed = result["g"] if result["g"] <= 100 else int(result["g"] * 100 / 255)
-            _LOGGER.debug("Effect mode: effect_id=%s, brightness=%d, speed=%d",
-                          result["effect_id"], self._brightness, self._effect_speed)
+            # Speed location varies by device type
+            if self.effect_type == EffectType.SYMPHONY:
+                # SYMPHONY: speed in byte 5 (value1), stored at ~half scale
+                self._effect_speed = min(100, result["value1"] * 2)
+            else:
+                # ADDRESSABLE_0x53 and others: speed in byte 7 (G position)
+                self._effect_speed = result["g"] if result["g"] <= 100 else int(result["g"] * 100 / 255)
+            _LOGGER.debug("Effect mode: effect_id=%s, brightness=%d, speed=%d (value1=%d, g=%d)",
+                          result["effect_id"], self._brightness, self._effect_speed,
+                          result["value1"], result["g"])
 
         elif result.get("is_white_mode"):
             # White/CCT mode - brightness from value1 (byte 5), scaled 0-100 → 0-255

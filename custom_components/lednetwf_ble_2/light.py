@@ -179,16 +179,21 @@ class LEDNetWFLight(LightEntity):
             return
 
         # Just brightness change - resend current color/mode
+        # IMPORTANT: Check effect FIRST since it takes priority over stored color values
         if ATTR_BRIGHTNESS in kwargs:
-            if self._device.color_temp_kelvin and self._device.has_color_temp:
+            if self._device.effect:
+                # Re-send effect with new brightness
+                await self._device.set_effect(
+                    self._device.effect,
+                    speed=self._device.effect_speed,
+                    brightness=brightness
+                )
+            elif self._device.color_temp_kelvin and self._device.has_color_temp:
                 await self._device.set_color_temp(
                     self._device.color_temp_kelvin, brightness
                 )
             elif self._device.rgb_color and self._device.has_rgb:
                 await self._device.set_rgb_color(self._device.rgb_color, brightness)
-            elif self._device.effect:
-                # Re-send effect to update brightness (some devices support this)
-                await self._device.set_effect(self._device.effect)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
