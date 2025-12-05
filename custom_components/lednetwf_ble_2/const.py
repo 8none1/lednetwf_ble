@@ -158,6 +158,11 @@ SYMPHONY_SCENE_EFFECTS: Final = {
     # 19-44 are additional variations
 }
 
+# Symphony effects that support FG+BG colors via 0x41 command
+# Source: protocol_docs/14_symphony_background_colors.md
+# UIType_ForegroundColor_BackgroundColor: effects 5-18
+SYMPHONY_BG_COLOR_EFFECTS: Final = frozenset(range(5, 19))  # 5-18 inclusive
+
 # Addressable 0x53 effects (Ring Lights) - 0x38 command, NO checksum
 # Source: model_0x53.py EFFECTS_LIST_0x53
 ADDRESSABLE_0x53_EFFECTS: Final = {
@@ -279,8 +284,12 @@ ADDRESSABLE_0x53_EFFECTS: Final = {
 }
 
 # Product IDs with special speed encoding (inverted 0x01-0x1F scale)
-# Source: model_0x54.py - these devices use inverted speed where 0x01=fastest, 0x1F=slowest
-INVERTED_SPEED_PRODUCT_IDS: Final = {0x54, 0x55, 0x62, 0x5B}
+# Source: model_0x54.py, protocol_docs/07a_effect_commands_by_device.md
+# These devices use inverted speed where 0x01=fastest, 0x1F=slowest
+# Note: Symphony devices (0xA1-0xA9) do NOT use inverted speed - they use 1=slow, 31=fast
+INVERTED_SPEED_PRODUCT_IDS: Final = {
+    0x54, 0x55, 0x62, 0x5B,  # Strip controllers
+}
 
 # Product ID to capabilities mapping
 # Source: protocol_docs/04_device_identification_capabilities.md
@@ -349,13 +358,23 @@ PRODUCT_CAPABILITIES: Final = {
     226: {"name": "Ctrl_Ceiling_Assist", "has_rgb": False, "has_ww": True, "has_cw": True, "effect_type": EffectType.NONE},
 
     # Symphony controllers - addressable RGB with effects
-    161: {"name": "Ctrl_RGB_Symphony", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True},
-    162: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True},
-    163: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True},
-    164: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True},
-    166: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True},
-    167: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True},
-    169: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True},
+    # Source: protocol_docs/14_symphony_background_colors.md - effects 5-18 support FG+BG colors via 0x41 command
+    161: {"name": "Ctrl_RGB_Symphony", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
+    162: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
+    163: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
+    164: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
+    166: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
+    167: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
+    169: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
+
+    # Symphony Line strips
+    170: {"name": "Symphony_Line", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},  # 0xAA
+    171: {"name": "Symphony_Line", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},  # 0xAB
+
+    # LED Curtain Lights - matrix displays using Symphony protocol
+    # Source: protocol_docs/13_led_curtain_lights.md
+    172: {"name": "Symphony_Curtain", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},  # 0xAC
+    173: {"name": "Symphony_Curtain", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},  # 0xAD
 }
 
 

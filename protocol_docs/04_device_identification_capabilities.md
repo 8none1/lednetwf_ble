@@ -129,6 +129,10 @@ Source: `com/zengge/wifi/Device/a.java` method `k()`
 | 0xA6 (166)      | Ctrl_Mini_RGB_Symphony_new_0xA6 | RGBNewSymphony   | New Symphony        |
 | 0xA7 (167)      | Ctrl_Mini_RGB_Symphony_new_0xA7 | RGBNewSymphony   | New Symphony        |
 | 0xA9 (169)      | Ctrl_Mini_RGB_Symphony_new_0xA9 | RGBNewSymphony   | New Symphony        |
+| 0xAA (170)      | Symphony_Line_0xAA              | RGBNewSymphony   | Symphony strip      |
+| 0xAB (171)      | Symphony_Line_0xAB              | RGBNewSymphony   | Symphony strip      |
+| **0xAC (172)**  | **Symphony_Curtain_0xAC**       | **RGBNewSymphony**| **LED Curtain Light** |
+| **0xAD (173)**  | **Symphony_Curtain_0xAD**       | **RGBNewSymphony**| **LED Curtain Light** |
 | 0xD1 (209)      | Digital_Light_0xd1              | Special          | Digital LED panel   |
 | 0xE1 (225)      | Ctrl_Ceiling_light_0xe1         | Ceiling          | Ceiling light       |
 | 0xE2 (226)      | Ctrl_Ceiling_light_Assist_0xe2  | Ceiling          | Ceiling assist      |

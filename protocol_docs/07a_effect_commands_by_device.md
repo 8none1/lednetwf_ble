@@ -27,6 +27,8 @@ Effect commands vary significantly by device type. Using the wrong format will c
 | 0x56, 0x80 | Music Strip | 0x42 | `[0x42, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct |
 | 0x5B | Strip Controller | 0x38 | `[0x38, effect, speed, bright, chk]` | 5 | YES | 0-100 | Direct |
 | **0xA1-0xA9** | **Symphony Devices** | **0x38** | `[0x38, effect, speed, bright, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
+| **0xAA, 0xAB** | **Symphony Strip** | **0x38** | `[0x38, effect, speed, bright, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
+| **0xAC, 0xAD (172, 173)** | **LED Curtain Light** | **0x38** | `[0x38, effect, speed, bright, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
 | **0x33, 0x06, 0x04** | **Legacy RGB** | **0x61** | `[0x61, effect, speed, persist, chk]` | **5** | **YES** | **1-31** | **INVERTED** |
 
 ---

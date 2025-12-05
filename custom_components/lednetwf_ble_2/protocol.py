@@ -13,7 +13,7 @@ import colorsys
 import logging
 from typing import Tuple
 
-from .const import EffectType, MIN_KELVIN, MAX_KELVIN
+from .const import EffectType, MIN_KELVIN, MAX_KELVIN, SYMPHONY_BG_COLOR_EFFECTS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -440,14 +440,14 @@ def build_effect_command_0x38(effect_id: int, speed: int = 50, brightness: int =
 
     IMPORTANT:
     - brightness must be 1-100 (0 = power off!)
-    - speed is inverted 1-31 scale (1=fastest, 31=slowest)
+    - speed uses 1-31 scale where 1=slowest, 31=fastest (NOT inverted)
     """
     # For build effects (100-399), convert to internal ID (1-300)
     internal_id = effect_id - 99 if effect_id >= 100 else effect_id
 
-    # Convert speed from 0-100 to inverted 1-31 scale
-    # Formula: speed_byte = 31 - round(speed_percent * 30 / 100)
-    speed_byte = 31 - round(speed * 30 / 100)
+    # Convert speed from 0-100 to 1-31 scale (1=slowest, 31=fastest)
+    # Formula: speed_byte = 1 + round(speed_percent * 30 / 100)
+    speed_byte = 1 + round(speed * 30 / 100)
     speed_byte = max(1, min(31, speed_byte))
 
     # Ensure brightness is at least 1 (0 = power off!)
@@ -463,14 +463,23 @@ def build_effect_command_0x38(effect_id: int, speed: int = 50, brightness: int =
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
-def build_effect_command_0x61(effect_id: int, speed: int = 128, persist: bool = False) -> bytearray:
+def build_effect_command_0x61(effect_id: int, speed: int = 16, persist: bool = False) -> bytearray:
     """
     Build legacy effect command (0x61).
 
-    Used for non-Symphony RGB devices.
+    Used for non-Symphony RGB devices (e.g., product_id 0x33).
     Effect IDs: 37-56 (20 effects)
 
     Format: [0x61, effect_id, speed, persist, checksum]
+
+    Args:
+        effect_id: Effect ID (37-56)
+        speed: Protocol speed value 1-31 (INVERTED: 1=fastest, 31=slowest)
+               Convert from UI percentage: speed = 1 + int(30 * (1.0 - ui_pct/100))
+        persist: If True, save to flash (0xF0), else temporary (0x0F)
+
+    Note: There is NO brightness byte in this command format.
+          Brightness must be controlled separately via color commands.
     """
     raw_cmd = bytearray([
         0x61,
@@ -543,7 +552,7 @@ def build_effect_command(
         return build_effect_command_0x53(effect_id, speed, brightness)
     elif effect_type == EffectType.SYMPHONY:
         if has_bg_color and effect_id >= 0x100:
-            # Encoded effect ID for 0x56/0x80 devices
+            # Encoded effect ID for 0x56/0x80 devices (static effects use ID << 8)
             decoded_id = effect_id >> 8
             if decoded_id <= 10:
                 # Static effect (2-10) - use 0x41 command
@@ -563,15 +572,33 @@ def build_effect_command(
                     effect_id
                 )
                 return None
+        elif has_bg_color and effect_id in SYMPHONY_BG_COLOR_EFFECTS:
+            # Symphony effects 5-18 support FG+BG colors via 0x41 command
+            # Source: protocol_docs/14_symphony_background_colors.md
+            if fg_rgb is None:
+                fg_rgb = (255, 255, 255)  # Default white
+            if bg_rgb is None:
+                bg_rgb = (0, 0, 0)  # Default black
+            _LOGGER.debug(
+                "Using 0x41 command for Symphony effect %d with FG=%s, BG=%s",
+                effect_id, fg_rgb, bg_rgb
+            )
+            return build_static_effect_command_0x41(
+                effect_id, fg_rgb, bg_rgb, speed
+            )
         elif has_bg_color:
-            # Regular strip effect (1-99 or 255) - use 0x42 command
+            # Regular strip effect (1-99 or 255) for 0x56/0x80 - use 0x42 command
             return build_effect_command_0x42(effect_id, speed, brightness)
         else:
             # Standard Symphony effect - 5 bytes WITH checksum
             return build_effect_command_0x38(effect_id, speed, brightness)
     elif effect_type == EffectType.SIMPLE:
-        # 0x61 command - speed needs to be 0-255, convert from 0-100
-        speed_byte = int(speed * 255 / 100)
+        # 0x61 command - speed uses INVERTED 1-31 range
+        # Formula from ad/e.java: protocol_speed = 1 + (30 * (1.0 - ui_speed/100))
+        # 100% UI speed (fast) → 1 (fastest protocol value)
+        # 0% UI speed (slow) → 31 (slowest protocol value)
+        speed_byte = 1 + int(30 * (1.0 - speed / 100))
+        speed_byte = max(1, min(31, speed_byte))  # Clamp to valid range
         return build_effect_command_0x61(effect_id, speed_byte)
     return None
 

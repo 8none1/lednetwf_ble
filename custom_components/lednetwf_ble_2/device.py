@@ -30,6 +30,8 @@ from .const import (
     get_effect_id,
     convert_brightness_from_adv,
     convert_speed_from_adv,
+    SYMPHONY_BG_COLOR_EFFECTS,
+    SYMPHONY_SCENE_EFFECTS,
 )
 from . import protocol
 
@@ -237,25 +239,38 @@ class LEDNetWFDevice:
     def bg_effect_list(self) -> list[str]:
         """Return list of effects that support background color.
 
-        Background color is only available for Static Effects 2-10.
+        For 0x56/0x80 devices: Static Effects 2-10
+        For Symphony devices: Effects 5-18 (Theater chase through Ripple)
         """
         if not self.has_bg_color:
             return []
-        # Only Static Effects 2-10 support background color
-        return [f"Static Effect {i}" for i in range(2, 11)]
+
+        if self.effect_type == EffectType.SYMPHONY:
+            # Symphony devices: effects 5-18 support FG+BG colors
+            return [SYMPHONY_SCENE_EFFECTS[i] for i in SYMPHONY_BG_COLOR_EFFECTS
+                    if i in SYMPHONY_SCENE_EFFECTS]
+        else:
+            # 0x56/0x80 devices: Static Effects 2-10
+            return [f"Static Effect {i}" for i in range(2, 11)]
 
     def is_bg_color_available(self) -> bool:
         """Return True if background color can be set for current effect.
 
-        Background color is only available when running a static effect (2-10).
-        Not available for: solid color mode, dynamic effects, or sound reactive.
+        For 0x56/0x80 devices: Static Effects 2-10
+        For Symphony devices: Effects 5-18 (Theater chase through Ripple)
+        Not available for: solid color mode, other effects, or sound reactive.
         """
         if not self.has_bg_color:
             return False
         if self._effect is None:
             return False
-        # Check if current effect is a static effect (2-10)
-        return self._effect.startswith("Static Effect")
+
+        if self.effect_type == EffectType.SYMPHONY:
+            # Symphony devices: check if current effect is in bg_color supported list
+            return self._effect in self.bg_effect_list
+        else:
+            # 0x56/0x80 devices: check for Static Effect prefix
+            return self._effect.startswith("Static Effect")
 
     def register_callback(self, callback_fn: Callable[[], None]) -> None:
         """Register a callback for state updates."""
@@ -485,13 +500,13 @@ class LEDNetWFDevice:
             if self.effect_type == EffectType.SYMPHONY:
                 # SYMPHONY effect mode:
                 # - Brightness in byte 6 (R position), 1-100 scale
-                # - Speed in byte 5 (value1), stored as (inverted speed_byte) × 3
+                # - Speed in byte 5 (value1), stored as speed_byte × 3
                 brightness_pct = result["r"] if result["r"] > 0 else 100
                 self._brightness = int(brightness_pct * 255 / 100)
-                # Convert speed: value1 = speed_byte × 3, then speed_byte is inverted 1-31
+                # Convert speed: value1 = speed_byte × 3, speed_byte is 1-31 (1=slow, 31=fast)
                 speed_byte = result["value1"] // 3 if result["value1"] > 0 else 16
                 if speed_byte >= 1 and speed_byte <= 31:
-                    self._effect_speed = int((31 - speed_byte) * 100 / 30)
+                    self._effect_speed = int((speed_byte - 1) * 100 / 30)
                 else:
                     self._effect_speed = 50
             else:

@@ -26,6 +26,8 @@ This documentation has been split into 11 separate files for easier navigation a
 | **Implement in Python** / complete example    | `10_python_implementation_guide.md`       |
 | **Reference original code** / Java files      | `11_java_source_code_references.md`       |
 | **Look up effect names** / Symphony modes     | `12_symphony_effect_names.md`             |
+| **Control LED curtain lights** / matrix panels| `13_led_curtain_lights.md`                |
+| **Symphony FG/BG colors** / effect colors     | `14_symphony_background_colors.md`        |
 
 ---
 
@@ -199,6 +201,43 @@ This documentation has been split into 11 separate files for easier navigation a
 
 ---
 
+### 13. LED Curtain Light Protocol
+
+**File**: `13_led_curtain_lights.md`
+
+**Contains**:
+
+- LED curtain light device identification (Product IDs 172, 173)
+- Supported matrix sizes (13x10 to 30x30)
+- On/Off commands (0x3B, 0x71)
+- RGB color commands (0x3B HSV, 0x31 direct)
+- Effect commands (0x38 Symphony format)
+- Speed encoding (1-31 inverted)
+
+**Keywords**: curtain light, LED matrix, panel, symphony_curtain, surplife
+
+**Use this when**: You're working with LED curtain/matrix panel devices from surplife.
+
+---
+
+### 14. Symphony Background Colors
+
+**File**: `14_symphony_background_colors.md`
+
+**Contains**:
+
+- 0x41 command format for FG/BG colors (13 bytes)
+- 0xA3 command format for multi-color arrays (variable)
+- Effect UI types and which effects support background colors
+- State response parsing for FG/BG colors
+- Python implementations for both command formats
+
+**Keywords**: Symphony, background color, foreground, 0x41, 0xA3, effect colors, settled mode
+
+**Use this when**: You need to set foreground and background colors for Symphony device effects.
+
+---
+
 ## Common Task Workflows
 
 ### Task: Implement a basic LED controller
@@ -309,7 +348,9 @@ docs/
 ├── 09_effects_addressable_led_support.md
 ├── 10_python_implementation_guide.md
 ├── 11_java_source_code_references.md
-└── 12_symphony_effect_names.md
+├── 12_symphony_effect_names.md
+├── 13_led_curtain_lights.md
+└── 14_symphony_background_colors.md
 ```
 
 ---
