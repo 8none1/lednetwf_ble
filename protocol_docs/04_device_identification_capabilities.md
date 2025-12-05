@@ -1,10 +1,19 @@
 # DEVICE IDENTIFICATION AND CAPABILITIES
 
+## Critical Rule: Use Product ID, Not sta_byte!
+
+**⚠️ IMPORTANT**: The Android app uses **product_id** (bytes 8-9 in manufacturer data) to determine device capabilities, NOT the sta_byte (byte 0).
+
+- **Product ID** = Device type identifier → Maps to device class with capabilities
+- **sta_byte** = Current device status → Changes based on power/mode state
+
+**Always extract product_id first for reliable device identification.**
+
 ## How the App Determines Device Capabilities
 
 The ZenGGe app uses a **class hierarchy** to determine device capabilities:
 
-1. **Product ID** (from manufacturer data byte 1) maps to a **Device Type class**
+1. **Product ID** (from manufacturer data bytes 8-9) maps to a **Device Type class**
 2. Device Type class inherits from a **BaseType** that defines core capabilities
 3. **Interfaces** (`hd.*`) mark additional features like Symphony effects
 
@@ -170,3 +179,222 @@ Defines the current operating mode of the device:
 | `StatusModeType_Dynamic` | Running an effect |
 | `StatusModeType_NONE_NO_BRIGHT` | Off, no brightness |
 | `StatusModeType_NONE` | Unknown/none |
+
+---
+
+## Implementation Guide: Extracting Product ID
+
+### Step 1: Parse Manufacturer Data (Python/bleak)
+
+```python
+def get_device_info(advertisement_data):
+    """
+    Extract device info from BLE advertisement manufacturer data.
+    
+    Args:
+        advertisement_data: BleakScanner advertisement_data object
+    
+    Returns:
+        dict with product_id, ble_version, sta_byte, mac, etc.
+    """
+    mfr_data = advertisement_data.manufacturer_data
+    
+    # Find LEDnetWF company ID (0x5A00-0x5AFF range: 23040-23295)
+    for company_id, payload in mfr_data.items():
+        if 23040 <= company_id <= 23295 and len(payload) == 27:
+            # Format B (bleak): company ID is dict key, NOT in payload
+            # Payload bytes 8-9 contain product_id (big-endian)
+            product_id = (payload[8] << 8) | payload[9]
+            ble_version = payload[1]
+            sta_byte = payload[0]
+            
+            return {
+                'product_id': product_id,
+                'ble_version': ble_version,
+                'sta_byte': sta_byte,
+                'mac': ':'.join(f'{b:02X}' for b in payload[2:8]),
+                'fw_version': payload[10],
+                'led_version': payload[11],
+            }
+    return None
+```
+
+### Step 2: Map Product ID to Capabilities
+
+```python
+def get_device_capabilities(product_id: int) -> dict:
+    """
+    Determine device capabilities from product_id.
+    
+    Returns:
+        dict with has_rgb, has_ww, has_cw, has_effects, effect_type
+    """
+    # Symphony devices - addressable LED with advanced effects
+    if product_id in [161, 162, 163, 164, 166, 167, 169, 8]:  # 0xA1-0xA9, 0x08
+        return {
+            'has_rgb': True,
+            'has_ww': False,
+            'has_cw': False,
+            'has_effects': True,
+            'effect_type': 'symphony',
+            'effect_command': '0x38_5byte_inverted_speed',
+        }
+    
+    # FillLight/Ring Light - addressable with custom effects
+    if product_id == 29:  # 0x1D
+        return {
+            'has_rgb': True,
+            'has_ww': False,
+            'has_cw': False,
+            'has_effects': True,
+            'effect_type': 'addressable',
+            'effect_command': '0x38_4byte_no_checksum',
+        }
+    
+    # RGBCW devices
+    if product_id in [7, 14, 30, 37, 53, 59]:  # RGBCW variants
+        return {
+            'has_rgb': True,
+            'has_ww': True,
+            'has_cw': True,
+            'has_effects': False,
+            'effect_type': None,
+        }
+    
+    # RGBW devices
+    if product_id in [4, 6, 20, 26, 27, 38, 39, 44, 48, 68, 84]:  # RGBW variants
+        return {
+            'has_rgb': True,
+            'has_ww': True,
+            'has_cw': False,
+            'has_effects': True,
+            'effect_type': 'simple',
+            'effect_command': '0x61_5byte',
+        }
+    
+    # RGB only devices
+    if product_id in [33, 51]:  # RGB variants
+        return {
+            'has_rgb': True,
+            'has_ww': False,
+            'has_cw': False,
+            'has_effects': True,
+            'effect_type': 'simple',
+            'effect_command': '0x61_5byte',
+        }
+    
+    # CCT only devices
+    if product_id in [9, 22, 28, 82, 98]:  # CCT variants
+        return {
+            'has_rgb': False,
+            'has_ww': True,
+            'has_cw': True,
+            'has_effects': False,
+            'effect_type': None,
+        }
+    
+    # Dimmers
+    if product_id in [23, 33, 65]:  # Dimmer variants
+        return {
+            'has_rgb': False,
+            'has_ww': True,
+            'has_cw': False,
+            'has_effects': False,
+            'effect_type': None,
+        }
+    
+    # Switches (no dimming/color control)
+    if product_id in [11, 147, 148, 149, 150, 151]:  # Switch variants
+        return {
+            'has_rgb': False,
+            'has_ww': False,
+            'has_cw': False,
+            'has_effects': False,
+            'effect_type': None,
+        }
+    
+    # Unknown - need to probe
+    return None
+```
+
+### Step 3: Fallback Detection (sta_byte as hint)
+
+If product_id is unknown or maps to TypeNone (0x00), use sta_byte as a secondary hint:
+
+```python
+def detect_with_fallback(product_id: int, sta_byte: int) -> dict:
+    """
+    Use product_id first, sta_byte as fallback for unknown devices.
+    
+    Note: sta_byte is DEVICE STATUS, not device type!
+          It's unreliable but better than nothing for unmapped devices.
+    """
+    # Try product_id first
+    capabilities = get_device_capabilities(product_id)
+    if capabilities is not None:
+        return capabilities
+    
+    # Fallback to sta_byte patterns (unreliable!)
+    # These correlations are observed, not guaranteed
+    if sta_byte == 0x53:
+        # Often FillLight-style devices
+        return {
+            'has_rgb': True,
+            'has_effects': True,
+            'effect_type': 'addressable',
+            'effect_command': '0x38_4byte_no_checksum',
+            'note': 'Detected from sta_byte - may be inaccurate!',
+        }
+    elif sta_byte in [0xA1, 0xA2, 0xA3, 0xA4, 0xA6, 0xA7, 0xA9]:
+        # Often Symphony devices
+        return {
+            'has_rgb': True,
+            'has_effects': True,
+            'effect_type': 'symphony',
+            'effect_command': '0x38_5byte_inverted_speed',
+            'note': 'Detected from sta_byte - may be inaccurate!',
+        }
+    
+    # Still unknown - must probe device
+    return None
+```
+
+---
+
+## Why sta_byte is Unreliable
+
+**Common misconception**: Old implementations used sta_byte (byte 0 of manufacturer data) as a device type identifier.
+
+**Reality**: 
+- sta_byte represents **current device status** (power, mode, etc.)
+- It can change based on device state
+- Different product types can share the same sta_byte value
+- No official documentation defines its meaning
+- Android app **never uses sta_byte** for device identification
+
+**Only use sta_byte as a last resort fallback when product_id is unknown (0x00 or unmapped).**
+
+---
+
+## Quick Reference: Product ID Ranges
+
+| Range | Device Types | Examples |
+|-------|-------------|----------|
+| 0x04-0x27 (4-39) | Controllers, bulbs | RGB, RGBW, RGBCW variants |
+| 0x29-0x2D (41-45) | Special devices | Mirror lights, plant lights |
+| 0x33-0x48 (51-72) | Controllers, bulbs | RGB, RGBW, RGBCW variants |
+| 0x52-0x62 (82-98) | CCT/dimmer | Bulbs, controllers |
+| 0x93-0x97 (147-151) | Switches/sockets | On/Off, multi-channel |
+| 0xA1-0xA9 (161-169) | Symphony | Addressable LED controllers |
+| 0xD1 (209) | Digital panels | LED matrix panels |
+| 0xE1-0xE2 (225-226) | Ceiling lights | Smart ceiling fixtures |
+
+---
+
+## Summary: Detection Priority
+
+1. **Always extract product_id first** (bytes 8-9, big-endian)
+2. **Map product_id to capabilities** using product table
+3. **If product_id unknown**, use sta_byte as hint (unreliable)
+4. **If still unknown**, probe device with state query
+5. **Cache results** by MAC address to avoid repeated detection
