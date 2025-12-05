@@ -1,4 +1,56 @@
-# Session Notes - LEDnetWF BLE Protocol Reverse Engineering
+# Session Notes - AI Assistant Role & Mission
+
+## Project Context
+This project is developing a new Home Assistant custom integration to control LEDnetWF/Zengge Bluetooth Low Energy LED lights. The integration is being reverse-engineered from the official Android application.
+
+## My Role & Responsibilities
+
+### 1. Primary Mission
+Help develop the new Home Assistant integration by analyzing and documenting the Android app's BLE protocol implementation.
+
+### 2. Source Code Locations
+
+#### **Android App (Source of Truth)**
+- **Location 1**: `/home/will/source/reverse_engineering/zengee/`
+- **Location 2**: `/home/will/source/jadx/projects/zengee/`
+- **Purpose**: These contain the decompiled Android application code. This is the authoritative source for understanding the BLE protocol.
+- **Action**: Analyze both directories to understand how the app communicates with the LED devices.
+
+#### **Old Python Integration (Reference Only - READ ONLY)**
+- **Location**: `/home/will/source/lednetwf_ble/custom_components/lednetwf_ble/`
+- **Purpose**: Working Python implementation from a previous version.
+- **Action**: Read to understand patterns and help interpret Android code. DO NOT fix bugs or modify this code.
+- **Note**: We're replacing this implementation, not maintaining it.
+
+#### **New Python Integration (Analysis Only)**
+- **Location**: `/home/will/source/lednetwf_ble/custom_components/lednetwf_ble_2/`
+- **Purpose**: New implementation being written by another AI assistant.
+- **Action**: Can analyze and report bugs/issues, but DO NOT fix them. Provide detailed findings so the other AI can make corrections.
+
+#### **Protocol Documentation**
+- **Location**: `/home/will/source/lednetwf_ble/protocol_docs/`
+- **Purpose**: Documented findings from Android app analysis.
+- **Action**: 
+  - Always check documentation first when answering questions
+  - Document new discoveries as you explore the Android code
+  - Update/correct documentation if Android code reveals errors
+  - Assume documentation might be incomplete or incorrect - verify against Android source
+
+## Workflow
+
+1. **When asked a question**: Check `protocol_docs/` first
+2. **When exploring**: Analyze Android app code from both `zengee` directories
+3. **When documenting**: Write findings to `protocol_docs/`
+4. **When verifying**: Cross-reference with old Python code if needed
+5. **When reviewing new code**: Analyze and report, don't fix
+
+## Key Principles
+
+- Android app code is the source of truth
+- Documentation should reflect what the Android code actually does
+- Old Python code is for reference and understanding only
+- New Python code review is informational only
+- Keep documentation accurate and up-to-date based on discoveries - LEDnetWF BLE Protocol Reverse Engineering
 
 **Date**: 3 December 2025
 **Branch**: 8none1/version_2
@@ -12,7 +64,58 @@
 - **BLE Version**: 5
 - **Protocol Version**: 0 (legacy)
 
-### Current Issue
+### Current Issue - Effect Commands Turning Off Device
+
+**Problem**: Setting effects on 0x53 devices often turns device OFF and sets wrong brightness
+
+**Root Cause Analysis** (4 Dec 2025):
+
+1. **Incorrect 0x38 Command Format for Addressable LED Devices**
+   - **Current (WRONG)**: `[0x38, effect_id, speed, param, checksum]` - 5 bytes total
+   - **Correct (from working old code)**: `[0x38, effect_id, speed, brightness]` - 4 bytes, NO checksum
+   - The raw command payload is only 4 bytes before transport wrapping
+   - Checksum is NOT added to unwrapped payload for this command
+
+2. **Missing Brightness Parameter**
+   - New integration file: `protocol.py::build_effect_command_0x38()` 
+   - Uses generic `param` instead of brightness
+   - `device.py::set_effect()` doesn't pass current brightness value
+   - Old working code: `effect_packet[11] = self.get_brightness_percent()`
+
+3. **Device Classification Error**
+   - 0x53/0x54/0x56 devices are addressable LED strip controllers
+   - They use 0x38 command but with DIFFERENT format than Symphony devices
+   - They have 93+ custom effects (IDs 1-93+), not Symphony effects
+   - NOT the same as "Simple Effects" (37-56) or "Symphony Effects" (1-44)
+
+**Working Packet Example** (from old code):
+```text
+00 00 80 00 00 04 05 0b 38 01 32 64
+└──────transport────┘ └─payload──┘
+                      ^  ^  ^  ^
+                      |  |  |  └─ brightness (0x64 = 100%)
+                      |  |  └──── speed (0x32 = 50)
+                      |  └─────── effect_id (0x01 = effect 1)
+                      └────────── command (0x38)
+```
+
+**CRITICAL RESEARCH FINDINGS** (4 Dec 2025):
+
+Analysis of all old Python models revealed **FIVE DIFFERENT effect command formats**:
+
+1. **0x53** (UNIQUE): `0x38` with 4 bytes, NO checksum - `[0x38, effect, speed, bright]`
+2. **0x54/0x55/0x62**: `0x38` with 5 bytes + checksum, `0x39` for candle (9 bytes)
+3. **0x56/0x80**: `0x42` (5 bytes), `0x41` (13 bytes, FG/BG colors), `0x73` (13 bytes, music)
+4. **0x5B**: `0x38` with 5 bytes + checksum, `0x39` for candle (9 bytes)
+5. **Symphony (0xA1-0xA9)**: `0x38` with 5 bytes + checksum (param instead of brightness)
+
+**Key Discovery**: Only 0x53 omits the checksum! All others include it.
+
+**Documentation**: 
+- `BUG_REPORT_EFFECT_COMMANDS.md` - Complete bug analysis with fixes
+- `EFFECT_COMMAND_REFERENCE.md` - Comprehensive reference for all device types
+
+**Previous Issue** (RESOLVED):
 Linux machine not receiving BLE notifications from device, but:
 - Device DOES send notifications (confirmed via LightBlue on phone)
 - This is a Linux BLE stack issue, NOT a device protocol issue

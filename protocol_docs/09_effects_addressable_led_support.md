@@ -49,6 +49,77 @@ The app uses **Product ID** to instantiate a device class, which determines effe
 | 0x41 (65) | `Ctrl_Dim_0x41` | Dimmer only |
 | 0x93-0x97 | Switch devices | On/Off only |
 
+## Effect Command Formats
+
+**CRITICAL**: Different device types use different effect command formats!
+
+### ADDRESSABLE_0x53 Format (Ring Lights) - NO CHECKSUM
+
+Used by: Product IDs 0, 29, 83 (Ring Lights)
+Source: `model_0x53.py` set_effect() method
+
+**Format (4 bytes, NO checksum):**
+```
+[0x38, effect_id, speed, brightness]
+```
+
+| Byte | Field       | Range    | Description                    |
+|------|-------------|----------|--------------------------------|
+| 0    | Command     | 0x38     | Effect command opcode          |
+| 1    | Effect ID   | 1-113, 255 | Effect number (255=cycle all)|
+| 2    | Speed       | 0-100    | Effect speed percentage        |
+| 3    | Brightness  | 0-100    | Effect brightness percentage   |
+
+**Example:** Effect 1 "Gold Ring" at speed 50, brightness 100
+```
+Wrapped: 00 00 80 00 00 04 05 0b 38 01 32 64
+         [----transport header---] ^  ^  ^  ^
+                                   |  |  |  brightness (100)
+                                   |  |  speed (50)
+                                   |  effect_id (1)
+                                   command (0x38)
+```
+
+**NO CHECKSUM** - The 4th byte is brightness, NOT a checksum!
+
+### SYMPHONY Format - WITH CHECKSUM
+
+Used by: Product IDs 161-169 (Symphony controllers)
+Source: Protocol documentation, Symphony device classes
+
+**Format (5 bytes, WITH checksum):**
+```
+[0x38, effect_id, speed, brightness, checksum]
+```
+
+| Byte | Field       | Range    | Description                    |
+|------|-------------|----------|--------------------------------|
+| 0    | Command     | 0x38     | Effect command opcode          |
+| 1    | Effect ID   | 1-44     | Scene effect, or 1-300 internal for build |
+| 2    | Speed       | 0-255    | Effect speed                   |
+| 3    | Brightness  | 0-100    | Effect brightness percentage   |
+| 4    | Checksum    | 0-255    | Sum of bytes 0-3 & 0xFF        |
+
+### SIMPLE Format (0x61 Command)
+
+Used by: Non-Symphony RGB devices
+Source: `dd/g.java`
+
+**Format (5 bytes):**
+```
+[0x61, effect_id, speed, persist, checksum]
+```
+
+| Byte | Field       | Range    | Description                    |
+|------|-------------|----------|--------------------------------|
+| 0    | Command     | 0x61     | Legacy effect command          |
+| 1    | Effect ID   | 37-56    | Simple effect number           |
+| 2    | Speed       | 0-255    | Effect speed                   |
+| 3    | Persist     | 0x0F/0xF0| 0xF0=persist, 0x0F=temporary  |
+| 4    | Checksum    | 0-255    | Sum of bytes 0-3 & 0xFF        |
+
+---
+
 ## Simple Effects (IDs 37-56)
 
 Source: `dd/g.java` method `k()`

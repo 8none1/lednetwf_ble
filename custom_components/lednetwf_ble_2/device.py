@@ -167,10 +167,15 @@ class LEDNetWFDevice:
         return self._effect_speed
 
     @property
+    def effect_type(self) -> EffectType:
+        """Return the effect type as proper enum (handles int conversion)."""
+        val = self._capabilities.get("effect_type", EffectType.NONE)
+        return EffectType(val) if isinstance(val, int) else val
+
+    @property
     def effect_list(self) -> list[str]:
         """Return list of available effects."""
-        effect_type = self._capabilities.get("effect_type", EffectType.NONE)
-        return get_effect_list(effect_type)
+        return get_effect_list(self.effect_type)
 
     @property
     def has_rgb(self) -> bool:
@@ -185,8 +190,7 @@ class LEDNetWFDevice:
     @property
     def has_effects(self) -> bool:
         """Return True if device supports effects."""
-        effect_type = self._capabilities.get("effect_type", EffectType.NONE)
-        return effect_type != EffectType.NONE
+        return self.effect_type != EffectType.NONE
 
     @property
     def needs_probing(self) -> bool:
@@ -381,25 +385,36 @@ class LEDNetWFDevice:
             self._effect = None
             self._color_temp_kelvin = None
             r, g, b = result["r"], result["g"], result["b"]
-            self._rgb = (r, g, b)
-            # Derive brightness from V component of HSV
-            _, _, v = protocol.rgb_to_hsv(r, g, b)
-            # v is 0-100, convert to 0-255
+            # Device returns RGB pre-scaled by brightness. Extract H, S, V
+            # then reconstruct "pure" color at full brightness for the color picker.
+            h, s, v = protocol.rgb_to_hsv(r, g, b)
+            # v is 0-100, convert to 0-255 for brightness
             self._brightness = int(v * 255 / 100)
-            _LOGGER.debug("RGB mode: rgb=%s, brightness=%d (from HSV v=%d)",
-                          self._rgb, self._brightness, v)
+            # Reconstruct pure RGB at V=100 (full brightness) for color picker
+            if v > 0:
+                pure_r, pure_g, pure_b = protocol.hsv_to_rgb(h, s, 100)
+                self._rgb = (pure_r, pure_g, pure_b)
+            else:
+                # If V=0, we can't determine the hue/sat, keep as-is
+                self._rgb = (r, g, b)
+            _LOGGER.debug("RGB mode: device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d (from HSV h=%d, s=%d, v=%d)",
+                          r, g, b, self._rgb, self._brightness, h, s, v)
 
         else:
-            # Unknown mode - use raw values
+            # Unknown mode - use raw values with same HSV reconstruction
             self._effect = None
             r, g, b = result["r"], result["g"], result["b"]
-            self._rgb = (r, g, b)
-            # For unknown mode, try to derive brightness from RGB
-            # Note: byte 10 is LED version, NOT brightness per Java source
-            _, _, v = protocol.rgb_to_hsv(r, g, b)
+            # Device returns RGB pre-scaled by brightness. Extract H, S, V
+            h, s, v = protocol.rgb_to_hsv(r, g, b)
             self._brightness = int(v * 255 / 100) if v > 0 else 255
-            _LOGGER.debug("Unknown mode (0x%02X/0x%02X): rgb=%s, brightness=%d (derived from RGB)",
-                          result["mode_type"], result["sub_mode"], self._rgb, self._brightness)
+            # Reconstruct pure RGB at V=100 for color picker
+            if v > 0:
+                pure_r, pure_g, pure_b = protocol.hsv_to_rgb(h, s, 100)
+                self._rgb = (pure_r, pure_g, pure_b)
+            else:
+                self._rgb = (r, g, b)
+            _LOGGER.debug("Unknown mode (0x%02X/0x%02X): device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d",
+                          result["mode_type"], result["sub_mode"], r, g, b, self._rgb, self._brightness)
 
         _LOGGER.debug("Parsed state: on=%s, rgb=%s, cct=%s, effect=%s, brightness=%s",
                       self._is_on, self._rgb, self._color_temp_kelvin, self._effect, self._brightness)
@@ -421,17 +436,20 @@ class LEDNetWFDevice:
 
     def _effect_id_to_name(self, effect_id: int) -> str | None:
         """Convert effect ID to name."""
-        effect_type = self._capabilities.get("effect_type", EffectType.NONE)
+        eff_type = self.effect_type
 
-        if effect_type == EffectType.SIMPLE:
+        if eff_type == EffectType.SIMPLE:
             from .const import SIMPLE_EFFECTS
             return SIMPLE_EFFECTS.get(effect_id)
-        elif effect_type == EffectType.SYMPHONY:
+        elif eff_type == EffectType.SYMPHONY:
             from .const import SYMPHONY_SCENE_EFFECTS
             if effect_id <= 44:
                 return SYMPHONY_SCENE_EFFECTS.get(effect_id)
             elif effect_id >= 100:
                 return f"Build Effect {effect_id - 99}"
+        elif eff_type == EffectType.ADDRESSABLE_0x53:
+            from .const import ADDRESSABLE_0x53_EFFECTS
+            return ADDRESSABLE_0x53_EFFECTS.get(effect_id)
         return None
 
     async def _send_command(self, packet: bytearray, with_response: bool = False) -> bool:
@@ -524,13 +542,13 @@ class LEDNetWFDevice:
 
         # Use the 0x3B B1 command format (temperature percentage + brightness percentage)
         # This format is used by Ring Lights (model_0x53) and Symphony devices.
-        # Per protocol docs: 0% = cool/6500K, 100% = warm/2700K
+        # Per working old code: 0% = warm/2700K, 100% = cool/6500K
         kelvin = max(MIN_KELVIN, min(MAX_KELVIN, kelvin))
-        temp_pct = int((MAX_KELVIN - kelvin) * 100 / (MAX_KELVIN - MIN_KELVIN))
+        temp_pct = int((kelvin - MIN_KELVIN) * 100 / (MAX_KELVIN - MIN_KELVIN))
         brightness_pct = int(brightness * 100 / 255)
 
         packet = protocol.build_cct_command_0x3B(temp_pct, brightness_pct)
-        _LOGGER.debug("Setting CCT: kelvin=%d, temp_pct=%d%% (0=cool, 100=warm), brightness_pct=%d%%",
+        _LOGGER.debug("Setting CCT: kelvin=%d, temp_pct=%d%% (0=warm, 100=cool), brightness_pct=%d%%",
                       kelvin, temp_pct, brightness_pct)
 
         if await self._send_command(packet):
@@ -542,19 +560,22 @@ class LEDNetWFDevice:
             return True
         return False
 
-    async def set_effect(self, effect_name: str, speed: int | None = None) -> bool:
+    async def set_effect(
+        self, effect_name: str, speed: int | None = None, brightness: int | None = None
+    ) -> bool:
         """Set an effect by name.
 
         Args:
             effect_name: Effect name from effect_list
             speed: Effect speed 0-100 (or None to use current)
+            brightness: Brightness 0-255 (or None to use current)
         """
         if not self.has_effects:
             _LOGGER.warning("Device %s does not support effects", self._name)
             return False
 
-        effect_type = self._capabilities.get("effect_type", EffectType.NONE)
-        effect_id = get_effect_id(effect_name, effect_type)
+        eff_type = self.effect_type
+        effect_id = get_effect_id(effect_name, eff_type)
 
         if effect_id is None:
             _LOGGER.warning("Unknown effect: %s", effect_name)
@@ -563,16 +584,26 @@ class LEDNetWFDevice:
         if speed is None:
             speed = self._effect_speed
 
-        # Convert speed to 0-255 for protocol
-        speed_byte = int(speed * 255 / 100)
+        if brightness is None:
+            brightness = self._brightness
 
-        packet = protocol.build_effect_command(effect_type, effect_id, speed_byte)
+        # Convert brightness from 0-255 to 0-100 for protocol
+        brightness_pct = int(brightness * 100 / 255)
+
+        # Note: speed is already 0-100, protocol expects 0-100 for most devices
+        packet = protocol.build_effect_command(eff_type, effect_id, speed, brightness_pct)
         if packet is None:
             return False
+
+        _LOGGER.debug(
+            "Setting effect: %s (id=%d), speed=%d, brightness=%d%% (effect_type=%s)",
+            effect_name, effect_id, speed, brightness_pct, eff_type.name
+        )
 
         if await self._send_command(packet):
             self._effect = effect_name
             self._effect_speed = speed
+            self._brightness = brightness
             self._notify_callbacks()
             return True
         return False
@@ -650,17 +681,28 @@ class LEDNetWFDevice:
         if color_mode == "rgb":
             # RGB mode - update RGB color
             rgb = result.get("rgb")
-            if rgb and rgb != self._rgb:
-                self._rgb = rgb
-                # Derive brightness from RGB (max component)
-                max_val = max(rgb)
-                if max_val > 0:
-                    self._brightness = max_val
-                self._color_temp_kelvin = None  # Clear CCT when in RGB mode
-                self._effect = None  # Clear effect when in RGB mode
-                changed = True
-                _LOGGER.debug("Advertisement updated RGB: %s, brightness: %d",
-                              self._rgb, self._brightness)
+            if rgb:
+                # Device returns RGB pre-scaled by brightness. Extract H, S, V
+                # then reconstruct "pure" color at full brightness for the color picker.
+                r, g, b = rgb
+                h, s, v = protocol.rgb_to_hsv(r, g, b)
+                # v is 0-100, convert to 0-255 for brightness
+                new_brightness = int(v * 255 / 100)
+                # Reconstruct pure RGB at V=100 (full brightness) for color picker
+                if v > 0:
+                    pure_r, pure_g, pure_b = protocol.hsv_to_rgb(h, s, 100)
+                    pure_rgb = (pure_r, pure_g, pure_b)
+                else:
+                    pure_rgb = rgb
+
+                if pure_rgb != self._rgb or new_brightness != self._brightness:
+                    self._rgb = pure_rgb
+                    self._brightness = new_brightness
+                    self._color_temp_kelvin = None  # Clear CCT when in RGB mode
+                    self._effect = None  # Clear effect when in RGB mode
+                    changed = True
+                    _LOGGER.debug("Advertisement updated RGB: device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d (HSV v=%d)",
+                                  r, g, b, self._rgb, self._brightness, v)
 
         elif color_mode == "cct":
             # CCT/White mode - update color temperature
@@ -669,9 +711,8 @@ class LEDNetWFDevice:
 
             if temp_pct is not None:
                 # Convert percent to Kelvin
-                # Per protocol docs: 0% = cool/6500K, 100% = warm/2700K
-                # Same direction as command format (0x3B 0xB1)
-                new_kelvin = int(MAX_KELVIN - temp_pct * (MAX_KELVIN - MIN_KELVIN) / 100)
+                # Per working old code: 0% = warm/2700K, 100% = cool/6500K
+                new_kelvin = int(MIN_KELVIN + temp_pct * (MAX_KELVIN - MIN_KELVIN) / 100)
                 if self._color_temp_kelvin != new_kelvin:
                     self._color_temp_kelvin = new_kelvin
                     changed = True

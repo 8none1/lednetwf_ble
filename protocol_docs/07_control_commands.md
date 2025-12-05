@@ -241,7 +241,7 @@ instead of separate WW/CW channels.
 |------|-----------------|-------------------------------------|
 | 0    | Command opcode  | 0x35 (53)                           |
 | 1    | Sub-command     | 0xB1 (177)                          |
-| 2    | Temperature %   | 0-100 (0=cool, 100=warm)            |
+| 2    | Temperature %   | 0-100 (0=warm/2700K, 100=cool/6500K)|
 | 3    | Brightness %    | 0-100                               |
 | 4    | Reserved        | 0x00                                |
 | 5    | Reserved        | 0x00                                |
@@ -295,7 +295,7 @@ def set_cct_temperature(temp_percent: int, brightness_percent: int,
     Set CCT color temperature.
     
     Args:
-        temp_percent: 0-100 (0=cool/6500K, 100=warm/2700K)
+        temp_percent: 0-100 (0=warm/2700K, 100=cool/6500K)
         brightness_percent: 0-100
         duration_sec: Transition duration in seconds
     """
@@ -490,11 +490,17 @@ Format (7 bytes):
 There are multiple effect command formats depending on device type and firmware.
 All command structures documented here are derived from the decompiled Java source code.
 
-## Effect Command (0x38) - Simple Effects
+## Effect Command (0x38) - Two Variants
+
+**IMPORTANT**: There are TWO different 0x38 command formats depending on device type!
+
+### Variant 1: Symphony Devices (5 bytes with checksum)
 
 Source: tc/d.java method d() lines 37-48
 
-Format (5 bytes) - for basic effects without custom colors:
+Used by: Symphony devices (product IDs 0xA1-0xA9, possibly others)
+
+Format (5 bytes):
 
 | Byte | Field           | Value                           |
 |------|-----------------|----------------------------------|
@@ -518,6 +524,66 @@ public static byte[] d(int i10, int i11, int i12) {
     return bArr;
 }
 ```
+
+### Variant 2: Addressable LED Strip Devices (4 bytes, NO checksum)
+
+Source: Working Python implementation (model_0x53.py, model_0x54.py, model_0x56.py)
+
+Used by: Addressable LED strip controllers (sta bytes 0x53, 0x54, 0x56, product IDs 0x001D, etc.)
+
+**Format (4 bytes - NO CHECKSUM):**
+
+| Byte | Field           | Value                           |
+|------|-----------------|----------------------------------|
+| 0    | Command opcode  | 0x38 (56)                        |
+| 1    | Effect ID       | Effect number (1-93+)            |
+| 2    | Speed           | 0-255                            |
+| 3    | Brightness      | 0-100 (percentage!)              |
+
+**CRITICAL**: The raw payload is only 4 bytes before transport wrapping. NO checksum byte!
+
+Example (effect 1, speed 50, brightness 100%):
+```
+Raw payload: [0x38, 0x01, 0x32, 0x64]
+Wrapped: 00 00 80 00 00 04 05 0b 38 01 32 64
+         └──────transport────┘ └─payload──┘
+                               ^  ^  ^  ^
+                               |  |  |  └─ brightness (0x64 = 100%)
+                               |  |  └──── speed (0x32 = 50)
+                               |  └─────── effect_id (0x01)
+                               └────────── command (0x38)
+```
+
+**Python Implementation:**
+```python
+def build_addressable_effect_0x38(effect_id: int, speed: int, brightness: int) -> bytearray:
+    """
+    Build effect command for addressable LED devices (0x53, 0x54, 0x56).
+    
+    Args:
+        effect_id: Effect number (1-93+)
+        speed: Effect speed (0-255)
+        brightness: Brightness percentage (0-100)
+    
+    Returns:
+        Wrapped command packet
+    """
+    raw_cmd = bytearray([
+        0x38,
+        effect_id & 0xFF,
+        speed & 0xFF,
+        brightness & 0xFF,  # Brightness in percent (0-100)
+    ])
+    # NO CHECKSUM for this variant!
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+```
+
+**Device Classification:**
+- 0x53 devices: 93+ custom effects
+- 0x54 devices: Similar effect set
+- 0x56 devices: Similar effect set
+- These are NOT "Simple Effects" (37-56) or "Symphony Effects" (1-44)
+- Each sta byte has its own custom effect list
 
 ## Effect Command (0x61) - Built-in Mode Effects
 
@@ -742,6 +808,27 @@ Format (13 bytes) for Symphony/BLE v5+ devices:
 | 11   | Time (lo)       | Duration low byte                |
 | 12   | Checksum        | Sum of bytes 0-11                |
 
+### CRITICAL: Time Field (bytes 10-11)
+
+**Use `0x00, 0x00` for instant response!**
+
+The time field controls transition duration. Non-zero values cause significant delays (possibly interpreted as seconds, not milliseconds):
+
+| Value | Result |
+|-------|--------|
+| `0x00, 0x00` | **Instant** - command executes immediately (RECOMMENDED) |
+| `0x00, 0x1E` | ~30 second delay before execution |
+| `0x00, 0x32` | ~50 second delay before execution |
+
+The working Android app packets use `0x00, 0x00` for all color commands. Only use non-zero values if you specifically need a fade/transition effect and understand the timing.
+
+**Example working color packet (raw payload):**
+
+```text
+3b a1 00 64 64 00 00 00 00 00 00 00 [checksum]
+                           ^^ ^^ = time = 0 (instant)
+```
+
 ### Mode Values (byte 1)
 
 From FragmentUniteControl.java and CipherSuite constants:
@@ -849,14 +936,16 @@ control instead of RGB. This is an alternative to the 0x35 CCT command.
 | 2    | Hue+Sat (hi)    | 0x00 (unused)                       |
 | 3    | Hue+Sat (lo)    | 0x00 (unused)                       |
 | 4    | Brightness      | 0x00 (unused for CCT)               |
-| 5    | Temperature %   | 0-100 (0=cool/6500K, 100=warm/2700K)|
+| 5    | Temperature %   | 0-100 (0=warm/2700K, 100=cool/6500K)|
 | 6    | Brightness %    | 0-100                               |
 | 7    | Red             | 0x00 (unused)                       |
 | 8    | Green           | 0x00 (unused)                       |
 | 9    | Blue            | 0x00 (unused)                       |
-| 10   | Time (hi)       | Duration high byte (e.g., 0x00)     |
-| 11   | Time (lo)       | Duration low byte (e.g., 0x1E=30)   |
+| 10   | Time (hi)       | Duration high byte (use 0x00)       |
+| 11   | Time (lo)       | Duration low byte (use 0x00 for instant) |
 | 12   | Checksum        | Sum of bytes 0-11                   |
+
+**IMPORTANT**: Use `0x00, 0x00` for time bytes for instant response. See "CRITICAL: Time Field" section above.
 
 **Java usage (c0.java line 56):**
 
@@ -873,18 +962,18 @@ tc.d.c(0xB1, 0, 0, 0, temp_percent, brightness_percent, 30, 0);
 
 ```python
 def build_cct_command_0x3B(temp_percent: int, brightness_percent: int,
-                           duration: int = 30) -> bytearray:
+                           duration: int = 0) -> bytearray:
     """
     Build CCT temperature command using 0x3B format with mode 0xB1.
-    
+
     This format is used by Ring Lights (model_0x53) and Symphony devices.
     Alternative to the 0x35 CCT command used by some ceiling lights.
-    
+
     Args:
-        temp_percent: 0-100 (0=cool/6500K, 100=warm/2700K)
+        temp_percent: 0-100 (0=warm/2700K, 100=cool/6500K)
         brightness_percent: 0-100
-        duration: Transition time in ms (default 30)
-    
+        duration: Transition time (default 0 = instant)
+
     Returns:
         13-byte command packet
     """

@@ -182,7 +182,7 @@ def build_color_command_0x3B(r: int, g: int, b: int, brightness: int = 100) -> b
         brightness & 0xFF,     # Brightness (0-100)
         0x00, 0x00,            # Params
         r & 0xFF, g & 0xFF, b & 0xFF,  # RGB values
-        0x00, 0x1E,            # Time (30ms)
+        0x00, 0x00,            # Time (0 = instant, matches working old code)
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
     return wrap_command(raw_cmd, cmd_family=0x0b)
@@ -247,7 +247,7 @@ def build_white_command(ww: int, cw: int) -> bytearray:
 
 
 def build_cct_command_0x3B(temp_percent: int, brightness_percent: int,
-                          duration: int = 30) -> bytearray:
+                          duration: int = 0) -> bytearray:
     """
     Build CCT temperature command using 0x3B format with mode 0xB1.
 
@@ -262,7 +262,7 @@ def build_cct_command_0x3B(temp_percent: int, brightness_percent: int,
     Args:
         temp_percent: 0-100 (0=cool/6500K, 100=warm/2700K)
         brightness_percent: 0-100
-        duration: Transition time in ms (default 30)
+        duration: Transition time (default 0 = instant, matches working old code)
 
     Returns:
         13-byte command packet wrapped in transport layer
@@ -321,15 +321,39 @@ def build_cct_command_0x35(temp_percent: int, brightness_percent: int, duration_
 # EFFECT COMMANDS
 # =============================================================================
 
-def build_effect_command_0x38(effect_id: int, speed: int = 128, param: int = 0) -> bytearray:
+def build_effect_command_0x53(effect_id: int, speed: int = 50, brightness: int = 100) -> bytearray:
     """
-    Build Symphony effect command (0x38).
+    Build addressable effect command for 0x53 devices (Ring Lights).
+
+    IMPORTANT: This format uses NO CHECKSUM - only 4 bytes!
+    Source: model_0x53.py set_effect() method
+
+    Format: [0x38, effect_id, speed, brightness] - NO checksum!
+    - effect_id: 1-113 (or 0xFF for cycle all)
+    - speed: 0-100
+    - brightness: 0-100
+
+    Product IDs using this format: 0, 29, 83 (per DEVICE_IDENTIFICATION_GUIDE.md)
+    """
+    raw_cmd = bytearray([
+        0x38,
+        effect_id & 0xFF,
+        speed & 0xFF,
+        brightness & 0xFF,  # Brightness 0-100, NOT a checksum!
+    ])
+    # NO checksum for 0x53 devices!
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+
+
+def build_effect_command_0x38(effect_id: int, speed: int = 128, brightness: int = 100) -> bytearray:
+    """
+    Build Symphony effect command (0x38) WITH checksum.
 
     Used for Symphony devices (product IDs 0xA1-0xA9, 0x08).
     Scene effects: IDs 1-44
     Build effects: IDs 100-399 (internal 1-300)
 
-    Format: [0x38, effect_id, speed, param, checksum]
+    Format: [0x38, effect_id, speed, brightness, checksum]
     """
     # For build effects (100-399), convert to internal ID (1-300)
     internal_id = effect_id - 99 if effect_id >= 100 else effect_id
@@ -338,7 +362,7 @@ def build_effect_command_0x38(effect_id: int, speed: int = 128, param: int = 0) 
         0x38,
         internal_id & 0xFF,
         speed & 0xFF,
-        param & 0xFF,
+        brightness & 0xFF,
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
     return wrap_command(raw_cmd, cmd_family=0x0b)
@@ -363,21 +387,32 @@ def build_effect_command_0x61(effect_id: int, speed: int = 128, persist: bool = 
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
-def build_effect_command(effect_type: EffectType, effect_id: int, speed: int = 128) -> bytearray | None:
+def build_effect_command(
+    effect_type: EffectType,
+    effect_id: int,
+    speed: int = 50,
+    brightness: int = 100,
+) -> bytearray | None:
     """
     Build effect command based on device effect type.
 
     Args:
-        effect_type: SIMPLE or SYMPHONY
+        effect_type: SIMPLE, SYMPHONY, or ADDRESSABLE_0x53
         effect_id: Effect ID
-        speed: Effect speed (0-255)
+        speed: Effect speed (0-100)
+        brightness: Effect brightness (0-100)
 
     Returns:
         Command packet or None if effect type is NONE
     """
-    if effect_type == EffectType.SYMPHONY:
-        return build_effect_command_0x38(effect_id, speed)
+    if effect_type == EffectType.ADDRESSABLE_0x53:
+        # 4 bytes, NO checksum - brightness is critical!
+        return build_effect_command_0x53(effect_id, speed, brightness)
+    elif effect_type == EffectType.SYMPHONY:
+        # 5 bytes WITH checksum
+        return build_effect_command_0x38(effect_id, speed, brightness)
     elif effect_type == EffectType.SIMPLE:
+        # 0x61 command
         return build_effect_command_0x61(effect_id, speed)
     return None
 

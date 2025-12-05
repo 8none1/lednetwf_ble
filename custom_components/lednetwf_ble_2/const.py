@@ -65,10 +65,14 @@ class ColorOrder(IntEnum):
 
 
 class EffectType(IntEnum):
-    """Effect command type based on device."""
+    """Effect command type based on device.
+
+    Based on DEVICE_IDENTIFICATION_GUIDE.md - use product_id for detection.
+    """
     NONE = 0
-    SIMPLE = 1      # 0x61 command, effects 37-56
-    SYMPHONY = 2    # 0x38 command, effects 1-44 (scene) + 100-399 (build)
+    SIMPLE = 1              # 0x61 command, effects 37-56
+    SYMPHONY = 2            # 0x38 command WITH checksum (5 bytes)
+    ADDRESSABLE_0x53 = 3    # 0x38 command NO checksum (4 bytes), brightness in byte 3
 
 
 # Simple effects (0x61 command) - IDs 37-56 for non-Symphony RGB devices
@@ -116,6 +120,126 @@ SYMPHONY_SCENE_EFFECTS: Final = {
     17: "Fireworks",
     18: "Ripple",
     # 19-44 are additional variations
+}
+
+# Addressable 0x53 effects (Ring Lights) - 0x38 command, NO checksum
+# Source: model_0x53.py EFFECTS_LIST_0x53
+ADDRESSABLE_0x53_EFFECTS: Final = {
+    1: "Gold Ring",
+    2: "Red Magenta Fade",
+    3: "Yellow Magenta Fade",
+    4: "Green Yellow Fade",
+    5: "Green Blue Spin",
+    6: "Blue Spin",
+    7: "Purple Pink Spin",
+    8: "Color Fade",
+    9: "Red Blue Flash",
+    10: "CMRGB Spin",
+    11: "RGBYMC Follow",
+    12: "CMYRGB Spin",
+    13: "RGB Chase",
+    14: "RGB Tri Reverse Spin",
+    15: "Red Fade",
+    16: "Blue Yellow Quad Static",
+    17: "Red Green Quad Static",
+    18: "Cyan Magenta Quad Static",
+    19: "Red Green Reverse Chase",
+    20: "Blue Yellow Reverse Chase",
+    21: "Cyan Magenta Reverse Chase",
+    22: "Yellow RGB Reverse Spin",
+    23: "Cyan RGB Reverse Spin",
+    24: "Magenta RGB Reverse Spin",
+    25: "RGB Reverse Spin",
+    26: "RGBY Reverse Spin",
+    27: "Magenta RGBY Reverse Spin",
+    28: "Cyan RGBYMC Reverse Spin",
+    29: "White RGBYMC Reverse Spin",
+    30: "Red Green Reverse Chase 2",
+    31: "Blue Yellow Reverse Chase 2",
+    32: "Cyan Pink Reverse Chase",
+    33: "White Strobe",
+    34: "White Strobe 2",
+    35: "Warm White Strobe",
+    36: "Smooth Color Fade",
+    37: "White Static",
+    38: "Pinks Fade",
+    39: "Cyans Fade",
+    40: "Cyan Magenta Slow Fade",
+    41: "Green Yellow Fade 2",
+    42: "RGBCMY Slow Fade",
+    43: "Whites Fade",
+    44: "Pink Purple Fade",
+    45: "Cyan Magenta Fade",
+    46: "Cyan Blue Fade",
+    47: "Yellow Cyan Fade",
+    48: "Red Yellow Fade",
+    49: "RGBCMY Strobe",
+    50: "Warm Cool White Strobe",
+    51: "Magenta Strobe",
+    52: "Cyan Strobe",
+    53: "Yellow Strobe",
+    54: "Magenta Cyan Strobe",
+    55: "Cyan Yellow Strobe",
+    56: "Cool White Strobe Random",
+    57: "Warm White Strobe Random",
+    58: "Light Green Strobe Random",
+    59: "Magenta Strobe Random",
+    60: "Cyan Strobe Random",
+    61: "Oranges Ring",
+    62: "Blue Ring",
+    63: "RMBCGY Loop",
+    64: "Cyan Magenta Follow",
+    65: "Yellow Green Follow",
+    66: "Pink Blue Follow",
+    67: "BGP Pastels Loop",
+    68: "CYM Follow",
+    69: "Pink Purple Demi Spinner",
+    70: "Blue Pink Spinner",
+    71: "Green Spinner",
+    72: "Blue Yellow Tri Spinner",
+    73: "Red Yellow Tri Spinner",
+    74: "Pink Green Tri Spinner",
+    75: "Red Blue Demi Spinner",
+    76: "Yellow Green Demi Spinner",
+    77: "RGB Tri Spinner",
+    78: "Red Magenta Demi Spinner",
+    79: "Cyan Magenta Demi Spinner",
+    80: "RCBM Quad Spinner",
+    81: "RGBCMY Spinner",
+    82: "RGB Spinner",
+    83: "CMB Spinner",
+    84: "Red Blue Demi Spinner 2",
+    85: "Cyan Magenta Demi Spinner 2",
+    86: "Yellow Orange Demi Spinner",
+    87: "Red Blue Striped Spinner",
+    88: "Green Yellow Striped Spinner",
+    89: "Red Pink Yellow Striped Spinner",
+    90: "Cyan Blue Magenta Striped Spinner",
+    91: "Pastels Striped Spinner",
+    92: "Rainbow Spin",
+    93: "Red Pink Blue Spinner",
+    94: "Cyan Magenta Spinner",
+    95: "Green Cyan Spinner",
+    96: "Yellow Red Spinner",
+    97: "Rainbow Strobe",
+    98: "Magenta Strobe 2",
+    99: "Yellow Orange Demi Strobe",
+    100: "Yellow Cyan Demi Flash",
+    101: "White Lightening Strobe",
+    102: "Purple Lightening Strobe",
+    103: "Magenta Lightening Strobe",
+    104: "Yellow Lightening Strobe",
+    105: "Blue With Sparkles",
+    106: "Red With Sparkles",
+    107: "Blue With Sparkles 2",
+    108: "Yellow Dissolve",
+    109: "Magenta Dissolve",
+    110: "Cyan Dissolve",
+    111: "Red Green Dissolve",
+    112: "RGB Dissolve",
+    113: "RGBCYM Dissolve",
+    # 114-115 are "Nothing" effects
+    255: "Cycle Through All Modes",  # Special effect ID 0xFF
 }
 
 # Product ID to capabilities mapping
@@ -168,13 +292,14 @@ PRODUCT_CAPABILITIES: Final = {
     # Special devices
     26:  {"name": "ChristmasLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
     27:  {"name": "SprayLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
-    29:  {"name": "FillLight", "has_rgb": None, "has_ww": None, "has_cw": None, "is_stub": True, "effect_type": EffectType.NONE},
+    29:  {"name": "FillLight", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.ADDRESSABLE_0x53, "has_segments": True},
     41:  {"name": "MirrorLight", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SIMPLE},
     209: {"name": "Digital_Light", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True},
 
     # Ring/Strip lights with background color support
-    0:   {"name": "RingLight_Generic", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SYMPHONY, "has_segments": True},
-    83:  {"name": "RingLight_0x53", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SYMPHONY, "has_segments": True},  # 0x53
+    # Note: product_id 0x53 (83) uses ADDRESSABLE_0x53 effect format (4 bytes, NO checksum)
+    0:   {"name": "RingLight_Generic", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.ADDRESSABLE_0x53, "has_segments": True},
+    83:  {"name": "RingLight_0x53", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.ADDRESSABLE_0x53, "has_segments": True},  # 0x53
     86:  {"name": "RingLight_0x56", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_bg_color": True},  # 0x56
     128: {"name": "RingLight_0x80", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_bg_color": True},  # 0x80
 
@@ -300,6 +425,9 @@ def get_effect_list(effect_type: EffectType) -> list[str]:
         for i in range(100, 400):
             effects.append(f"Build Effect {i - 99}")
         return effects
+    elif effect_type == EffectType.ADDRESSABLE_0x53:
+        # 0x53 Ring Light effects (113 effects + Cycle All)
+        return list(ADDRESSABLE_0x53_EFFECTS.values())
     return []
 
 
@@ -320,4 +448,8 @@ def get_effect_id(effect_name: str, effect_type: EffectType) -> int | None:
                 return num + 99  # Convert back to protocol ID
             except ValueError:
                 pass
+    elif effect_type == EffectType.ADDRESSABLE_0x53:
+        for eid, name in ADDRESSABLE_0x53_EFFECTS.items():
+            if name == effect_name:
+                return eid
     return None
