@@ -434,7 +434,6 @@ def build_effect_command_0x38(effect_id: int, speed: int = 50, brightness: int =
 
     Used for Symphony devices (product IDs 0xA1-0xA9, 0x08).
     Scene effects: IDs 1-44
-    Build effects: IDs 100-399 (internal 1-300)
 
     Format: [0x38, effect_id, speed_byte, brightness, checksum]
 
@@ -442,8 +441,8 @@ def build_effect_command_0x38(effect_id: int, speed: int = 50, brightness: int =
     - brightness must be 1-100 (0 = power off!)
     - speed uses 1-31 scale where 1=slowest, 31=fastest (NOT inverted)
     """
-    # For build effects (100-399), convert to internal ID (1-300)
-    internal_id = effect_id - 99 if effect_id >= 100 else effect_id
+    # Validate effect ID (Scene effects are 1-44)
+    effect_id = max(1, min(44, effect_id))
 
     # Convert speed from 0-100 to 1-31 scale (1=slowest, 31=fastest)
     # Formula: speed_byte = 1 + round(speed_percent * 30 / 100)
@@ -455,7 +454,7 @@ def build_effect_command_0x38(effect_id: int, speed: int = 50, brightness: int =
 
     raw_cmd = bytearray([
         0x38,
-        internal_id & 0xFF,
+        effect_id & 0xFF,
         speed_byte & 0xFF,
         brightness & 0xFF,
     ])
@@ -524,6 +523,7 @@ def build_effect_command(
     speed: int = 50,
     brightness: int = 100,
     has_bg_color: bool = False,
+    has_ic_config: bool = False,
     fg_rgb: tuple[int, int, int] | None = None,
     bg_rgb: tuple[int, int, int] | None = None,
 ) -> bytearray | None:
@@ -535,14 +535,15 @@ def build_effect_command(
         effect_id: Effect ID (can be encoded for special effect types)
         speed: Effect speed (0-100)
         brightness: Effect brightness (0-100)
-        has_bg_color: If True, use 0x56/0x80 effect commands
+        has_bg_color: If True, device supports background colors
+        has_ic_config: If True, device is a true Symphony controller (0xA1-0xAD)
         fg_rgb: Foreground RGB for static effects (optional)
         bg_rgb: Background RGB for static effects (optional)
 
     Returns:
         Command packet or None if effect type is NONE
 
-    Effect ID encoding for has_bg_color devices:
+    Effect ID encoding for 0x56/0x80 devices (has_bg_color but not has_ic_config):
         - Static effects: (effect_id >> 8) where result is 2-10
         - Sound reactive: (effect_id >> 8) where result is 0x33-0x41
         - Regular effects: effect_id directly (1-99, 255)
@@ -551,7 +552,27 @@ def build_effect_command(
         # 4 bytes, NO checksum - brightness is critical!
         return build_effect_command_0x53(effect_id, speed, brightness)
     elif effect_type == EffectType.SYMPHONY:
-        if has_bg_color and effect_id >= 0x100:
+        # True Symphony devices (0xA1-0xAD) with has_ic_config=True
+        if has_ic_config:
+            if has_bg_color and effect_id in SYMPHONY_BG_COLOR_EFFECTS:
+                # Symphony effects 5-18 support FG+BG colors via 0x41 command
+                # Source: protocol_docs/14_symphony_background_colors.md
+                if fg_rgb is None:
+                    fg_rgb = (255, 255, 255)  # Default white
+                if bg_rgb is None:
+                    bg_rgb = (0, 0, 0)  # Default black
+                _LOGGER.debug(
+                    "Using 0x41 command for Symphony effect %d with FG=%s, BG=%s",
+                    effect_id, fg_rgb, bg_rgb
+                )
+                return build_static_effect_command_0x41(
+                    effect_id, fg_rgb, bg_rgb, speed
+                )
+            else:
+                # Standard Symphony effect (1-44) - use 0x38 command
+                return build_effect_command_0x38(effect_id, speed, brightness)
+        # 0x56/0x80 devices (has_bg_color but not has_ic_config)
+        elif has_bg_color and effect_id >= 0x100:
             # Encoded effect ID for 0x56/0x80 devices (static effects use ID << 8)
             decoded_id = effect_id >> 8
             if decoded_id <= 10:
@@ -572,25 +593,11 @@ def build_effect_command(
                     effect_id
                 )
                 return None
-        elif has_bg_color and effect_id in SYMPHONY_BG_COLOR_EFFECTS:
-            # Symphony effects 5-18 support FG+BG colors via 0x41 command
-            # Source: protocol_docs/14_symphony_background_colors.md
-            if fg_rgb is None:
-                fg_rgb = (255, 255, 255)  # Default white
-            if bg_rgb is None:
-                bg_rgb = (0, 0, 0)  # Default black
-            _LOGGER.debug(
-                "Using 0x41 command for Symphony effect %d with FG=%s, BG=%s",
-                effect_id, fg_rgb, bg_rgb
-            )
-            return build_static_effect_command_0x41(
-                effect_id, fg_rgb, bg_rgb, speed
-            )
         elif has_bg_color:
             # Regular strip effect (1-99 or 255) for 0x56/0x80 - use 0x42 command
             return build_effect_command_0x42(effect_id, speed, brightness)
         else:
-            # Standard Symphony effect - 5 bytes WITH checksum
+            # Fallback for unknown Symphony devices - use 0x38 command
             return build_effect_command_0x38(effect_id, speed, brightness)
     elif effect_type == EffectType.SIMPLE:
         # 0x61 command - speed uses INVERTED 1-31 range

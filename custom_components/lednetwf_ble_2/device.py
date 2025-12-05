@@ -183,7 +183,7 @@ class LEDNetWFDevice:
     @property
     def effect_list(self) -> list[str]:
         """Return list of available effects."""
-        return get_effect_list(self.effect_type, self.has_bg_color)
+        return get_effect_list(self.effect_type, self.has_bg_color, self.has_ic_config)
 
     @property
     def has_rgb(self) -> bool:
@@ -226,6 +226,16 @@ class LEDNetWFDevice:
         return bool(self._capabilities.get("has_bg_color"))
 
     @property
+    def has_ic_config(self) -> bool:
+        """Return True if device supports IC configuration.
+
+        True Symphony devices (0xA1-0xAD) have IC configuration capability.
+        This distinguishes them from 0x56/0x80 devices which also use Symphony
+        effect type but have different effect sets.
+        """
+        return bool(self._capabilities.get("has_ic_config"))
+
+    @property
     def bg_rgb_color(self) -> tuple[int, int, int] | None:
         """Return background RGB color."""
         return self._bg_rgb
@@ -240,24 +250,25 @@ class LEDNetWFDevice:
         """Return list of effects that support background color.
 
         For 0x56/0x80 devices: Static Effects 2-10
-        For Symphony devices: Effects 5-18 (Theater chase through Ripple)
+        For Symphony devices: Effects 5-18 (Running/Overlay effects with FG+BG colors)
         """
         if not self.has_bg_color:
             return []
 
-        if self.effect_type == EffectType.SYMPHONY:
-            # Symphony devices: effects 5-18 support FG+BG colors
+        if self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
+            # True Symphony devices: effects 5-18 support FG+BG colors via 0x41 command
             return [SYMPHONY_SCENE_EFFECTS[i] for i in SYMPHONY_BG_COLOR_EFFECTS
                     if i in SYMPHONY_SCENE_EFFECTS]
-        else:
+        elif self.has_bg_color:
             # 0x56/0x80 devices: Static Effects 2-10
             return [f"Static Effect {i}" for i in range(2, 11)]
+        return []
 
     def is_bg_color_available(self) -> bool:
         """Return True if background color can be set for current effect.
 
         For 0x56/0x80 devices: Static Effects 2-10
-        For Symphony devices: Effects 5-18 (Theater chase through Ripple)
+        For Symphony devices: Effects 5-18 (Running/Overlay effects with FG+BG colors)
         Not available for: solid color mode, other effects, or sound reactive.
         """
         if not self.has_bg_color:
@@ -497,15 +508,19 @@ class LEDNetWFDevice:
             self._effect = self._effect_id_to_name(result["effect_id"])
             self._color_temp_kelvin = None
 
-            if self.effect_type == EffectType.SYMPHONY:
-                # SYMPHONY effect mode:
+            if self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
+                # True Symphony devices (0xA1-0xAD) effect mode:
                 # - Brightness in byte 6 (R position), 1-100 scale
                 # - Speed in byte 5 (value1), stored as speed_byte × 3
+                # - speed_byte is 1-31 (1=slow, 31=fast)
                 brightness_pct = result["r"] if result["r"] > 0 else 100
                 self._brightness = int(brightness_pct * 255 / 100)
                 # Convert speed: value1 = speed_byte × 3, speed_byte is 1-31 (1=slow, 31=fast)
-                speed_byte = result["value1"] // 3 if result["value1"] > 0 else 16
-                if speed_byte >= 1 and speed_byte <= 31:
+                raw_value1 = result["value1"]
+                if raw_value1 > 0:
+                    speed_byte = raw_value1 // 3
+                    # Clamp to valid range 1-31
+                    speed_byte = max(1, min(31, speed_byte))
                     self._effect_speed = int((speed_byte - 1) * 100 / 30)
                 else:
                     self._effect_speed = 50
@@ -789,7 +804,7 @@ class LEDNetWFDevice:
             return False
 
         eff_type = self.effect_type
-        effect_id = get_effect_id(effect_name, eff_type, self.has_bg_color)
+        effect_id = get_effect_id(effect_name, eff_type, self.has_bg_color, self.has_ic_config)
 
         if effect_id is None:
             _LOGGER.warning("Unknown effect: %s", effect_name)
@@ -838,6 +853,7 @@ class LEDNetWFDevice:
         packet = protocol.build_effect_command(
             eff_type, effect_id, speed, brightness_pct,
             has_bg_color=self.has_bg_color,
+            has_ic_config=self.has_ic_config,
             fg_rgb=fg_rgb,
             bg_rgb=bg_rgb,
         )

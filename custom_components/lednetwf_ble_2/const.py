@@ -136,26 +136,58 @@ SOUND_REACTIVE_EFFECTS: Final = {
 }
 
 # Symphony Scene effects (0x38 command) - IDs 1-44
+# Source: protocol_docs/12_symphony_effect_names.md (extracted from Android APK strings.xml)
+# UI Type determines which color pickers are available
 SYMPHONY_SCENE_EFFECTS: Final = {
-    1: "Static",
-    2: "Breathing",
-    3: "Rainbow",
-    4: "Color wipe",
-    5: "Theater chase",
-    6: "Twinkle",
-    7: "Scanner",
-    8: "Fade",
-    9: "Color chase",
-    10: "Running lights",
-    11: "Sparkle",
-    12: "Fire",
-    13: "Meteor",
-    14: "Wave",
-    15: "Comet",
-    16: "Bouncing balls",
-    17: "Fireworks",
-    18: "Ripple",
-    # 19-44 are additional variations
+    # StartColor_EndColor effects (1-4)
+    1: "Change gradually",
+    2: "Bright up and Fade gradually",
+    3: "Change quickly",
+    4: "Strobe-flash",
+    # ForegroundColor_BackgroundColor effects (5-18)
+    5: "Running, 1point from start to end",
+    6: "Running, 1point from end to start",
+    7: "Running, 1point from middle to both ends",
+    8: "Running, 1point from both ends to middle",
+    9: "Overlay, from start to end",
+    10: "Overlay, from end to start",
+    11: "Overlay, from middle to both ends",
+    12: "Overlay, from both ends to middle",
+    13: "Fading and running, 1point from start to end",
+    14: "Fading and running, 1point from end to start",
+    15: "Olivary Flowing, from start to end",
+    16: "Olivary Flowing, from end to start",
+    17: "Running, 1point w/background from start to end",
+    18: "Running, 1point w/background from end to start",
+    # FirstColor_SecondColor effects (19-26)
+    19: "2 colors run, multi points w/black background from start to end",
+    20: "2 colors run, multi points w/black background from end to start",
+    21: "2 colors run alternately, fading from start to end",
+    22: "2 colors run alternately, fading from end to start",
+    23: "2 colors run alternately, multi points from start to end",
+    24: "2 colors run alternately, multi points from end to start",
+    25: "Fading out Flows, from start to end",
+    26: "Fading out Flows, from end to start",
+    # Only_BackgroundColor effects (27-28)
+    27: "7 colors run alternately, 1 point with multi points background, from start to end",
+    28: "7 colors run alternately, 1 point with multi points background, from end to start",
+    # NoColor effects (29-44) - use preset rainbow colors
+    29: "7 colors run alternately, 1 point from start to end",
+    30: "7 colors run alternately, 1 point from end to start",
+    31: "7 colors run alternately, multi points from start to end",
+    32: "7 colors run alternately, multi points from end to start",
+    33: "7 colors overlay, multi points from start to end",
+    34: "7 colors overlay, multi points from end to start",
+    35: "7 colors overlay, multi points from middle to both ends",
+    36: "7 colors overlay, multi points from both ends to middle",
+    37: "7 colors flow gradually, from start to end",
+    38: "7 colors flow gradually, from end to start",
+    39: "Fading out run, 7 colors from start to end",
+    40: "Fading out run, 7 colors from end to start",
+    41: "Runs in olivary, 7 colors from start to end",
+    42: "Runs in olivary, 7 colors from end to start",
+    43: "Fading out run, 7 colors start with white from start to end",
+    44: "Fading out run, 7 colors start with white from end to start",
 }
 
 # Symphony effects that support FG+BG colors via 0x41 command
@@ -474,12 +506,13 @@ def needs_capability_probing(product_id: int | None) -> bool:
     return PRODUCT_CAPABILITIES[product_id].get("is_stub", False)
 
 
-def get_effect_list(effect_type: EffectType, has_bg_color: bool = False) -> list[str]:
+def get_effect_list(effect_type: EffectType, has_bg_color: bool = False, has_ic_config: bool = False) -> list[str]:
     """Get list of effect names for the given effect type.
 
     Args:
         effect_type: The effect command type for the device
         has_bg_color: If True, include static effects that support background color
+        has_ic_config: If True, device is a Symphony controller (0xA1-0xAD), not 0x56/0x80
 
     Returns:
         List of effect names
@@ -487,7 +520,11 @@ def get_effect_list(effect_type: EffectType, has_bg_color: bool = False) -> list
     if effect_type == EffectType.SIMPLE:
         return list(SIMPLE_EFFECTS.values())
     elif effect_type == EffectType.SYMPHONY:
-        if has_bg_color:
+        if has_ic_config:
+            # True Symphony devices (0xA1-0xAD): Only Scene effects (1-44)
+            # Build effects removed - they don't work on these devices
+            return list(SYMPHONY_SCENE_EFFECTS.values())
+        elif has_bg_color:
             # 0x56/0x80 devices: Static effects + Regular effects + Sound reactive
             effects = list(STATIC_EFFECTS_WITH_BG.values())
             effects.extend(list(STRIP_EFFECTS.values()))
@@ -495,25 +532,22 @@ def get_effect_list(effect_type: EffectType, has_bg_color: bool = False) -> list
             effects.append("Cycle Modes")
             return effects
         else:
-            # Other Symphony devices: Scene effects + Build effects
-            effects = list(SYMPHONY_SCENE_EFFECTS.values())
-            # Add build effects as numbered entries
-            for i in range(100, 400):
-                effects.append(f"Build Effect {i - 99}")
-            return effects
+            # Fallback for unknown Symphony-type devices: just Scene effects
+            return list(SYMPHONY_SCENE_EFFECTS.values())
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         # 0x53 Ring Light effects (113 effects + Cycle All)
         return list(ADDRESSABLE_0x53_EFFECTS.values())
     return []
 
 
-def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool = False) -> int | None:
+def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool = False, has_ic_config: bool = False) -> int | None:
     """Get effect ID from name.
 
     Args:
         effect_name: Effect name to look up
         effect_type: The effect command type for the device
         has_bg_color: If True, check static effects that support background color
+        has_ic_config: If True, device is a Symphony controller (0xA1-0xAD), not 0x56/0x80
 
     Returns:
         Effect ID or None if not found
@@ -523,7 +557,12 @@ def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool 
             if name == effect_name:
                 return eid
     elif effect_type == EffectType.SYMPHONY:
-        if has_bg_color:
+        if has_ic_config:
+            # True Symphony devices (0xA1-0xAD): Only Scene effects (1-44)
+            for eid, name in SYMPHONY_SCENE_EFFECTS.items():
+                if name == effect_name:
+                    return eid
+        elif has_bg_color:
             # 0x56/0x80 devices: Check static effects, strip effects, sound reactive
             for eid, name in STATIC_EFFECTS_WITH_BG.items():
                 if name == effect_name:
@@ -539,17 +578,10 @@ def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool 
             if effect_name == "Cycle Modes":
                 return 255
         else:
-            # Other Symphony devices: Scene effects + Build effects
+            # Fallback for unknown Symphony-type devices: just Scene effects
             for eid, name in SYMPHONY_SCENE_EFFECTS.items():
                 if name == effect_name:
                     return eid
-            # Check build effects
-            if effect_name.startswith("Build Effect "):
-                try:
-                    num = int(effect_name.replace("Build Effect ", ""))
-                    return num + 99  # Convert back to protocol ID
-                except ValueError:
-                    pass
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         for eid, name in ADDRESSABLE_0x53_EFFECTS.items():
             if name == effect_name:
