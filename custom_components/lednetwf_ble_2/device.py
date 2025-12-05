@@ -323,6 +323,13 @@ class LEDNetWFDevice:
             _LOGGER.debug("Could not unwrap notification (data too short?)")
             return
 
+        # Check for JSON-wrapped response (starts with '{' = 0x7B)
+        # Some devices wrap state responses in JSON: {"code":0,"payload":"hex_string"}
+        if payload[0] == 0x7B:  # '{'
+            payload = self._unwrap_json_payload(payload)
+            if not payload:
+                return
+
         # Format payload as 0xNN
         payload_hex = ' '.join(f'0x{b:02X}' for b in payload)
         _LOGGER.debug("Notification payload (%d bytes): %s", len(payload), payload_hex)
@@ -334,6 +341,69 @@ class LEDNetWFDevice:
             self._parse_led_settings_response(payload)
         else:
             _LOGGER.debug("Unknown notification type: 0x%02X", payload[0])
+
+    def _unwrap_json_payload(self, payload: bytes) -> bytes | None:
+        """Extract hex payload from JSON-wrapped notification.
+
+        Some devices (especially older ones or during setup) wrap responses in JSON:
+        {"code":0,"payload":"8133242B231DED00ED000A000F36"}
+
+        The payload field contains the actual state response as a hex string.
+
+        Source: Android UpperTransportLayer.java, Result.java
+        """
+        try:
+            # Decode as UTF-8 and parse JSON
+            json_str = payload.decode("utf-8", errors="ignore")
+            _LOGGER.debug("JSON-wrapped notification: %s", json_str)
+
+            import json
+            data = json.loads(json_str)
+
+            # Check for error code
+            code = data.get("code", 0)
+            if code != 0:
+                _LOGGER.warning("JSON notification error code: %d", code)
+
+            # Extract hex payload string
+            hex_payload = data.get("payload", "")
+            if not hex_payload:
+                _LOGGER.debug("JSON notification has no payload")
+                return None
+
+            # Convert hex string to bytes
+            return bytes.fromhex(hex_payload)
+
+        except (json.JSONDecodeError, ValueError) as ex:
+            # Fallback: try old format where payload is just quoted hex
+            # e.g., some responses are just "8133242B..."
+            _LOGGER.debug("JSON parse failed (%s), trying quoted hex extraction", ex)
+            return self._extract_quoted_hex(payload)
+
+    def _extract_quoted_hex(self, payload: bytes) -> bytes | None:
+        """Extract hex from quoted string (old format fallback).
+
+        Old devices might send: "8133242B231DED00ED000A000F36"
+        This extracts the content between the last pair of quotes.
+
+        Source: model_0x53.py notification_handler()
+        """
+        try:
+            text = payload.decode("utf-8", errors="ignore")
+            last_quote = text.rfind('"')
+            if last_quote > 0:
+                first_quote = text.rfind('"', 0, last_quote)
+                if first_quote >= 0:
+                    hex_str = text[first_quote + 1:last_quote]
+                    # Validate it's all hex characters
+                    if all(c in "0123456789abcdefABCDEF" for c in hex_str):
+                        _LOGGER.debug("Extracted quoted hex: %s", hex_str)
+                        return bytes.fromhex(hex_str)
+            _LOGGER.debug("Could not extract quoted hex from: %s", text[:100])
+            return None
+        except (UnicodeDecodeError, ValueError) as ex:
+            _LOGGER.debug("Quoted hex extraction failed: %s", ex)
+            return None
 
     def _parse_state_response(self, data: bytes) -> None:
         """Parse 0x81 state response.
@@ -361,18 +431,29 @@ class LEDNetWFDevice:
             # Effect mode
             self._effect = self._effect_id_to_name(result["effect_id"])
             self._color_temp_kelvin = None
-            # Brightness from byte 6 (R position), scaled 0-100 → 0-255
-            self._brightness = int(result["r"] * 255 / 100) if result["r"] <= 100 else result["r"]
-            # Speed location varies by device type
+
             if self.effect_type == EffectType.SYMPHONY:
-                # SYMPHONY: speed in byte 5 (value1), stored at ~half scale
-                self._effect_speed = min(100, result["value1"] * 2)
+                # SYMPHONY effect mode:
+                # - Brightness in byte 6 (R position), 1-100 scale
+                # - Speed in byte 5 (value1), stored as (inverted speed_byte) × 3
+                brightness_pct = result["r"] if result["r"] > 0 else 100
+                self._brightness = int(brightness_pct * 255 / 100)
+                # Convert speed: value1 = speed_byte × 3, then speed_byte is inverted 1-31
+                speed_byte = result["value1"] // 3 if result["value1"] > 0 else 16
+                if speed_byte >= 1 and speed_byte <= 31:
+                    self._effect_speed = int((31 - speed_byte) * 100 / 30)
+                else:
+                    self._effect_speed = 50
             else:
-                # ADDRESSABLE_0x53 and others: speed in byte 7 (G position)
+                # ADDRESSABLE_0x53 and others:
+                # - Brightness from byte 6 (R position), 0-100 scale
+                # - Speed from byte 7 (G position), 0-100 scale
+                self._brightness = int(result["r"] * 255 / 100) if result["r"] <= 100 else result["r"]
                 self._effect_speed = result["g"] if result["g"] <= 100 else int(result["g"] * 100 / 255)
-            _LOGGER.debug("Effect mode: effect_id=%s, brightness=%d, speed=%d (value1=%d, g=%d)",
+
+            _LOGGER.debug("Effect mode: effect_id=%s, brightness=%d, speed=%d (value1=%d, r=%d, g=%d)",
                           result["effect_id"], self._brightness, self._effect_speed,
-                          result["value1"], result["g"])
+                          result["value1"], result["r"], result["g"])
 
         elif result.get("is_white_mode"):
             # White/CCT mode - brightness from value1 (byte 5), scaled 0-100 → 0-255
@@ -588,13 +669,17 @@ class LEDNetWFDevice:
             return False
 
         if speed is None:
-            speed = self._effect_speed
+            speed = self._effect_speed if self._effect_speed > 0 else 50
 
         if brightness is None:
             brightness = self._brightness
 
+        # Ensure we have a valid brightness (0 = power off for some devices!)
+        if brightness <= 0:
+            brightness = 255  # Default to full brightness
+
         # Convert brightness from 0-255 to 0-100 for protocol
-        brightness_pct = int(brightness * 100 / 255)
+        brightness_pct = max(1, int(brightness * 100 / 255))
 
         # Note: speed is already 0-100, protocol expects 0-100 for most devices
         packet = protocol.build_effect_command(eff_type, effect_id, speed, brightness_pct)
@@ -812,12 +897,13 @@ class LEDNetWFDevice:
         _LOGGER.info("Probing capabilities for %s (product_id=0x%02X)",
                      self._name, self._product_id or 0)
 
-        # Start with unknown capabilities
+        # Start with unknown capabilities, but PRESERVE effect_type if already known
+        # from product_id lookup (don't overwrite ADDRESSABLE_0x53 with SYMPHONY!)
+        # By NOT including effect_type in detected, the update() won't overwrite it.
         detected = {
             "has_rgb": False,
             "has_ww": False,
             "has_cw": False,
-            "effect_type": EffectType.SYMPHONY,  # Assume modern device
         }
 
         try:

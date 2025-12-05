@@ -389,6 +389,138 @@ For model 0x53:
 
 ---
 
+## JSON-Wrapped Notification Responses
+
+**Document Created**: `JSON_WRAPPED_NOTIFICATION_RESPONSES.md`
+
+### Discovery Summary
+
+Some devices wrap BLE notification responses in JSON format instead of sending raw binary. The format is determined by **message type bits (2-3)** in the transport layer header byte 0.
+
+### Message Types
+
+| Type | Value | Format | Usage |
+|------|-------|--------|-------|
+| JSON | 0 | `{"code":0,"payload":"hex"}` | Some devices, WiFi provisioning |
+| HEX  | 1 | Raw binary | Most LED state responses |
+| ACK  | 2 | Acknowledgment | Filtered out by handlers |
+
+### Type Detection
+
+```python
+type_bits = (header_byte[0] & 0x0C) >> 2
+```
+
+### Key Findings
+
+1. **Type is per-notification, not per-device**
+   - Same device may use different types for different responses
+   - Cannot predict from product_id or ble_version alone
+
+2. **Android Implementation**
+   - `ZGHBReceiveCallback`: Handles binary (type=1) for most devices
+   - `z2.f`: Handles JSON (type=0) for WiFi provisioning and some device setup
+   - Type=2 (ACK) always filtered out
+
+3. **Python Implementation (Old Code)**
+   - model_0x53 (FillLight): Always JSON with quote extraction
+   - model_0x54: Checks for `{` prefix, JSON detection
+   - model_0x56: Pure binary, no JSON
+
+4. **Simplified Approach**
+   - Old Python code doesn't check type bits explicitly
+   - Instead: try UTF-8 decode + JSON parse, fallback to quote extraction
+   - This approach works for all known devices
+
+### Example JSON Response
+
+Raw (59 bytes):
+```
+00 00 80 00 00 2F 30 0A 7B 22 63 6F 64 65 22 3A 30 2C 22 70 61 79 6C 6F 61 64 22 3A 22 38 31 33 33 32 34 32 42 32 33 31 44 45 44 30 30 45 44 30 30 30 41 30 30 30 46 33 36 22 7D
+```
+
+Decoded payload:
+```json
+{"code":0,"payload":"8133242B231DED00ED000A000F36"}
+```
+
+State bytes:
+```
+81 33 24 2B 23 1D ED 00 ED 00 0A 00 0F 36
+```
+
+### Android Code References
+
+- `UpperTransportLayer.java`: Defines type constants (JSON=0, HEX=1, ACK=2)
+- `LowerTransportLayerDecoder.java`: Extracts type from bits 2-3 of header
+- `ZGHBReceiveCallback.java`: Binary notification handler (filters type=2)
+- `z2/f.java`: JSON notification handler (uses Gson to parse)
+- `Result.java`: JSON structure with `code` and `payload` fields
+
+---
+
+## Transport Header Type Bits - Critical Correction
+
+**Document Created**: `TRANSPORT_HEADER_TYPE_BITS_ANALYSIS.md`
+
+### The Problem
+
+Observed header byte `0x04`:
+- Bits 2-3 = 01 → Type 1 (HEX/binary according to spec)
+- But actual payload starts with `0x7B` (`{`) → JSON!
+
+### Investigation Results
+
+**CRITICAL FINDING: Type bits (2-3) DO NOT indicate JSON vs binary format!**
+
+#### Android Code Analysis
+
+1. **Two different LowerTransportLayerDecoder implementations:**
+   - `com.zengge.hagallbjarkan`: Extracts type bits
+   - `com.example.blelibrary`: Does NOT extract type bits
+
+2. **Type bits ONLY used to filter ACK packets:**
+   ```java
+   if (transport.getType() == 2) return;  // Filter ACKs
+   ```
+
+3. **NEVER checks type == 0 vs type == 1** for JSON detection
+   - z2.f: Always parses as JSON (no type check)
+   - ZGHBReceiveCallback: Passes raw payload (no type check)
+
+4. **Old Python code completely ignores transport header:**
+   - Decodes FULL notification (including header) as UTF-8
+   - Uses `rfind('"')` to extract hex between quotes
+   - Works by accident but is robust!
+
+### Why Type Bits Don't Match
+
+Possible reasons:
+1. Type bits may indicate **command format**, not response format
+2. Type bits may be unreliable/unused in practice
+3. Different firmware versions inconsistent
+4. Android app doesn't trust them, uses payload inspection instead
+
+### Correct Implementation
+
+**DO:**
+- Filter ACK packets: `if (type & 0x0C) >> 2 == 2: skip`
+- Detect JSON by payload: Check for `{` or try UTF-8 decode
+- Use old Python approach: Decode full notification, extract from quotes
+
+**DON'T:**
+- Trust type bits for JSON vs binary detection
+- Use type bits to decide parsing strategy
+
+### Impact
+
+Previous `JSON_WRAPPED_NOTIFICATION_RESPONSES.md` document was **INCORRECT**:
+- Stated type bits determine JSON vs binary → WRONG
+- Type bits only reliable for ACK filtering
+- JSON detection must be payload-based
+
+---
+
 ## Next Steps
 
 1. Debug why Linux isn't receiving BLE notifications (use `mon N` command)

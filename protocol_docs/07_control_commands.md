@@ -537,7 +537,7 @@ Used by: Addressable LED strip controllers (sta bytes 0x53, 0x54, 0x56, product 
 |------|-----------------|----------------------------------|
 | 0    | Command opcode  | 0x38 (56)                        |
 | 1    | Effect ID       | Effect number (1-93+)            |
-| 2    | Speed           | 0-255                            |
+| 2    | Speed           | 0-100 (direct, no conversion!)   |
 | 3    | Brightness      | 0-100 (percentage!)              |
 
 **CRITICAL**: The raw payload is only 4 bytes before transport wrapping. NO checksum byte!
@@ -562,7 +562,7 @@ def build_addressable_effect_0x38(effect_id: int, speed: int, brightness: int) -
     
     Args:
         effect_id: Effect number (1-93+)
-        speed: Effect speed (0-255)
+        speed: Effect speed (0-100, direct - no conversion needed)
         brightness: Brightness percentage (0-100)
     
     Returns:

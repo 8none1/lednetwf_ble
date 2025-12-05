@@ -89,12 +89,26 @@ class LEDNetWFLight(LightEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
+        # Build model string with effect type for easier debugging
+        # e.g., "FillLight (ADDRESSABLE_0x53)" or "Ctrl_RGB_Symphony_new (SYMPHONY)"
+        cap_name = self._device.capabilities.get("name", "Unknown")
+        effect_type = self._device.effect_type
+        model_str = f"{cap_name} ({effect_type.name})"
+
+        # Product ID as hex for hardware version, e.g., "0x1D (29)"
+        product_id = self._device.product_id
+        if product_id is not None:
+            hw_version = f"0x{product_id:02X} ({product_id})"
+        else:
+            hw_version = "Unknown"
+
         return DeviceInfo(
             identifiers={(DOMAIN, self._device.address)},
             name=self._device.name,
             manufacturer="LEDnetWF",
-            model=self._device.capabilities.get("name", "Unknown"),
+            model=model_str,
             sw_version=self._device.fw_version,
+            hw_version=hw_version,
         )
 
     @property

@@ -323,18 +323,23 @@ def build_cct_command_0x35(temp_percent: int, brightness_percent: int, duration_
 
 def build_effect_command_0x53(effect_id: int, speed: int = 50, brightness: int = 100) -> bytearray:
     """
-    Build addressable effect command for 0x53 devices (Ring Lights).
+    Build addressable effect command for 0x53 devices (Ring Lights, FillLight).
 
     IMPORTANT: This format uses NO CHECKSUM - only 4 bytes!
     Source: model_0x53.py set_effect() method
+    Source: protocol_docs/07_control_commands.md - Variant 2
 
     Format: [0x38, effect_id, speed, brightness] - NO checksum!
     - effect_id: 1-113 (or 0xFF for cycle all)
-    - speed: 0-100
-    - brightness: 0-100
+    - speed: 0-100 (direct, no conversion - matches old working code)
+    - brightness: 0-100 (percentage)
 
-    Product IDs using this format: 0, 29, 83 (per DEVICE_IDENTIFICATION_GUIDE.md)
+    Product IDs using this format: 0, 29 (FillLight), 83 (per protocol docs)
     """
+    # Speed and brightness both 0-100, sent directly (no conversion)
+    speed = max(0, min(100, speed))
+    brightness = max(0, min(100, brightness))
+
     raw_cmd = bytearray([
         0x38,
         effect_id & 0xFF,
@@ -345,7 +350,7 @@ def build_effect_command_0x53(effect_id: int, speed: int = 50, brightness: int =
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
-def build_effect_command_0x38(effect_id: int, speed: int = 128, brightness: int = 100) -> bytearray:
+def build_effect_command_0x38(effect_id: int, speed: int = 50, brightness: int = 100) -> bytearray:
     """
     Build Symphony effect command (0x38) WITH checksum.
 
@@ -353,15 +358,27 @@ def build_effect_command_0x38(effect_id: int, speed: int = 128, brightness: int 
     Scene effects: IDs 1-44
     Build effects: IDs 100-399 (internal 1-300)
 
-    Format: [0x38, effect_id, speed, brightness, checksum]
+    Format: [0x38, effect_id, speed_byte, brightness, checksum]
+
+    IMPORTANT:
+    - brightness must be 1-100 (0 = power off!)
+    - speed is inverted 1-31 scale (1=fastest, 31=slowest)
     """
     # For build effects (100-399), convert to internal ID (1-300)
     internal_id = effect_id - 99 if effect_id >= 100 else effect_id
 
+    # Convert speed from 0-100 to inverted 1-31 scale
+    # Formula: speed_byte = 31 - round(speed_percent * 30 / 100)
+    speed_byte = 31 - round(speed * 30 / 100)
+    speed_byte = max(1, min(31, speed_byte))
+
+    # Ensure brightness is at least 1 (0 = power off!)
+    brightness = max(1, min(100, brightness))
+
     raw_cmd = bytearray([
         0x38,
         internal_id & 0xFF,
-        speed & 0xFF,
+        speed_byte & 0xFF,
         brightness & 0xFF,
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
