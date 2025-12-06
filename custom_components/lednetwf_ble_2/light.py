@@ -188,7 +188,11 @@ class LEDNetWFLight(LightEntity):
     def color_mode(self) -> ColorMode:
         """Return current color mode."""
         if self._device.effect:
-            # When running an effect, report brightness mode
+            # For Settled Mode effects, allow RGB color changes
+            # so user can adjust foreground color while staying in the effect
+            if self._device.is_in_settled_effect():
+                return ColorMode.RGB
+            # For other effects, report brightness mode (no color picker)
             return ColorMode.BRIGHTNESS
         if self._device.color_temp_kelvin and self._device.has_color_temp:
             return ColorMode.COLOR_TEMP
@@ -349,7 +353,8 @@ class LEDNetWFBackgroundLight(LightEntity):
             if self._device.bg_brightness >= 10:
                 brightness = self._device.bg_brightness
             else:
-                brightness = 255  # Default to full brightness
+                # Default to foreground brightness (user expectation: BG matches FG)
+                brightness = self._device.brightness or 255
 
         # Handle RGB color
         if ATTR_RGB_COLOR in kwargs:

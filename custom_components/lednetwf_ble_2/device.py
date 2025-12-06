@@ -30,7 +30,6 @@ from .const import (
     get_effect_id,
     convert_brightness_from_adv,
     convert_speed_from_adv,
-    SYMPHONY_BG_COLOR_EFFECTS,
     SYMPHONY_SCENE_EFFECTS,
 )
 from . import protocol
@@ -250,15 +249,17 @@ class LEDNetWFDevice:
         """Return list of effects that support background color.
 
         For 0x56/0x80 devices: Static Effects 2-10
-        For Symphony devices: Effects 5-18 (Running/Overlay effects with FG+BG colors)
+        For Symphony devices (has_ic_config): Settled Mode effects 2-10
         """
         if not self.has_bg_color:
             return []
 
         if self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
-            # True Symphony devices: effects 5-18 support FG+BG colors via 0x41 command
-            return [SYMPHONY_SCENE_EFFECTS[i] for i in SYMPHONY_BG_COLOR_EFFECTS
-                    if i in SYMPHONY_SCENE_EFFECTS]
+            # True Symphony devices: Settled Mode effects 2-10 support FG+BG colors
+            # Effect 1 ("Solid Color") does NOT support background color
+            from .const import SYMPHONY_SETTLED_EFFECTS, SYMPHONY_SETTLED_BG_EFFECTS
+            return [SYMPHONY_SETTLED_EFFECTS[i] for i in SYMPHONY_SETTLED_BG_EFFECTS
+                    if i in SYMPHONY_SETTLED_EFFECTS]
         elif self.has_bg_color:
             # 0x56/0x80 devices: Static Effects 2-10
             return [f"Static Effect {i}" for i in range(2, 11)]
@@ -268,7 +269,7 @@ class LEDNetWFDevice:
         """Return True if background color can be set for current effect.
 
         For 0x56/0x80 devices: Static Effects 2-10
-        For Symphony devices: Effects 5-18 (Running/Overlay effects with FG+BG colors)
+        For Symphony devices (has_ic_config): Settled Mode effects 2-10
         Not available for: solid color mode, other effects, or sound reactive.
         """
         if not self.has_bg_color:
@@ -282,6 +283,27 @@ class LEDNetWFDevice:
         else:
             # 0x56/0x80 devices: check for Static Effect prefix
             return self._effect.startswith("Static Effect")
+
+    def is_in_settled_effect(self) -> bool:
+        """Return True if device is currently in a Settled Mode effect.
+
+        Settled Mode effects (1-10) use 0x41 command with FG+BG colors.
+        When in Settled Mode, color changes should update FG/BG via 0x41
+        rather than exiting to solid color mode.
+
+        Returns True for Symphony devices (has_ic_config) running:
+        - "Solid Color" (effect 1)
+        - "Static Effect 2-10" (effects 2-10)
+        """
+        if not self.has_ic_config:
+            return False
+        if self._effect is None:
+            return False
+        if self.effect_type != EffectType.SYMPHONY:
+            return False
+
+        from .const import SYMPHONY_SETTLED_EFFECTS
+        return self._effect in SYMPHONY_SETTLED_EFFECTS.values()
 
     def register_callback(self, callback_fn: Callable[[], None]) -> None:
         """Register a callback for state updates."""
@@ -504,8 +526,15 @@ class LEDNetWFDevice:
 
         # Handle different modes
         if result.get("is_effect_mode"):
-            # Effect mode
-            self._effect = self._effect_id_to_name(result["effect_id"])
+            # Effect mode (mode_type=0x25) - this is Function Mode for Symphony devices
+            # For has_ic_config devices, effect_id 1-100 are Function Mode effects
+            # NOT Settled Mode effects (which report mode_type=0x61)
+            if self.has_ic_config:
+                # Function Mode effects: use SYMPHONY_EFFECTS directly (bypass _effect_id_to_name)
+                from .const import SYMPHONY_EFFECTS
+                self._effect = SYMPHONY_EFFECTS.get(result["effect_id"])
+            else:
+                self._effect = self._effect_id_to_name(result["effect_id"])
             self._color_temp_kelvin = None
 
             if self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
@@ -580,6 +609,46 @@ class LEDNetWFDevice:
             _LOGGER.debug("RGB mode: device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d (from HSV h=%d, s=%d, v=%d)",
                           r, g, b, self._rgb, self._brightness, h, s, v)
 
+        elif (self.has_ic_config and
+              result["mode_type"] == 0x61 and
+              1 <= result["sub_mode"] <= 10):
+            # Settled Mode effect for Symphony devices (has_ic_config)
+            # mode_type=0x61 with sub_mode=1-10 indicates Settled effect
+            # RGB contains the foreground color
+            from .const import SYMPHONY_SETTLED_EFFECTS
+            effect_id = result["sub_mode"]
+            self._effect = SYMPHONY_SETTLED_EFFECTS.get(effect_id)
+            self._color_temp_kelvin = None
+
+            r, g, b = result["r"], result["g"], result["b"]
+            # Derive brightness from RGB via HSV
+            h, s, v = protocol.rgb_to_hsv(r, g, b)
+            brightness_raw = round(v * 255 / 100)
+            if brightness_raw == 0 and (r > 0 or g > 0 or b > 0):
+                brightness_raw = 1
+            self._brightness = brightness_raw
+
+            # Reconstruct pure RGB for color picker
+            if v > 0 or (r > 0 or g > 0 or b > 0):
+                max_rgb = max(r, g, b)
+                if max_rgb > 0:
+                    scale = 255 / max_rgb
+                    pure_r = min(255, int(round(r * scale)))
+                    pure_g = min(255, int(round(g * scale)))
+                    pure_b = min(255, int(round(b * scale)))
+                    self._rgb = (pure_r, pure_g, pure_b)
+                else:
+                    self._rgb = (r, g, b)
+            else:
+                self._rgb = (r, g, b)
+
+            # Speed from value1 (if available)
+            if result["value1"] > 0:
+                self._effect_speed = min(100, result["value1"])
+
+            _LOGGER.debug("Settled effect mode: effect=%s (id=%d), fg_rgb=%s, pure_rgb=%s, brightness=%d, speed=%d",
+                          self._effect, effect_id, (r, g, b), self._rgb, self._brightness, self._effect_speed)
+
         else:
             # Unknown mode - use raw values with same HSV reconstruction
             # For SIMPLE devices, DON'T clear effect state from unknown mode responses.
@@ -641,8 +710,16 @@ class LEDNetWFDevice:
             return SIMPLE_EFFECTS.get(effect_id)
         elif eff_type == EffectType.SYMPHONY:
             if self.has_ic_config:
-                # True Symphony devices (0xA1-0xAD): Function Mode effects (1-100)
-                from .const import SYMPHONY_EFFECTS
+                # True Symphony devices (0xA1-0xAD):
+                # - Settled Mode effects (1-10) via 0x41 command
+                # - Function Mode effects (1-100) via 0x42 command
+                # For IDs 1-10, check Settled effects first, then Function Mode
+                from .const import SYMPHONY_SETTLED_EFFECTS, SYMPHONY_EFFECTS
+                if effect_id <= 10:
+                    name = SYMPHONY_SETTLED_EFFECTS.get(effect_id)
+                    if name:
+                        return name
+                # Fall through to Function Mode for IDs 1-100
                 return SYMPHONY_EFFECTS.get(effect_id)
             elif self.has_bg_color:
                 # 0x56/0x80 devices: Static effects, strip effects, or sound reactive
@@ -723,13 +800,68 @@ class LEDNetWFDevice:
         Args:
             rgb: Tuple of (R, G, B) values 0-255
             brightness: Brightness 0-255
+
+        For devices in Settled Mode effects (Symphony has_ic_config), changing color
+        updates the foreground color via 0x41 command while staying in the effect.
+        To exit effect mode, select a non-Settled effect from the effects list.
         """
         if not self.has_rgb:
             _LOGGER.warning("Device %s does not support RGB", self._name)
             return False
 
-        eff_type = self.effect_type
+        # Check if we're in a Settled Mode effect
+        # If so, update FG color via 0x41 command with the current effect_id
+        if self.is_in_settled_effect():
+            # Get the actual effect_id from the current effect name
+            from .const import SYMPHONY_SETTLED_EFFECTS
+            effect_id = None
+            for eid, name in SYMPHONY_SETTLED_EFFECTS.items():
+                if name == self._effect:
+                    effect_id = eid
+                    break
 
+            if effect_id is None:
+                effect_id = 1  # Fallback to Solid Color
+
+            # Scale FG color by brightness
+            scale = brightness / 255.0
+            fg_rgb = (
+                int(rgb[0] * scale),
+                int(rgb[1] * scale),
+                int(rgb[2] * scale),
+            )
+
+            # Get current BG color (scaled by bg_brightness)
+            if self._bg_rgb:
+                bg_scale = self._bg_brightness / 255.0
+                bg_rgb = (
+                    int(self._bg_rgb[0] * bg_scale),
+                    int(self._bg_rgb[1] * bg_scale),
+                    int(self._bg_rgb[2] * bg_scale),
+                )
+            else:
+                bg_rgb = (0, 0, 0)
+
+            packet = protocol.build_static_effect_command_0x41(
+                effect_id, fg_rgb, bg_rgb, self._effect_speed
+            )
+
+            _LOGGER.debug(
+                "Updating FG color in Settled effect %s (id=%d): fg=%s, bg=%s, speed=%d",
+                self._effect, effect_id, fg_rgb, bg_rgb, self._effect_speed
+            )
+
+            if await self._send_command(packet):
+                self._rgb = rgb
+                self._brightness = brightness
+                # Keep self._effect - stay in current effect mode
+                self._color_temp_kelvin = None
+                self._notify_callbacks()
+                return True
+            return False
+
+        # Standard color command (exits effect mode)
+        eff_type = self.effect_type
         if eff_type == EffectType.SIMPLE:
             # SIMPLE devices use 0x31 command format (9-byte RGB)
             # Brightness is applied directly to RGB values (no separate brightness field)
@@ -867,7 +999,11 @@ class LEDNetWFDevice:
                     int(self._bg_rgb[2] * scale),
                 )
             else:
-                bg_rgb = (0, 0, 0)  # Default black
+                # No background color set yet - default to black
+                # Sync bg_brightness with foreground so when user first picks
+                # a BG color, it will match the foreground brightness
+                self._bg_brightness = brightness
+                bg_rgb = (0, 0, 0)
 
         # Note: speed is already 0-100, protocol expects 0-100 for most devices
         packet = protocol.build_effect_command(
@@ -911,7 +1047,7 @@ class LEDNetWFDevice:
     ) -> bool:
         """Set background color for static effects.
 
-        Only works on devices that support background color (0x56, 0x80)
+        Only works on devices that support background color (0x56, 0x80, Symphony)
         and only when running a static effect (2-10).
 
         Args:
@@ -929,7 +1065,25 @@ class LEDNetWFDevice:
             )
             return False
 
-        # Scale RGB by brightness
+        # Get the actual effect_id from the current effect name
+        effect_id = None
+        if self.is_in_settled_effect():
+            from .const import SYMPHONY_SETTLED_EFFECTS
+            for eid, name in SYMPHONY_SETTLED_EFFECTS.items():
+                if name == self._effect:
+                    effect_id = eid
+                    break
+        if effect_id is None:
+            # Fallback: try to extract from effect name like "Static Effect 3"
+            if self._effect and self._effect.startswith("Static Effect "):
+                try:
+                    effect_id = int(self._effect.split()[-1])
+                except ValueError:
+                    effect_id = 2  # Default to Static Effect 2
+            else:
+                effect_id = 2  # Default
+
+        # Scale BG RGB by brightness
         scale = brightness / 255.0
         scaled_r = int(rgb[0] * scale)
         scaled_g = int(rgb[1] * scale)
@@ -947,13 +1101,14 @@ class LEDNetWFDevice:
         else:
             fg_rgb = (255, 255, 255)  # Default white
 
-        packet = protocol.build_bg_color_command_0x41(
-            fg_rgb, bg_rgb, self._effect_speed
+        packet = protocol.build_static_effect_command_0x41(
+            effect_id, fg_rgb, bg_rgb, self._effect_speed
         )
 
         _LOGGER.debug(
-            "Setting background color: RGB=(%d,%d,%d), brightness=%d, "
-            "scaled=(%d,%d,%d), fg=(%d,%d,%d)",
+            "Setting background color in effect %s (id=%d): BG=(%d,%d,%d), "
+            "brightness=%d, scaled=(%d,%d,%d), fg=(%d,%d,%d)",
+            self._effect, effect_id,
             rgb[0], rgb[1], rgb[2], brightness,
             scaled_r, scaled_g, scaled_b,
             fg_rgb[0], fg_rgb[1], fg_rgb[2],
@@ -1109,6 +1264,58 @@ class LEDNetWFDevice:
             if changed:
                 _LOGGER.debug("Advertisement updated effect: %s, speed: %d, brightness: %d",
                               self._effect, self._effect_speed, self._brightness)
+
+        elif color_mode == "settled":
+            # Settled Mode effect (Symphony devices has_ic_config)
+            # This is mode_type=0x61 with sub_mode=1-10
+            effect_id = result.get("effect_id")
+            effect_speed = result.get("effect_speed")
+            rgb = result.get("rgb")
+
+            if effect_id is not None:
+                from .const import SYMPHONY_SETTLED_EFFECTS
+                effect_name = SYMPHONY_SETTLED_EFFECTS.get(effect_id)
+                if effect_name and self._effect != effect_name:
+                    self._effect = effect_name
+                    changed = True
+
+            if effect_speed is not None:
+                new_speed = convert_speed_from_adv(effect_speed, self._product_id)
+                if self._effect_speed != new_speed:
+                    self._effect_speed = new_speed
+                    changed = True
+
+            if rgb:
+                # Extract RGB and brightness via HSV
+                r, g, b = rgb
+                h, s, v = protocol.rgb_to_hsv(r, g, b)
+                brightness = round(v * 255 / 100)
+                if brightness == 0 and (r > 0 or g > 0 or b > 0):
+                    brightness = 1
+
+                # Reconstruct pure RGB at full brightness
+                max_rgb = max(r, g, b)
+                if max_rgb > 0:
+                    scale = 255 / max_rgb
+                    pure_r = min(255, int(round(r * scale)))
+                    pure_g = min(255, int(round(g * scale)))
+                    pure_b = min(255, int(round(b * scale)))
+                    pure_rgb = (pure_r, pure_g, pure_b)
+                else:
+                    pure_rgb = (r, g, b)
+
+                if self._rgb != pure_rgb:
+                    self._rgb = pure_rgb
+                    changed = True
+                if self._brightness != brightness:
+                    self._brightness = brightness
+                    changed = True
+
+            if changed:
+                _LOGGER.debug(
+                    "Advertisement updated Settled effect: %s, rgb=%s, speed=%d, brightness=%d",
+                    self._effect, self._rgb, self._effect_speed, self._brightness
+                )
 
         if changed:
             self._notify_callbacks()

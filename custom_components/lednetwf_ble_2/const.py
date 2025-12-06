@@ -143,6 +143,27 @@ SYMPHONY_EFFECTS: Final = {
     i: f"Effect {i}" for i in range(1, 101)
 }
 
+# Symphony Settled Mode effects (0x41 command) - IDs 1-10
+# Source: SettledModeFragment.java, protocol_docs/15_static_effects_with_bg_color.md
+# Effect 1 = Solid Color (FG only, no background)
+# Effects 2-10 = Static effects with FG+BG color support
+# Format: [0x41, mode, FG_R, FG_G, FG_B, BG_R, BG_G, BG_B, speed, direction, 0x00, 0xF0, checksum]
+SYMPHONY_SETTLED_EFFECTS: Final = {
+    1: "Solid Color",
+    2: "Static Effect 2",
+    3: "Static Effect 3",
+    4: "Static Effect 4",
+    5: "Static Effect 5",
+    6: "Static Effect 6",
+    7: "Static Effect 7",
+    8: "Static Effect 8",
+    9: "Static Effect 9",
+    10: "Static Effect 10",
+}
+
+# Symphony Settled effects that support background color (2-10, not 1)
+SYMPHONY_SETTLED_BG_EFFECTS: Final = frozenset(range(2, 11))  # 2-10 inclusive
+
 # Symphony Scene effects (0x38 command) - IDs 1-44
 # Source: protocol_docs/07_effect_names.md (extracted from Android APK strings.xml)
 # These are named effects available in "Scene Mode" - NOT used by most Symphony devices
@@ -530,9 +551,12 @@ def get_effect_list(effect_type: EffectType, has_bg_color: bool = False, has_ic_
         return list(SIMPLE_EFFECTS.values())
     elif effect_type == EffectType.SYMPHONY:
         if has_ic_config:
-            # True Symphony devices (0xA1-0xAD): Function Mode effects (1-100)
-            # Uses 0x42 command - effects are numbered only, no names in the app
-            return list(SYMPHONY_EFFECTS.values())
+            # True Symphony devices (0xA1-0xAD):
+            # - Settled Mode effects (1-10) via 0x41 command with FG+BG colors
+            # - Function Mode effects (1-100) via 0x42 command
+            effects = list(SYMPHONY_SETTLED_EFFECTS.values())
+            effects.extend(list(SYMPHONY_EFFECTS.values()))
+            return effects
         elif has_bg_color:
             # 0x56/0x80 devices: Static effects + Regular effects + Sound reactive
             effects = list(STATIC_EFFECTS_WITH_BG.values())
@@ -567,7 +591,15 @@ def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool 
                 return eid
     elif effect_type == EffectType.SYMPHONY:
         if has_ic_config:
-            # True Symphony devices (0xA1-0xAD): Function Mode effects (1-100)
+            # True Symphony devices (0xA1-0xAD):
+            # - Settled Mode effects (1-10) via 0x41 command with FG+BG colors
+            # - Function Mode effects (1-100) via 0x42 command
+            # Check Settled Mode effects first (encode with << 8 to distinguish from Function Mode)
+            for eid, name in SYMPHONY_SETTLED_EFFECTS.items():
+                if name == effect_name:
+                    # Encode Settled effects with << 8 to distinguish from Function Mode
+                    return eid << 8
+            # Then check Function Mode effects (1-100)
             for eid, name in SYMPHONY_EFFECTS.items():
                 if name == effect_name:
                     return eid

@@ -557,10 +557,22 @@ def build_effect_command(
     elif effect_type == EffectType.SYMPHONY:
         # True Symphony devices (0xA1-0xAD) with has_ic_config=True
         if has_ic_config:
-            # Symphony Function Mode effects (1-100) use 0x42 command
-            # Source: FunctionModeFragment.java - effects are numbered 1-100
-            # Format: [0x42, effect_id, speed, brightness, checksum]
-            return build_effect_command_0x42(effect_id, speed, brightness)
+            if effect_id >= 0x100:
+                # Settled Mode effect (encoded with << 8 to distinguish from Function Mode)
+                # Decode and route to 0x41 command with FG+BG colors
+                decoded_id = effect_id >> 8
+                if fg_rgb is None:
+                    fg_rgb = (255, 255, 255)  # Default white
+                if bg_rgb is None:
+                    bg_rgb = (0, 0, 0)  # Default black
+                return build_static_effect_command_0x41(
+                    decoded_id, fg_rgb, bg_rgb, speed
+                )
+            else:
+                # Symphony Function Mode effects (1-100) use 0x42 command
+                # Source: FunctionModeFragment.java - effects are numbered 1-100
+                # Format: [0x42, effect_id, speed, brightness, checksum]
+                return build_effect_command_0x42(effect_id, speed, brightness)
         # 0x56/0x80 devices (has_bg_color but not has_ic_config)
         elif has_bg_color and effect_id >= 0x100:
             # Encoded effect ID for 0x56/0x80 devices (static effects use ID << 8)
@@ -1022,6 +1034,19 @@ def parse_manufacturer_data(
                     # 0x24 (36) = PowerType_PowerOFF per protocol docs
                     color_mode = 'off'
                     _LOGGER.debug("%sManu data power off mode (0x24)", log_prefix)
+                elif 1 <= sub_mode <= 10:
+                    # Settled Mode effect (Symphony devices has_ic_config)
+                    # mode_type=0x61 with sub_mode=1-10 indicates Settled effect
+                    # RGB is in bytes 18-20 (foreground color)
+                    # Speed is in byte 17
+                    color_mode = 'settled'
+                    effect_id = sub_mode  # Settled effect 1-10
+                    rgb = (data[18], data[19], data[20])
+                    effect_speed = data[17]  # Speed for settled effects
+                    _LOGGER.debug(
+                        "%sManu data Settled Mode effect: id=%d, rgb=%s, speed=%d",
+                        log_prefix, effect_id, rgb, effect_speed
+                    )
                 else:
                     # Log full state bytes for debugging unknown sub-modes
                     state_bytes = ' '.join(f'{b:02X}' for b in data[14:min(25, len(data))])
