@@ -28,7 +28,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Could not connect to the device. Ensure it is powered on and in range.",
+      "cannot_connect": "The Home Assistant server wasn't able to establish a reliable connection to your device. Ensure it is powered on and in range, then try again.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {

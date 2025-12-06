@@ -657,20 +657,25 @@ def build_led_settings_command(
 
     Sets LED count, IC type, and color order for addressable strips.
 
-    Format: [0x62, count_lo, count_hi, ic_type, color_order, d, e, f, freq_lo, freq_hi, 0, persist, checksum]
-    Source: tc/b.java method B() lines 518-531
+    Format: [0x62, count_hi, count_lo, ic_type, color_order, d, e, f, freq_hi, freq_lo, param, persist, checksum]
+    Source: tc/b.java method B() lines 519-536
+
+    Note: Java uses g2.c.c() which returns [lo, hi], then reverses order:
+      bArr[1] = bArrC[1]  (high byte)
+      bArr[2] = bArrC[0]  (low byte)
+    So the wire format is big-endian (high byte first).
     """
     raw_cmd = bytearray([
         0x62,
-        led_count & 0xFF,          # LED count low byte
         (led_count >> 8) & 0xFF,   # LED count high byte
+        led_count & 0xFF,          # LED count low byte
         led_type & 0xFF,
         color_order & 0xFF,
         param_d & 0xFF,
         param_e & 0xFF,
         param_f & 0xFF,
-        0x00, 0x00,                # Frequency (0 = default)
-        0x00,                       # Reserved
+        0x00, 0x00,                # Frequency (0 = default, big-endian)
+        0x00,                       # Reserved param
         0xF0,                       # Persist
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
@@ -690,15 +695,20 @@ def build_led_settings_command_a3(
 
     For newer A3+ Symphony devices with segment support.
 
-    Format: [0x62, count_lo, count_hi, seg_lo, seg_hi, ic_type, color_order, music_count, music_seg, persist, checksum]
-    Source: tc/b.java method C() lines 533-547
+    Format: [0x62, count_hi, count_lo, seg_hi, seg_lo, ic_type, color_order, music_count, music_seg, persist, checksum]
+    Source: tc/b.java method C() lines 539-555
+
+    Note: Java uses g2.c.c() which returns [lo, hi], then reverses order:
+      bArr[1] = bArrC[1]  (high byte)
+      bArr[2] = bArrC[0]  (low byte)
+    So the wire format is big-endian (high byte first).
     """
     raw_cmd = bytearray([
         0x62,
-        led_count & 0xFF,          # LED count low byte
         (led_count >> 8) & 0xFF,   # LED count high byte
-        segments & 0xFF,           # Segments low byte
+        led_count & 0xFF,          # LED count low byte
         (segments >> 8) & 0xFF,    # Segments high byte
+        segments & 0xFF,           # Segments low byte
         led_type & 0xFF,
         color_order & 0xFF,
         music_led_count & 0xFF,

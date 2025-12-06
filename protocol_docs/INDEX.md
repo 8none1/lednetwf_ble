@@ -1,6 +1,6 @@
 # LEDnetWF BLE Protocol Documentation
 
-**Version**: 3.5
+**Version**: 3.6
 **Updated**: 6 December 2025
 
 ---
@@ -25,6 +25,7 @@
 | 15 | [15_static_effects_with_bg_color.md](15_static_effects_with_bg_color.md) | **Static effects with FG+BG** for 0x56/Symphony |
 | 16 | [16_query_formats_0x63_vs_0x44.md](16_query_formats_0x63_vs_0x44.md) | **Query commands** 0x63 (IC settings) vs 0x44 (Settled Mode) |
 | 17 | [17_device_configuration.md](17_device_configuration.md) | **Query commands by device**, IOTBT protocol, color order & LED count |
+| 18 | [18_sound_reactive_music_mode.md](18_sound_reactive_music_mode.md) | **Sound reactive** for built-in mic devices (0x08, 0x48) - 0x73 command |
 
 ---
 
@@ -70,6 +71,7 @@ All commands must be wrapped in transport layer. See [04_connection_transport.md
 | Query device settings | [17_device_configuration.md](17_device_configuration.md) |
 | Set color order / LED count | [17_device_configuration.md](17_device_configuration.md) |
 | IOTBT (0x80) protocol | [17_device_configuration.md](17_device_configuration.md) |
+| Sound reactive / music mode | [18_sound_reactive_music_mode.md](18_sound_reactive_music_mode.md) |
 
 ---
 
@@ -123,6 +125,7 @@ Key files in `/home/will/source/jadx/projects/surplife/` (IOTBT protocol):
 
 | Date | Changes |
 |------|---------|
+| 6 Dec 2025 | v3.6 - Added sound reactive / music mode documentation (doc 18) |
 | 6 Dec 2025 | v3.5 - Added complete IOTBT (0x80) protocol from surplife sources |
 | 6 Dec 2025 | v3.4 - Added query commands by device type to doc 17 |
 | 6 Dec 2025 | v3.3 - Expanded doc 17: color order + LED count settings |

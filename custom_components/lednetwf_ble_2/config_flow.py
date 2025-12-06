@@ -182,6 +182,9 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_options()
 
         # User wants to test - flash the device and probe if needed
+        # Use setup_mode=True for single connection attempt (no retries)
+        # and wrap in overall timeout so UI doesn't hang
+        device = None
         try:
             product_id = self._discovery_info.get("product_id")
             device = LEDNetWFDevice(
@@ -189,56 +192,68 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._discovery_info["address"],
                 self._discovery_info["name"],
                 product_id,
+                setup_mode=True,  # Single connection attempt, fast failure
             )
 
-            # If device needs capability probing (unknown product ID), probe first
-            if needs_capability_probing(product_id):
-                _LOGGER.info(
-                    "Unknown product ID 0x%02X - probing capabilities",
-                    product_id or 0
-                )
-                probed_caps = await device.probe_capabilities()
-                # Store probed capabilities for later use
-                self._discovery_info["probed_capabilities"] = probed_caps
-                _LOGGER.info("Probed capabilities: %s", probed_caps)
-
-            # Flash the device 3 times to confirm it's the right one
-            for _ in range(3):
-                await device.turn_on()
-                await asyncio.sleep(0.5)
-                await device.turn_off()
-                await asyncio.sleep(0.5)
-
-            # Query LED settings if device supports it
-            caps = device.capabilities  # Use device's capabilities (may be probed)
-            _LOGGER.debug(
-                "Device capabilities after flash test: has_ic_config=%s, has_color_order=%s, effect_type=%s",
-                caps.get("has_ic_config"), caps.get("has_color_order"), caps.get("effect_type")
-            )
-            if caps.get("has_ic_config"):
-                led_settings = await device.query_led_settings_and_wait(timeout=3.0)
-                if led_settings:
+            # Overall timeout for the entire test operation (15 seconds)
+            async def _test_device():
+                # If device needs capability probing (unknown product ID), probe first
+                if needs_capability_probing(product_id):
                     _LOGGER.info(
-                        "Queried LED settings: count=%s, type=%s, order=%s",
-                        led_settings.get("led_count"),
-                        led_settings.get("ic_type"),
-                        led_settings.get("color_order"),
+                        "Unknown product ID 0x%02X - probing capabilities",
+                        product_id or 0
                     )
-                    # Store for use in options step
-                    self._discovery_info["queried_led_settings"] = led_settings
+                    probed_caps = await device.probe_capabilities()
+                    # Store probed capabilities for later use
+                    self._discovery_info["probed_capabilities"] = probed_caps
+                    _LOGGER.info("Probed capabilities: %s", probed_caps)
 
-            # For SIMPLE devices with color order support, explicitly query state
-            # to get current color order (can't rely on turn_on/off notifications)
-            if caps.get("has_color_order"):
-                _LOGGER.info("Querying state for color order...")
-                await device.query_state_and_wait(timeout=3.0)
-                if device.color_order:
-                    _LOGGER.info("Queried color order: %d", device.color_order)
-                    self._discovery_info["queried_color_order"] = device.color_order
+                # Flash the device 3 times to confirm it's the right one
+                for _ in range(3):
+                    await device.turn_on()
+                    await asyncio.sleep(0.5)
+                    await device.turn_off()
+                    await asyncio.sleep(0.5)
+
+                # Query LED settings if device supports it
+                caps = device.capabilities  # Use device's capabilities (may be probed)
+                _LOGGER.debug(
+                    "Device capabilities after flash test: has_ic_config=%s, has_color_order=%s, effect_type=%s",
+                    caps.get("has_ic_config"), caps.get("has_color_order"), caps.get("effect_type")
+                )
+                if caps.get("has_ic_config"):
+                    led_settings = await device.query_led_settings_and_wait(timeout=3.0)
+                    if led_settings:
+                        _LOGGER.info(
+                            "Queried LED settings: count=%s, type=%s, order=%s",
+                            led_settings.get("led_count"),
+                            led_settings.get("ic_type"),
+                            led_settings.get("color_order"),
+                        )
+                        # Store for use in options step
+                        self._discovery_info["queried_led_settings"] = led_settings
+
+                # For SIMPLE devices with color order support, explicitly query state
+                # to get current color order (can't rely on turn_on/off notifications)
+                if caps.get("has_color_order"):
+                    _LOGGER.info("Querying state for color order...")
+                    await device.query_state_and_wait(timeout=3.0)
+                    if device.color_order:
+                        _LOGGER.info("Queried color order: %d", device.color_order)
+                        self._discovery_info["queried_color_order"] = device.color_order
+
+            try:
+                await asyncio.wait_for(_test_device(), timeout=15.0)
+            except asyncio.TimeoutError:
+                _LOGGER.warning("Device test timed out after 15 seconds")
+                raise BleakNotFoundError("Connection timed out")
 
             await device.stop()
 
         except BleakNotFoundError:
+            # Clean up the device on failure
+            if device:
+                await device.stop()
             errors["base"] = "cannot_connect"
             return self.async_show_form(
                 step_id="confirm",
@@ -247,6 +262,9 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 description_placeholders={"name": self._discovery_info["name"]},
             )
         except Exception as ex:
+            # Clean up the device on failure
+            if device:
+                await device.stop()
             _LOGGER.exception("Validation error: %s", ex)
             errors["base"] = "unknown"
             return self.async_show_form(

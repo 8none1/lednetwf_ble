@@ -47,6 +47,7 @@ class LEDNetWFDevice:
         name: str,
         product_id: int | None = None,
         disconnect_delay: int = DEFAULT_DISCONNECT_DELAY,
+        setup_mode: bool = False,
     ) -> None:
         """Initialize the device.
 
@@ -56,12 +57,15 @@ class LEDNetWFDevice:
             name: Device name
             product_id: Product ID from manufacturer data
             disconnect_delay: Seconds to wait before disconnecting
+            setup_mode: If True, use single connection attempt (no retries)
+                       for faster failure during device setup/testing
         """
         self._hass = hass
         self._address = address
         self._name = name
         self._product_id = product_id
         self._disconnect_delay = disconnect_delay
+        self._setup_mode = setup_mode
 
         # Connection state
         self._client: BleakClient | None = None
@@ -380,6 +384,10 @@ class LEDNetWFDevice:
                 # Store for ble_device_callback
                 self._ble_device = ble_device
 
+                # In setup mode, use single attempt for fast failure
+                # In normal mode, use default retries (3) for reliability
+                max_attempts = 1 if self._setup_mode else 3
+
                 self._client = await establish_connection(
                     BleakClientWithServiceCache,
                     ble_device,
@@ -387,6 +395,7 @@ class LEDNetWFDevice:
                     disconnected_callback=self._on_disconnected,
                     use_services_cache=True,
                     ble_device_callback=lambda: self._ble_device,
+                    max_attempts=max_attempts,
                 )
 
                 # Start notifications
@@ -472,6 +481,17 @@ class LEDNetWFDevice:
             # Pass from byte 1 onwards so parser sees 0x63 as first byte
             _LOGGER.debug("LED settings response with status byte prefix")
             self._parse_led_settings_response(payload[1:])
+        elif len(payload) >= 3 and payload[0] == 0xF0:
+            # Command ACK response format: [0xF0] [command_echo] [status] [checksum]
+            # 0xF0 = ACK marker, command_echo = the command that was sent,
+            # status = 0x00 for success, checksum validates the response
+            cmd_echo = payload[1]
+            status = payload[2]
+            status_str = "success" if status == 0x00 else f"error 0x{status:02X}"
+            _LOGGER.debug(
+                "Command ACK: cmd=0x%02X, status=%s",
+                cmd_echo, status_str
+            )
         else:
             _LOGGER.debug("Unknown notification type: 0x%02X", payload[0])
 
