@@ -16,24 +16,50 @@ Phone-processed audio modes (where the app analyzes audio and sends rapid color 
 
 ## Supported Devices
 
-| Product ID | Device Name | Effect Type | Notes |
-|------------|-------------|-------------|-------|
-| 0x08 (8) | Ctrl_Mini_RGB_Mic | SYMPHONY | RGB only, has segments |
-| 0x48 (72) | Ctrl_Mini_RGBW_Mic | SIMPLE | RGBW support |
+### Devices WITH Built-in Microphone
+
+Determined by which UI fragment the device uses:
+- `MusicModeFragment` = has device mic option (built-in microphone)
+- `MusicModeFragmentWithoutMic` = app mic only (no built-in microphone)
+
+| Product ID | Device Name | Command Format | Notes |
+|------------|-------------|----------------|-------|
+| 0x08 (8) | Ctrl_Mini_RGB_Mic | 5-byte simple | RGB only, SYMPHONY type |
+| 0x48 (72) | Ctrl_Mini_RGBW_Mic | 5-byte simple | RGBW, SIMPLE type |
+| 0xA2 (162) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller |
+| 0xA3 (163) | Ctrl_RGB_Symphony_new | 13-byte full | Symphony controller |
+| 0xA6 (166) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Extends 0xA3 |
+| 0xA7 (167) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller |
+| 0xA9 (169) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller |
+
+### Devices WITHOUT Built-in Microphone
+
+These devices support music mode but only via phone audio processing (not supported):
+
+| Product ID | Device Name | Notes |
+|------------|-------------|-------|
+| 0xA1 (161) | Ctrl_Mini_RGB_Symphony | No music mode tabs in UI |
+| 0xA4 (164) | Ctrl_Mini_RGB_Symphony_new | Uses `MusicModeFragmentWithoutMic` |
 
 ### How to Detect
 
-Check product ID from manufacturer data bytes 8-9:
 ```python
 product_id = (mfr_data[8] << 8) | mfr_data[9]
-has_builtin_mic = product_id in (0x08, 0x48)
+
+# Simple mic devices (5-byte command)
+SIMPLE_MIC_DEVICES = {0x08, 0x48}
+
+# Symphony mic devices (13-byte command)
+SYMPHONY_MIC_DEVICES = {0xA2, 0xA3, 0xA6, 0xA7, 0xA9}
+
+has_builtin_mic = product_id in (SIMPLE_MIC_DEVICES | SYMPHONY_MIC_DEVICES)
 ```
 
 ---
 
-## Command: 0x73 - Sound Reactive Enable/Disable
+## Command Format 1: Simple 5-Byte (0x08, 0x48)
 
-This simple command enables or disables the built-in microphone mode.
+For simple mic devices, use the basic enable/disable command.
 
 ### Format (Raw Payload)
 
@@ -51,46 +77,94 @@ This simple command enables or disables the built-in microphone mode.
 
 ### Example Packets
 
-**Enable sound reactive mode:**
+**Enable:**
 ```
 Raw:     73 7A 7B F0 58
-         ^^ ^^ ^^ ^^ ^^
-         |  |  |  |  checksum (0x73+0x7A+0x7B+0xF0 = 0x258, &0xFF = 0x58)
-         |  |  |  on (0xF0)
-         |  |  fixed
-         |  fixed
+```
+
+**Disable:**
+```
+Raw:     73 7A 7B 0F 77
+```
+
+### Java Source
+
+`tc/b.java` method `o(boolean z10)` (line 1670)
+
+---
+
+## Command Format 2: Symphony 13-Byte (0xA2, 0xA3, 0xA6, 0xA7, 0xA9)
+
+Symphony devices with built-in microphones use a more complex command with effect selection, colors, and sensitivity.
+
+### Format (Raw Payload)
+
+```
+[0x73, enable, mode, effect_id, FG_R, FG_G, FG_B, BG_R, BG_G, BG_B, sensitivity, brightness, checksum]
+```
+
+| Byte | Value | Description |
+|------|-------|-------------|
+| 0 | 0x73 (115) | Command ID |
+| 1 | 0x01/0x00 | 0x01 = Device mic on, 0x00 = Off |
+| 2 | 0x26/0x27 | 0x27 (39) = Device mic mode, 0x26 (38) = App mic mode |
+| 3 | 1-255 | Effect ID (255 = all colors mode) |
+| 4-6 | RGB | Foreground color |
+| 7-9 | RGB | Background color |
+| 10 | 0-100 | Sensitivity (microphone gain) |
+| 11 | 0-100 | Brightness percentage |
+| 12 | checksum | Sum of bytes 0-11 & 0xFF |
+
+### Example Packets
+
+**Enable device mic with effect 1, red foreground, blue background, 50% sensitivity, 100% brightness:**
+```
+Raw:     73 01 27 01 FF 00 00 00 00 FF 32 64 XX
+         ^^ ^^ ^^ ^^ ^^^^^^^^^ ^^^^^^^^^ ^^ ^^ ^^
+         |  |  |  |  red FG    blue BG   |  |  checksum
+         |  |  |  effect 1               |  100% brightness
+         |  |  device mic mode (0x27)    50% sensitivity
+         |  on (0x01)
          cmd
 ```
 
-**Disable sound reactive mode:**
+**Disable device mic:**
 ```
-Raw:     73 7A 7B 0F 67
-         ^^ ^^ ^^ ^^ ^^
-         |  |  |  |  checksum (0x73+0x7A+0x7B+0x0F = 0x167, &0xFF = 0x67)
-         |  |  |  off (0x0F)
-         |  |  fixed
-         |  fixed
+Raw:     73 00 27 01 FF 00 00 00 00 FF 32 64 XX
+         ^^ ^^
+         |  off (0x00)
          cmd
 ```
 
 ### Java Source
 
-`tc/b.java` method `o(boolean z10)` (line 1670):
+`com/zengge/wifi/COMM/Protocol/z.java`:
+
 ```java
-public static byte[] o(boolean z10) {
-    byte[] bArr = new byte[5];
-    bArr[0] = 115;  // 0x73
-    bArr[1] = 122;  // 0x7A
-    bArr[2] = 123;  // 0x7B
-    if (z10) {
-        bArr[3] = -16;  // 0xF0 = on
-    } else {
-        bArr[3] = 15;   // 0x0F = off
-    }
-    bArr[4] = b(bArr, 4);  // checksum
+private byte[] a(boolean z10, boolean z11, int i10, int i11, int i12, int i13, int i14, BaseDeviceInfo baseDeviceInfo) {
+    byte[] bArr = new byte[13];
+    bArr[0] = 115;                          // 0x73 command
+    bArr[1] = z10 ? (byte) 1 : (byte) 0;    // enable (1) / disable (0)
+    bArr[2] = (byte) (z11 ? 38 : 39);       // 0x26 app mic, 0x27 device mic
+    bArr[3] = (byte) i10;                   // effect ID
+    bArr[4] = (byte) Color.red(i11);        // FG red
+    bArr[5] = (byte) Color.green(i11);      // FG green
+    bArr[6] = (byte) Color.blue(i11);       // FG blue
+    bArr[7] = (byte) Color.red(i12);        // BG red
+    bArr[8] = (byte) Color.green(i12);      // BG green
+    bArr[9] = (byte) Color.blue(i12);       // BG blue
+    bArr[10] = (byte) i13;                  // sensitivity
+    bArr[11] = (byte) i14;                  // brightness
+    bArr[12] = tc.b.b(bArr, 12);            // checksum
     return bArr;
 }
 ```
+
+### UI Fragment Logic
+
+In `MusicModeFragment.java`, the K2() method builds the command:
+- `C0 = true` → App mic mode (z10=false in Protocol/z.java)
+- `C0 = false` → Device mic mode (z10=true in Protocol/z.java)
 
 ---
 
@@ -126,33 +200,44 @@ if mode_type == 0x62:
 In [const.py](../custom_components/lednetwf_ble_2/const.py), add `has_builtin_mic` flag:
 
 ```python
-# Current entries (around line 387-390):
-72:  {"name": "Ctrl_Mini_RGBW_Mic", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
-8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True},
+# Simple mic devices (5-byte command)
+8:   {"name": "Ctrl_Mini_RGB_Mic", ..., "has_builtin_mic": True, "mic_cmd_format": "simple"},
+72:  {"name": "Ctrl_Mini_RGBW_Mic", ..., "has_builtin_mic": True, "mic_cmd_format": "simple"},
 
-# Add has_builtin_mic flag:
-72:  {"name": "Ctrl_Mini_RGBW_Mic", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True},
-8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_builtin_mic": True},
+# Symphony mic devices (13-byte command)
+162: {"name": "Ctrl_Mini_RGB_Symphony_new", ..., "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+163: {"name": "Ctrl_RGB_Symphony_new", ..., "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+166: {"name": "Ctrl_Mini_RGB_Symphony_new", ..., "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+167: {"name": "Ctrl_Mini_RGB_Symphony_new", ..., "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+169: {"name": "Ctrl_Mini_RGB_Symphony_new", ..., "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+
+# No built-in mic (DO NOT add has_builtin_mic)
+161: {"name": "Ctrl_Mini_RGB_Symphony", ...},  # No music tabs
+164: {"name": "Ctrl_Mini_RGB_Symphony_new", ...},  # App mic only
 ```
 
 ### 2. Add Property to LEDNetWFDevice
 
-In [device.py](../custom_components/lednetwf_ble_2/device.py), add property:
+In [device.py](../custom_components/lednetwf_ble_2/device.py), add properties:
 
 ```python
 @property
 def has_builtin_mic(self) -> bool:
     """Return True if device has built-in microphone for sound reactive mode."""
     return self._capabilities.get("has_builtin_mic", False)
+
+@property
+def mic_command_format(self) -> str:
+    """Return the mic command format: 'simple' or 'symphony'."""
+    return self._capabilities.get("mic_cmd_format", "simple")
 ```
 
 ### 3. Add Sound Reactive Effect to Effect List
 
-In [const.py](../custom_components/lednetwf_ble_2/const.py), modify `get_effect_list()` to include sound reactive option for mic devices:
+In [const.py](../custom_components/lednetwf_ble_2/const.py):
 
 ```python
-def get_effect_list(effect_type: EffectType, has_ic_config: bool = False,
-                    has_bg_color: bool = False, has_builtin_mic: bool = False) -> list[str]:
+def get_effect_list(..., has_builtin_mic: bool = False) -> list[str]:
     # ... existing logic ...
 
     # Add sound reactive option for devices with built-in mic
@@ -162,39 +247,72 @@ def get_effect_list(effect_type: EffectType, has_ic_config: bool = False,
     return effects
 ```
 
-### 4. Add Protocol Command Builder
+### 4. Add Protocol Command Builders
 
-In [protocol.py](../custom_components/lednetwf_ble_2/protocol.py), add:
+In [protocol.py](../custom_components/lednetwf_ble_2/protocol.py):
 
 ```python
-def build_sound_reactive_command(enable: bool) -> bytearray:
+def build_sound_reactive_simple(enable: bool) -> bytearray:
     """
-    Build command to enable/disable built-in microphone sound reactive mode.
-
-    Only for devices with built-in microphones (product IDs 0x08, 0x48).
-
-    Args:
-        enable: True to enable, False to disable
-
-    Returns:
-        Wrapped command packet
+    Build simple 5-byte sound reactive command for 0x08, 0x48 devices.
     """
     raw_cmd = bytearray([0x73, 0x7A, 0x7B])
     raw_cmd.append(0xF0 if enable else 0x0F)
     raw_cmd.append(calculate_checksum(raw_cmd))
     return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+def build_sound_reactive_symphony(
+    enable: bool,
+    effect_id: int = 1,
+    fg_rgb: tuple[int, int, int] = (255, 0, 0),
+    bg_rgb: tuple[int, int, int] = (0, 0, 255),
+    sensitivity: int = 50,
+    brightness: int = 100
+) -> bytearray:
+    """
+    Build 13-byte sound reactive command for Symphony devices (0xA2, 0xA3, etc).
+
+    Args:
+        enable: True to enable device mic, False to disable
+        effect_id: Effect number (1-255, 255 = all colors)
+        fg_rgb: Foreground color tuple
+        bg_rgb: Background color tuple
+        sensitivity: Microphone sensitivity 0-100
+        brightness: Brightness percentage 0-100
+    """
+    raw_cmd = bytearray([
+        0x73,                           # Command
+        0x01 if enable else 0x00,       # Enable/disable
+        0x27,                           # Device mic mode (0x27)
+        effect_id,                      # Effect ID
+        fg_rgb[0], fg_rgb[1], fg_rgb[2],  # FG RGB
+        bg_rgb[0], bg_rgb[1], bg_rgb[2],  # BG RGB
+        sensitivity,                    # Sensitivity
+        brightness                      # Brightness
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0a)
 ```
 
-### 5. Handle Effect Selection in Light Entity
+### 5. Handle Effect Selection
 
-In [light.py](../custom_components/lednetwf_ble_2/light.py), modify `async_set_effect()` to handle sound reactive:
+In [light.py](../custom_components/lednetwf_ble_2/light.py):
 
 ```python
 async def async_set_effect(self, effect: str) -> None:
     """Set the effect."""
     if effect == "Sound Reactive":
         if self._device.has_builtin_mic:
-            cmd = build_sound_reactive_command(enable=True)
+            if self._device.mic_command_format == "symphony":
+                cmd = build_sound_reactive_symphony(
+                    enable=True,
+                    effect_id=1,
+                    sensitivity=50,
+                    brightness=self._device.brightness_percent
+                )
+            else:
+                cmd = build_sound_reactive_simple(enable=True)
             await self._device.send_command(cmd)
             self._device._effect = effect
             return
@@ -203,46 +321,38 @@ async def async_set_effect(self, effect: str) -> None:
 
 ### 6. Handle Exiting Sound Reactive Mode
 
-When user selects a different effect or sets a color, disable sound reactive first:
-
 ```python
 # In color/effect setting methods:
 if self._device._effect == "Sound Reactive" and self._device.has_builtin_mic:
-    # Disable sound reactive before changing mode
-    cmd = build_sound_reactive_command(enable=False)
+    if self._device.mic_command_format == "symphony":
+        cmd = build_sound_reactive_symphony(enable=False)
+    else:
+        cmd = build_sound_reactive_simple(enable=False)
     await self._device.send_command(cmd)
-```
-
-### 7. Parse State Response for Sound Reactive
-
-In device state parsing, detect mode 0x62:
-
-```python
-# In notification/state parsing:
-if mode_byte == 0x62:
-    self._effect = "Sound Reactive"
-    self._is_sound_reactive = True
 ```
 
 ---
 
 ## Testing Checklist
 
-- [ ] Device with product ID 0x08 shows "Sound Reactive" in effect list
-- [ ] Device with product ID 0x48 shows "Sound Reactive" in effect list
-- [ ] Selecting "Sound Reactive" enables microphone mode on device
+- [ ] Device 0x08 shows "Sound Reactive" and uses 5-byte command
+- [ ] Device 0x48 shows "Sound Reactive" and uses 5-byte command
+- [ ] Device 0xA3 shows "Sound Reactive" and uses 13-byte command
+- [ ] Device 0xA2/0xA6/0xA7/0xA9 work with 13-byte command
+- [ ] Device 0xA4 does NOT show "Sound Reactive" option
+- [ ] Selecting "Sound Reactive" enables microphone mode
 - [ ] LED responds to ambient sound when enabled
-- [ ] Selecting another effect disables sound reactive mode
-- [ ] Setting a color disables sound reactive mode
-- [ ] State correctly shows "Sound Reactive" when mode is active
+- [ ] Exiting sound reactive mode works correctly
 
 ---
 
 ## Java Source References
 
-| File | Method | Purpose |
-|------|--------|---------|
-| `tc/b.java` | `o(boolean)` | Command 0x73 - sound reactive enable/disable |
-| `BaseDeviceInfo.java` | `M0()` | Returns true if device supports music/mic |
-| `Ctrl_Mini_RGB_Mic_0x08.java` | `M0()` | Overrides to return true |
-| `Ctrl_Mini_RGBW_Mic_0x48.java` | `M0()` | Overrides to return true |
+| File | Method/Class | Purpose |
+|------|--------------|---------|
+| `tc/b.java` | `o(boolean)` | Simple 5-byte command (0x08, 0x48) |
+| `Protocol/z.java` | class | 13-byte Symphony command |
+| `MusicModeFragment.java` | K2() | Builds Symphony sound reactive command |
+| `MusicModeFragment.java` | P2() | Toggles app mic vs device mic |
+| `MusicModeFragmentWithoutMic.java` | - | Devices without built-in mic |
+| `BaseDeviceInfo.java` | `M0()` | Returns true if device supports music mode |

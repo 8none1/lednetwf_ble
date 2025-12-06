@@ -335,18 +335,109 @@ Command bytes: `[0xEA] [0x81]`
 
 Command bytes: `[0xE0] [0x0E] [0x01]`
 
-### Response Format (DeviceState2.java)
+### Response Formats - 0xEA 0x81 vs 0x81
 
-IOTBT state responses begin with magic header `{0xEA, 0x81}`:
+**CRITICAL**: IOTBT devices can return **two different response formats** depending on the query used. Do NOT simply strip 0xEA - it's part of a different response format!
+
+#### Detecting Response Type
+
+```python
+def detect_iotbt_response_type(data: bytes) -> str:
+    """Detect IOTBT response format from magic header."""
+    if len(data) >= 2 and data[0] == 0xEA and data[1] == 0x81:
+        return "DeviceState2"  # New format (fw >= 11)
+    elif len(data) >= 1 and data[0] == 0x81:
+        return "DeviceState"   # Legacy format (fw < 11)
+    else:
+        return "unknown"
+```
+
+#### DeviceState2 Format (0xEA 0x81 response)
+
+**Source**: `com/zengge/wifi/Device/DeviceState2.java`
+
+This format is returned when you send the `0xEA 0x81 0x8A 0x8B` query (firmware >= 11):
 
 | Byte | Field | Description |
 |------|-------|-------------|
-| 0 | 0xEA | Response magic byte 1 |
-| 1 | 0x81 | Response magic byte 2 |
-| 2 | ? | Reserved |
-| 3-4 | Address | Device address (big-endian, & 0xFFFF) |
-| 5 | Brightness | Current brightness (0-255) |
-| 6 | Power | 0x23 = ON, 0x24 = OFF |
+| 0 | **0xEA** | Magic byte 1 (Telink "user all" opcode) |
+| 1 | **0x81** | Magic byte 2 (state query marker) |
+| 2 | ? | Reserved/unknown |
+| 3-4 | Address | Device mesh address (big-endian, & 0x7FFF) |
+| 5 | Mode | Current mode/brightness |
+| 6 | Power | 0x23 = ON, others = OFF |
+
+**Parsing code from DeviceState2.java**:
+```java
+// Magic header check
+public static final byte[] MAGIC = {(byte)0xEA, (byte)0x81};
+public static boolean isDeviceState2(byte[] data) {
+    return Arrays.equals(MAGIC, new byte[]{data[0], data[1]});
+}
+
+// Constructor parses at DIFFERENT offsets than DeviceState
+public DeviceState2(byte[] bArr) {
+    // Address at bytes 3-4 (big-endian, masked)
+    setAddress(((bArr[3] << 8) & 0xFF00) | (bArr[4] & 0xFF)) & 0x7FFF);
+
+    // Power at byte 6 (NOT byte 1 like in standard 0x81)
+    setPowerOn(bArr[6] == 0x23);
+
+    // Mode at byte 5
+    setMode(bArr[5] & 0xFF);
+}
+```
+
+#### DeviceState Format (0x81 response)
+
+**Source**: `tc/b.java:c()` (standard response parser)
+
+This format is returned when you send the legacy `0x81 0x8A 0x8B [checksum]` query:
+
+| Byte | Field | Description |
+|------|-------|-------------|
+| 0 | **0x81** | Response identifier |
+| 1 | Power | 0x23 = ON, 0x24 = OFF |
+| 2 | Mode | Current mode type |
+| ... | ... | (see standard 0x81 response format above) |
+
+#### Implementation Recommendation
+
+```python
+def parse_iotbt_state_response(data: bytes) -> dict:
+    """Parse IOTBT state response, handling both formats."""
+    if len(data) < 2:
+        return None
+
+    # Check for DeviceState2 format (0xEA 0x81 magic header)
+    if data[0] == 0xEA and data[1] == 0x81:
+        # DeviceState2 format - different byte positions!
+        if len(data) < 7:
+            return None
+        return {
+            "format": "DeviceState2",
+            "address": ((data[3] << 8) | data[4]) & 0x7FFF,
+            "mode": data[5] & 0xFF,
+            "power_on": data[6] == 0x23,
+        }
+
+    # Standard 0x81 format
+    elif data[0] == 0x81:
+        return {
+            "format": "DeviceState",
+            "power_on": data[1] == 0x23,
+            "mode": data[2] if len(data) > 2 else 0,
+            # ... parse remaining fields as standard
+        }
+
+    return None
+```
+
+**Key Points**:
+1. **Do NOT strip 0xEA** - it identifies the response format
+2. **Byte offsets differ** between DeviceState and DeviceState2
+3. Use firmware version to choose query format (>=11 uses 0xEA 0x81)
+4. Check magic header to determine parsing strategy
 
 ### Status Response (from notification_handler)
 

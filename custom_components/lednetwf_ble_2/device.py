@@ -31,6 +31,7 @@ from .const import (
     convert_brightness_from_adv,
     convert_speed_from_adv,
     SYMPHONY_SCENE_EFFECTS,
+    SOUND_REACTIVE_MARKER,
 )
 from . import protocol
 
@@ -189,7 +190,9 @@ class LEDNetWFDevice:
     @property
     def effect_list(self) -> list[str]:
         """Return list of available effects."""
-        return get_effect_list(self.effect_type, self.has_bg_color, self.has_ic_config)
+        return get_effect_list(
+            self.effect_type, self.has_bg_color, self.has_ic_config, self.has_builtin_mic
+        )
 
     @property
     def has_rgb(self) -> bool:
@@ -261,6 +264,26 @@ class LEDNetWFDevice:
         Color order is stored in byte 4 upper nibble of state response.
         """
         return bool(self._capabilities.get("has_color_order"))
+
+    @property
+    def has_builtin_mic(self) -> bool:
+        """Return True if device has built-in microphone for sound reactive mode.
+
+        Devices with built-in mic (0x08, 0x48, 0xA2, 0xA3, etc.) support on-device audio processing.
+        Sound reactive mode is enabled via 0x73 command.
+        """
+        return bool(self._capabilities.get("has_builtin_mic"))
+
+    @property
+    def mic_command_format(self) -> str:
+        """Return the mic command format: 'simple' or 'symphony'.
+
+        - 'simple': 5-byte command for devices 0x08, 0x48
+        - 'symphony': 13-byte command for devices 0xA2, 0xA3, 0xA6, 0xA7, 0xA9
+
+        Source: protocol_docs/18_sound_reactive_music_mode.md
+        """
+        return self._capabilities.get("mic_cmd_format", "simple")
 
     @property
     def color_order(self) -> int | None:
@@ -471,7 +494,11 @@ class LEDNetWFDevice:
         _LOGGER.debug("Notification payload (%d bytes): %s", len(payload), payload_hex)
 
         # Parse based on first byte (or first two bytes for status+type responses)
-        if payload[0] == 0x81:
+        if len(payload) >= 2 and payload[0] == 0xEA and payload[1] == 0x81:
+            # DeviceState2 format (IOTBT devices with firmware >= 11)
+            # Magic header 0xEA 0x81, different byte positions than standard 0x81
+            self._parse_device_state2_response(payload)
+        elif payload[0] == 0x81:
             self._parse_state_response(payload)
         elif payload[0] == 0x63:
             self._parse_led_settings_response(payload)
@@ -557,6 +584,72 @@ class LEDNetWFDevice:
         except (UnicodeDecodeError, ValueError) as ex:
             _LOGGER.debug("Quoted hex extraction failed: %s", ex)
             return None
+
+    def _parse_device_state2_response(self, data: bytes) -> None:
+        """Parse DeviceState2 format (0xEA 0x81 magic header).
+
+        Used by IOTBT devices with firmware >= 11. Different byte positions
+        than standard 0x81 format.
+
+        Source: protocol_docs/17_device_configuration.md
+        Source: com/zengge/wifi/Device/DeviceState2.java
+
+        Format:
+        - Bytes 0-1: 0xEA 0x81 (magic header)
+        - Byte 2: Reserved/unknown
+        - Bytes 3-4: Device mesh address (big-endian, & 0x7FFF)
+        - Byte 5: Mode
+        - Byte 6: Power (0x23 = ON, others = OFF)
+        - Bytes 7+: Additional state data (RGB, brightness, etc.)
+        """
+        if len(data) < 7:
+            _LOGGER.debug("DeviceState2 response too short: %d bytes", len(data))
+            return
+
+        # Parse DeviceState2 format
+        address = ((data[3] << 8) | data[4]) & 0x7FFF
+        mode = data[5] & 0xFF
+        is_on = data[6] == 0x23
+
+        _LOGGER.debug(
+            "DeviceState2: address=0x%04X, mode=0x%02X, power=%s",
+            address, mode, "ON" if is_on else "OFF"
+        )
+
+        self._is_on = is_on
+
+        # Try to extract RGB from bytes 7-9 if available
+        if len(data) >= 10:
+            r, g, b = data[7], data[8], data[9]
+            if r > 0 or g > 0 or b > 0:
+                # Device returns RGB pre-scaled by brightness
+                h, s, v = protocol.rgb_to_hsv(r, g, b)
+                brightness_raw = round(v * 255 / 100)
+                if brightness_raw == 0 and (r > 0 or g > 0 or b > 0):
+                    brightness_raw = 1
+                self._brightness = brightness_raw
+
+                # Reconstruct pure RGB at full brightness
+                max_rgb = max(r, g, b)
+                if max_rgb > 0:
+                    scale = 255 / max_rgb
+                    pure_r = min(255, int(round(r * scale)))
+                    pure_g = min(255, int(round(g * scale)))
+                    pure_b = min(255, int(round(b * scale)))
+                    self._rgb = (pure_r, pure_g, pure_b)
+                else:
+                    self._rgb = (r, g, b)
+
+                _LOGGER.debug(
+                    "DeviceState2 RGB: device=(%d,%d,%d), pure=%s, brightness=%d",
+                    r, g, b, self._rgb, self._brightness
+                )
+
+        # Signal waiting coroutine if any
+        if self._pending_state_response:
+            self._pending_state_response.set()
+
+        self._notify_callbacks()
 
     def _parse_state_response(self, data: bytes) -> None:
         """Parse 0x81 state response.
@@ -750,6 +843,13 @@ class LEDNetWFDevice:
             _LOGGER.debug("Settled effect mode: effect=%s (id=%d), fg_rgb=%s, pure_rgb=%s, brightness=%d, speed=%d",
                           self._effect, effect_id, (r, g, b), self._rgb, self._brightness, self._effect_speed)
 
+        elif result["mode_type"] == 0x62 and self.has_builtin_mic:
+            # Sound reactive mode (built-in microphone)
+            # Device is listening to ambient audio and controlling LEDs autonomously
+            self._effect = "Sound Reactive"
+            self._color_temp_kelvin = None
+            _LOGGER.debug("Sound reactive mode detected (mode_type=0x62)")
+
         else:
             # Unknown mode - use raw values with same HSV reconstruction
             # For SIMPLE devices, DON'T clear effect state from unknown mode responses.
@@ -918,6 +1018,10 @@ class LEDNetWFDevice:
             _LOGGER.warning("Device %s does not support RGB", self._name)
             return False
 
+        # Exit sound reactive mode before setting color
+        if self._effect == "Sound Reactive" and self.has_builtin_mic:
+            await self.set_sound_reactive(enable=False)
+
         # Check if we're in a Settled Mode effect
         # If so, update FG color via 0x41 command with the current effect_id
         if self.is_in_settled_effect():
@@ -1017,6 +1121,10 @@ class LEDNetWFDevice:
             _LOGGER.warning("Device %s does not support color temperature", self._name)
             return False
 
+        # Exit sound reactive mode before setting color temp
+        if self._effect == "Sound Reactive" and self.has_builtin_mic:
+            await self.set_sound_reactive(enable=False)
+
         eff_type = self.effect_type
         kelvin = max(MIN_KELVIN, min(MAX_KELVIN, kelvin))
 
@@ -1065,11 +1173,21 @@ class LEDNetWFDevice:
             return False
 
         eff_type = self.effect_type
-        effect_id = get_effect_id(effect_name, eff_type, self.has_bg_color, self.has_ic_config)
+        effect_id = get_effect_id(
+            effect_name, eff_type, self.has_bg_color, self.has_ic_config, self.has_builtin_mic
+        )
 
         if effect_id is None:
             _LOGGER.warning("Unknown effect: %s", effect_name)
             return False
+
+        # Handle sound reactive mode specially (uses different command)
+        if effect_id == SOUND_REACTIVE_MARKER:
+            return await self.set_sound_reactive(enable=True)
+
+        # Exit sound reactive mode before switching to another effect
+        if self._effect == "Sound Reactive" and self.has_builtin_mic:
+            await self.set_sound_reactive(enable=False)
 
         if speed is None:
             speed = self._effect_speed if self._effect_speed > 0 else 50
@@ -1346,6 +1464,62 @@ class LEDNetWFDevice:
         if await self._send_command(packet):
             self._color_order = color_order
             _LOGGER.debug("Set color order to %d for %s", color_order, self._name)
+            return True
+        return False
+
+    async def set_sound_reactive(self, enable: bool) -> bool:
+        """Enable or disable sound reactive mode for devices with built-in microphone.
+
+        When enabled, the device listens to ambient sound and adjusts LED colors
+        autonomously based on audio input from its built-in microphone.
+
+        Args:
+            enable: True to enable sound reactive mode, False to disable
+
+        Returns:
+            True if command was sent successfully
+        """
+        if not self.has_builtin_mic:
+            _LOGGER.warning("Device %s does not have built-in microphone", self._name)
+            return False
+
+        # Build the appropriate command based on device type
+        if self.mic_command_format == "symphony":
+            # Symphony devices (0xA2, 0xA3, 0xA6, 0xA7, 0xA9) use 13-byte command
+            # with effect selection, colors, and sensitivity
+            # Get current colors or use defaults
+            fg_rgb = self._rgb if self._rgb else (255, 0, 0)  # Default red
+            bg_rgb = self._bg_rgb if self._bg_rgb else (0, 0, 255)  # Default blue
+            # Convert brightness from 0-255 to 0-100
+            brightness_pct = max(1, round(self._brightness * 100 / 255)) if self._brightness > 0 else 100
+
+            packet = protocol.build_sound_reactive_symphony(
+                enable=enable,
+                effect_id=1,  # Default to effect 1
+                fg_rgb=fg_rgb,
+                bg_rgb=bg_rgb,
+                sensitivity=50,  # Default 50% sensitivity
+                brightness=brightness_pct,
+            )
+            _LOGGER.debug(
+                "%s sound reactive mode (symphony) for %s: fg=%s, bg=%s, brightness=%d%%",
+                "Enabling" if enable else "Disabling", self._name,
+                fg_rgb, bg_rgb, brightness_pct
+            )
+        else:
+            # Simple devices (0x08, 0x48) use 5-byte command
+            packet = protocol.build_sound_reactive_simple(enable)
+            _LOGGER.debug(
+                "%s sound reactive mode (simple) for %s",
+                "Enabling" if enable else "Disabling", self._name
+            )
+
+        if await self._send_command(packet):
+            if enable:
+                self._effect = "Sound Reactive"
+            else:
+                self._effect = None
+            self._notify_callbacks()
             return True
         return False
 

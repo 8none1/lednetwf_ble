@@ -755,6 +755,95 @@ def build_color_order_command_simple(color_order: int) -> bytearray:
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
+def build_sound_reactive_simple(enable: bool) -> bytearray:
+    """
+    Build simple 5-byte sound reactive command for 0x08, 0x48 devices.
+
+    Only for devices with built-in microphones using the simple command format.
+    When enabled, the device listens to ambient sound via its built-in mic
+    and adjusts LED colors/patterns autonomously.
+
+    Source: tc/b.java method o(boolean) lines 1670-1681
+    Source: protocol_docs/18_sound_reactive_music_mode.md
+
+    Args:
+        enable: True to enable sound reactive mode, False to disable
+
+    Format: [0x73, 0x7A, 0x7B, state, checksum]
+        - 0x73: Command ID
+        - 0x7A, 0x7B: Fixed bytes
+        - state: 0xF0 = enable, 0x0F = disable
+        - checksum: Sum of bytes 0-3 & 0xFF
+    """
+    raw_cmd = bytearray([
+        0x73,                      # Command ID
+        0x7A,                      # Fixed
+        0x7B,                      # Fixed
+        0xF0 if enable else 0x0F,  # State: 0xF0=on, 0x0F=off
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+def build_sound_reactive_symphony(
+    enable: bool,
+    effect_id: int = 1,
+    fg_rgb: tuple[int, int, int] = (255, 0, 0),
+    bg_rgb: tuple[int, int, int] = (0, 0, 255),
+    sensitivity: int = 50,
+    brightness: int = 100,
+) -> bytearray:
+    """
+    Build 13-byte sound reactive command for Symphony devices (0xA2, 0xA3, etc).
+
+    For Symphony devices with built-in microphones. These devices support
+    effect selection, colors, and sensitivity parameters.
+
+    Source: com/zengge/wifi/COMM/Protocol/z.java
+    Source: MusicModeFragment.java method K2()
+    Source: protocol_docs/18_sound_reactive_music_mode.md
+
+    Args:
+        enable: True to enable device mic, False to disable
+        effect_id: Effect number (1-255, 255 = all colors mode)
+        fg_rgb: Foreground color tuple (0-255)
+        bg_rgb: Background color tuple (0-255)
+        sensitivity: Microphone sensitivity 0-100
+        brightness: Brightness percentage 0-100
+
+    Format: [0x73, enable, mode, effect_id, FG_R, FG_G, FG_B, BG_R, BG_G, BG_B, sensitivity, brightness, checksum]
+        - Byte 0: 0x73 (Command ID)
+        - Byte 1: 0x01 = enable, 0x00 = disable
+        - Byte 2: 0x27 = device mic mode, 0x26 = app mic mode (we use device mic)
+        - Byte 3: effect_id (1-255)
+        - Bytes 4-6: Foreground RGB
+        - Bytes 7-9: Background RGB
+        - Byte 10: Sensitivity (0-100)
+        - Byte 11: Brightness (0-100)
+        - Byte 12: Checksum
+    """
+    sensitivity = max(0, min(100, sensitivity))
+    brightness = max(0, min(100, brightness))
+    effect_id = max(1, min(255, effect_id))
+
+    raw_cmd = bytearray([
+        0x73,                           # Command ID
+        0x01 if enable else 0x00,       # Enable/disable
+        0x27,                           # Device mic mode (0x27)
+        effect_id & 0xFF,               # Effect ID
+        fg_rgb[0] & 0xFF,               # FG Red
+        fg_rgb[1] & 0xFF,               # FG Green
+        fg_rgb[2] & 0xFF,               # FG Blue
+        bg_rgb[0] & 0xFF,               # BG Red
+        bg_rgb[1] & 0xFF,               # BG Green
+        bg_rgb[2] & 0xFF,               # BG Blue
+        sensitivity & 0xFF,             # Sensitivity
+        brightness & 0xFF,              # Brightness
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
 # =============================================================================
 # RESPONSE PARSING
 # =============================================================================

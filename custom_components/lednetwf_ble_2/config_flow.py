@@ -179,7 +179,7 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # User wants to skip testing and just add
         if not user_input.get("test_device"):
-            return await self.async_step_options()
+            return self._create_entry({})
 
         # User wants to test - flash the device and probe if needed
         # Use setup_mode=True for single connection attempt (no retries)
@@ -208,12 +208,30 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._discovery_info["probed_capabilities"] = probed_caps
                     _LOGGER.info("Probed capabilities: %s", probed_caps)
 
-                # Flash the device 3 times to confirm it's the right one
-                for _ in range(3):
-                    await device.turn_on()
-                    await asyncio.sleep(0.5)
-                    await device.turn_off()
-                    await asyncio.sleep(0.5)
+                # Test pattern based on device capabilities
+                await device.turn_on()
+                await asyncio.sleep(0.3)
+
+                if device.has_rgb:
+                    # RGB devices: Show R-G-B test pattern at full brightness
+                    # Easily distinguishable from effects and confirms color control
+                    for color in [(255, 0, 0), (0, 255, 0), (0, 0, 255)]:
+                        await device.set_rgb_color(color, brightness=255)
+                        await asyncio.sleep(0.7)
+                elif device.has_color_temp:
+                    # CCT devices: Sweep from warm to cool
+                    for kelvin in [2700, 4600, 6500]:
+                        await device.set_color_temp(kelvin, brightness=255)
+                        await asyncio.sleep(0.7)
+                else:
+                    # Dimmer-only: Just flash on/off
+                    for _ in range(3):
+                        await asyncio.sleep(0.4)
+                        await device.turn_off()
+                        await asyncio.sleep(0.3)
+                        await device.turn_on()
+
+                await device.turn_off()
 
                 # Query LED settings if device supports it
                 caps = device.capabilities  # Use device's capabilities (may be probed)
@@ -274,8 +292,8 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 description_placeholders={"name": self._discovery_info["name"]},
             )
 
-        # Device flashed successfully - proceed to options
-        return await self.async_step_options()
+        # Device flashed successfully - create entry with defaults
+        return self._create_entry({})
 
     async def async_step_options(
         self, user_input: dict[str, Any] | None = None
@@ -376,6 +394,11 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if "probed_capabilities" in self._discovery_info:
             data["probed_capabilities"] = self._discovery_info["probed_capabilities"]
 
+        # Get queried LED settings (from device test step) to use as defaults
+        queried = self._discovery_info.get("queried_led_settings", {})
+        queried_color_order = self._discovery_info.get("queried_color_order")
+        caps = get_device_capabilities(self._discovery_info.get("product_id"))
+
         # Process options
         processed_options = {
             CONF_DISCONNECT_DELAY: options.get(
@@ -383,22 +406,36 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         }
 
+        # Use user-provided options first, then queried values, then defaults
         if CONF_LED_COUNT in options:
             processed_options[CONF_LED_COUNT] = int(options[CONF_LED_COUNT])
+        elif queried.get("led_count"):
+            processed_options[CONF_LED_COUNT] = queried["led_count"]
+
         if CONF_SEGMENTS in options:
             processed_options[CONF_SEGMENTS] = int(options[CONF_SEGMENTS])
+        elif queried.get("segments"):
+            processed_options[CONF_SEGMENTS] = queried["segments"]
+
         if CONF_LED_TYPE in options:
             processed_options[CONF_LED_TYPE] = LedType[options[CONF_LED_TYPE]].value
+        elif queried.get("ic_type") is not None:
+            processed_options[CONF_LED_TYPE] = queried["ic_type"]
+
         if CONF_COLOR_ORDER in options:
             color_order_name = options[CONF_COLOR_ORDER]
             # Check if it's a SimpleColorOrder (for SIMPLE devices) or ColorOrder (for addressable)
-            caps = get_device_capabilities(self._discovery_info.get("product_id"))
             if caps.get("has_color_order") and not caps.get("has_ic_config"):
                 # SIMPLE device - use SimpleColorOrder
                 processed_options[CONF_COLOR_ORDER] = SimpleColorOrder[color_order_name].value
             else:
                 # Addressable/Symphony device - use ColorOrder
                 processed_options[CONF_COLOR_ORDER] = ColorOrder[color_order_name].value
+        elif queried.get("color_order") is not None:
+            processed_options[CONF_COLOR_ORDER] = queried["color_order"]
+        elif queried_color_order is not None:
+            # For SIMPLE devices, color_order comes from state query
+            processed_options[CONF_COLOR_ORDER] = queried_color_order
 
         return self.async_create_entry(
             title=self._discovery_info["name"],

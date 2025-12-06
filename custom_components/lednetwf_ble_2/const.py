@@ -384,10 +384,10 @@ PRODUCT_CAPABILITIES: Final = {
     37:  {"name": "Ctrl_RGBCW_Both", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SIMPLE},
     38:  {"name": "Ctrl_Mini_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
     39:  {"name": "Ctrl_Mini_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
-    72:  {"name": "Ctrl_Mini_RGBW_Mic", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
+    72:  {"name": "Ctrl_Mini_RGBW_Mic", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True, "mic_cmd_format": "simple"},
 
     # Controllers with RGB only
-    8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True},
+    8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_builtin_mic": True, "mic_cmd_format": "simple"},
     16:  {"name": "ChristmasLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
     51:  {"name": "Ctrl_Mini_RGB", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_color_order": True},
 
@@ -439,13 +439,14 @@ PRODUCT_CAPABILITIES: Final = {
 
     # Symphony controllers - addressable RGB with effects
     # Source: protocol_docs/14_symphony_background_colors.md - effects 5-18 support FG+BG colors via 0x41 command
+    # Note: has_builtin_mic based on Java source - devices using MusicModeFragment have mic, MusicModeFragmentWithoutMic don't
     161: {"name": "Ctrl_RGB_Symphony", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
-    162: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
-    163: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
-    164: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
-    166: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
-    167: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
-    169: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},
+    162: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True, "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+    163: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True, "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+    164: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},  # Uses phone mic, no built-in
+    166: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True, "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+    167: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True, "has_builtin_mic": True, "mic_cmd_format": "symphony"},
+    169: {"name": "Ctrl_RGB_Symphony_new", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True, "has_builtin_mic": True, "mic_cmd_format": "symphony"},
 
     # Symphony Line strips
     170: {"name": "Symphony_Line", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_ic_config": True, "has_bg_color": True},  # 0xAA
@@ -554,19 +555,27 @@ def needs_capability_probing(product_id: int | None) -> bool:
     return PRODUCT_CAPABILITIES[product_id].get("is_stub", False)
 
 
-def get_effect_list(effect_type: EffectType, has_bg_color: bool = False, has_ic_config: bool = False) -> list[str]:
+def get_effect_list(
+    effect_type: EffectType,
+    has_bg_color: bool = False,
+    has_ic_config: bool = False,
+    has_builtin_mic: bool = False,
+) -> list[str]:
     """Get list of effect names for the given effect type.
 
     Args:
         effect_type: The effect command type for the device
         has_bg_color: If True, include static effects that support background color
         has_ic_config: If True, device is a Symphony controller (0xA1-0xAD), not 0x56/0x80
+        has_builtin_mic: If True, include "Sound Reactive" option for devices with built-in mic
 
     Returns:
         List of effect names
     """
+    effects = []
+
     if effect_type == EffectType.SIMPLE:
-        return list(SIMPLE_EFFECTS.values())
+        effects = list(SIMPLE_EFFECTS.values())
     elif effect_type == EffectType.SYMPHONY:
         if has_ic_config:
             # True Symphony devices (0xA1-0xAD):
@@ -574,24 +583,37 @@ def get_effect_list(effect_type: EffectType, has_bg_color: bool = False, has_ic_
             # - Function Mode effects (1-100) via 0x42 command
             effects = list(SYMPHONY_SETTLED_EFFECTS.values())
             effects.extend(list(SYMPHONY_EFFECTS.values()))
-            return effects
         elif has_bg_color:
             # 0x56/0x80 devices: Static effects + Regular effects + Sound reactive
             effects = list(STATIC_EFFECTS_WITH_BG.values())
             effects.extend(list(STRIP_EFFECTS.values()))
             effects.extend(list(SOUND_REACTIVE_EFFECTS.values()))
             effects.append("Cycle Modes")
-            return effects
         else:
             # Fallback for unknown Symphony-type devices: numbered effects
-            return list(SYMPHONY_EFFECTS.values())
+            effects = list(SYMPHONY_EFFECTS.values())
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         # 0x53 Ring Light effects (113 effects + Cycle All)
-        return list(ADDRESSABLE_0x53_EFFECTS.values())
-    return []
+        effects = list(ADDRESSABLE_0x53_EFFECTS.values())
+
+    # Add sound reactive option for devices with built-in microphone
+    if has_builtin_mic:
+        effects.append("Sound Reactive")
+
+    return effects
 
 
-def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool = False, has_ic_config: bool = False) -> int | None:
+# Special marker for sound reactive mode (not a real effect ID)
+SOUND_REACTIVE_MARKER: Final = 0xFFFF
+
+
+def get_effect_id(
+    effect_name: str,
+    effect_type: EffectType,
+    has_bg_color: bool = False,
+    has_ic_config: bool = False,
+    has_builtin_mic: bool = False,
+) -> int | None:
     """Get effect ID from name.
 
     Args:
@@ -599,10 +621,15 @@ def get_effect_id(effect_name: str, effect_type: EffectType, has_bg_color: bool 
         effect_type: The effect command type for the device
         has_bg_color: If True, check static effects that support background color
         has_ic_config: If True, device is a Symphony controller (0xA1-0xAD), not 0x56/0x80
+        has_builtin_mic: If True, recognize "Sound Reactive" effect
 
     Returns:
-        Effect ID or None if not found
+        Effect ID or None if not found.
+        Returns SOUND_REACTIVE_MARKER (0xFFFF) for "Sound Reactive" effect.
     """
+    # Check for sound reactive mode first (special handling, not a real effect ID)
+    if effect_name == "Sound Reactive" and has_builtin_mic:
+        return SOUND_REACTIVE_MARKER
     if effect_type == EffectType.SIMPLE:
         for eid, name in SIMPLE_EFFECTS.items():
             if name == effect_name:

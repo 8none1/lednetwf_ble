@@ -20,8 +20,6 @@
 | 08 | [08_state_query_response_parsing.md](08_state_query_response_parsing.md) | State query format, response parsing |
 | 09 | [09_python_guide.md](09_python_guide.md) | Complete Python implementation example |
 | 10 | [10_device_specific.md](10_device_specific.md) | Device-specific quirks, product ID reference |
-| 13 | [13_led_curtain_lights.md](13_led_curtain_lights.md) | LED Curtain Light protocol (0xAC, 0xAD) |
-| 14 | [14_symphony_background_colors.md](14_symphony_background_colors.md) | Symphony FG/BG color effects (0x41 cmd) |
 | 15 | [15_static_effects_with_bg_color.md](15_static_effects_with_bg_color.md) | **Static effects with FG+BG** for 0x56/Symphony |
 | 16 | [16_query_formats_0x63_vs_0x44.md](16_query_formats_0x63_vs_0x44.md) | **Query commands** 0x63 (IC settings) vs 0x44 (Settled Mode) |
 | 17 | [17_device_configuration.md](17_device_configuration.md) | **Query commands by device**, IOTBT protocol, color order & LED count |

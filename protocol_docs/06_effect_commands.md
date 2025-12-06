@@ -434,13 +434,13 @@ int speed = Math.round(g2.d.f(100.0f, 0.0f, 31.0f, 1.0f, seekBarValue));
 
 ### Symphony Effect Lists
 
-**Scene Effects (IDs 1-44)**: See `12_symphony_effect_names.md` for complete list
+**Scene Effects (IDs 1-44)**: See [07_effect_names.md](07_effect_names.md) for complete list
 - Effect 1: "Change gradually"
 - Effect 5: "Running, 1point from start to end"
 - Effect 29: "7 colors run alternately, 1 point from start to end"
 - ...44 total scene effects
 
-**Build Effects (IDs 1-300)**: Also in `12_symphony_effect_names.md`
+**Build Effects (IDs 1-300)**: See [07_effect_names.md](07_effect_names.md)
 - Displayed as IDs 100-399 in UI (internal ID + 99)
 - Effect 1: "Circulate all modes"
 - Effect 2: "7 colors change gradually"
@@ -948,119 +948,15 @@ Key files for effect command implementation:
 
 ---
 
-## Appendix A: Effects with Foreground/Background Colors
+## Related Documentation
 
-### 0x41 Command - Settled Mode Effects (Symphony)
-
-For Symphony devices (0xA2-0xA9) that support FG/BG colors with animations.
-
-**Format (13 bytes):**
-
-| Byte | Field | Value |
-|------|-------|-------|
-| 0 | Command | 0x41 |
-| 1 | Effect Mode | 1-10 |
-| 2-4 | FG R, G, B | 0-255 each |
-| 5-7 | BG R, G, B | 0-255 each (0,0,0 if disabled) |
-| 8 | Speed | 0-100 (direct, NOT inverted) |
-| 9 | Direction | 0=forward, 1=reverse |
-| 10 | Reserved | 0x00 |
-| 11 | Persist | 0xF0 |
-| 12 | Checksum | Sum of bytes 0-11 |
-
-```python
-def build_effect_0x41(mode: int, fg: tuple, bg: tuple, speed: int, forward: bool) -> bytes:
-    cmd = bytearray([0x41, mode & 0xFF,
-                     fg[0] & 0xFF, fg[1] & 0xFF, fg[2] & 0xFF,
-                     bg[0] & 0xFF, bg[1] & 0xFF, bg[2] & 0xFF,
-                     speed & 0xFF, 0 if forward else 1, 0x00, 0xF0])
-    cmd.append(sum(cmd) & 0xFF)
-    return bytes(cmd)
-```
-
-### Effect FG/BG Support by ID
-
-| Effect ID | Name | FG | BG |
-|-----------|------|----|----|
-| 1 | Solid color | Yes | No |
-| 2-4 | Animations | Yes | No* |
-| **5-18** | **Running/overlay patterns** | **Yes** | **Yes** |
-| 19-26 | Two-color alternating | Yes | Yes (as 2nd) |
-| 27-28 | Background only | No | Yes |
-| 29-44 | Preset patterns | No | No |
-
-*Effects 1, 3, 4 use "start/end color" which is similar but handled differently.
+- **FG/BG Color Effects (0x41 command)**: See [15_static_effects_with_bg_color.md](15_static_effects_with_bg_color.md)
+- **LED Settings Queries (0x63, 0x44)**: See [16_query_formats_0x63_vs_0x44.md](16_query_formats_0x63_vs_0x44.md) and [17_device_configuration.md](17_device_configuration.md)
+- **IC Types and Color Order**: See [17_device_configuration.md](17_device_configuration.md)
 
 ---
 
-## Appendix B: LED Settings Queries
-
-### Original Format (0x63) - Most Symphony Devices
-
-**Query:** `[0x63, 0x12, 0x21, 0xF0, checksum]`
-
-**Response (12 bytes):**
-
-| Byte | Field | Notes |
-|------|-------|-------|
-| 0 | Header | 0x63 |
-| 1-2 | LED Count | Big-endian |
-| 3 | IC Type | See IC table |
-| 4 | Color Order | See order table |
-| 5-7 | Timing Params | D, E, F |
-| 8-9 | Frequency | Refresh rate Hz |
-| 10 | Reserved | |
-| 11 | Checksum | |
-
-**Set Command (0x62, 13 bytes):**
-`[0x62, count_lo, count_hi, ic_type, color_order, d, e, f, freq_lo, freq_hi, unknown, 0xF0, chk]`
-
-### A3+ Format (0x44) - Newer Devices
-
-**Query:** `[0x44, 0x4A, 0x4B, 0xF0, checksum]`
-
-**Response (10 bytes):**
-
-| Byte | Field |
-|------|-------|
-| 0 | Has 4th channel (RGBW) |
-| 1-2 | LED Count (swapped) |
-| 3-4 | Segments (swapped) |
-| 5 | IC Type |
-| 6 | Color Order |
-| 7 | Music LED Count |
-| 8 | Music Segments |
-
-### IC Chip Types
-
-| Code | Chip | Notes |
-|------|------|-------|
-| 1 | UCS1903 | Slower timing |
-| 2 | SM16703 | Fast timing |
-| 3 | WS2811 | 12V external IC |
-| 4 | WS2812B | Most common 5V |
-| 5 | SK6812 | Compatible with WS2812B |
-| 6 | INK1003 | Alternative |
-| 7 | WS2801 | SPI-based |
-| 8 | WS2815 | 12V backup data |
-| 9 | APA102 | SPI high speed |
-| 10 | TM1914 | Alternative |
-| 11 | UCS2904B | Higher current |
-
-### Color Order Codes
-
-| Code | Order |
-|------|-------|
-| 0 | RGB |
-| 1 | RBG |
-| 2 | GRB |
-| 3 | GBR |
-| 4 | BRG |
-| 5 | BGR |
-
----
-
-## Appendix C: Value Ranges Summary
+## Appendix: Value Ranges Summary
 
 ### Brightness
 

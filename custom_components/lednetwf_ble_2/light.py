@@ -181,6 +181,7 @@ class LEDNetWFLight(LightEntity):
         # Capabilities
         attrs["has_rgb"] = self._device.has_rgb
         attrs["has_color_temp"] = self._device.has_color_temp
+        attrs["has_builtin_mic"] = self._device.has_builtin_mic
 
         return attrs
 
