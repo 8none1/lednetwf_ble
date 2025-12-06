@@ -16,6 +16,7 @@ from homeassistant.const import CONF_MAC, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.selector import NumberSelector, NumberSelectorConfig, NumberSelectorMode
 
 from bleak_retry_connector import BleakNotFoundError
 
@@ -24,12 +25,15 @@ from .const import (
     CONF_PRODUCT_ID,
     CONF_DISCONNECT_DELAY,
     CONF_LED_COUNT,
+    CONF_SEGMENTS,
     CONF_LED_TYPE,
     CONF_COLOR_ORDER,
     DEFAULT_DISCONNECT_DELAY,
     DEFAULT_LED_COUNT,
+    DEFAULT_SEGMENTS,
     LedType,
     ColorOrder,
+    SimpleColorOrder,
     is_supported_device,
     get_device_capabilities,
     needs_capability_probing,
@@ -207,9 +211,30 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # Query LED settings if device supports it
             caps = device.capabilities  # Use device's capabilities (may be probed)
+            _LOGGER.debug(
+                "Device capabilities after flash test: has_ic_config=%s, has_color_order=%s, effect_type=%s",
+                caps.get("has_ic_config"), caps.get("has_color_order"), caps.get("effect_type")
+            )
             if caps.get("has_ic_config"):
-                await device.query_led_settings()
-                await asyncio.sleep(0.5)
+                led_settings = await device.query_led_settings_and_wait(timeout=3.0)
+                if led_settings:
+                    _LOGGER.info(
+                        "Queried LED settings: count=%s, type=%s, order=%s",
+                        led_settings.get("led_count"),
+                        led_settings.get("ic_type"),
+                        led_settings.get("color_order"),
+                    )
+                    # Store for use in options step
+                    self._discovery_info["queried_led_settings"] = led_settings
+
+            # For SIMPLE devices with color order support, explicitly query state
+            # to get current color order (can't rely on turn_on/off notifications)
+            if caps.get("has_color_order"):
+                _LOGGER.info("Querying state for color order...")
+                await device.query_state_and_wait(timeout=3.0)
+                if device.color_order:
+                    _LOGGER.info("Queried color order: %d", device.color_order)
+                    self._discovery_info["queried_color_order"] = device.color_order
 
             await device.stop()
 
@@ -243,6 +268,9 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         caps = get_device_capabilities(self._discovery_info.get("product_id"))
 
+        # Get queried LED settings if available (from device test step)
+        queried = self._discovery_info.get("queried_led_settings", {})
+
         # Build options schema based on device capabilities
         schema_dict: dict[vol.Marker, Any] = {
             vol.Optional(
@@ -253,22 +281,69 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Only show LED config for addressable strips
         if caps.get("has_ic_config"):
+            # Use queried values as defaults if available, otherwise use hardcoded defaults
+            default_led_count = queried.get("led_count") or DEFAULT_LED_COUNT
+            default_segments = queried.get("segments") or DEFAULT_SEGMENTS
+
+            # Map IC type value to enum name
+            queried_ic_type = queried.get("ic_type")
+            default_led_type = LedType.WS2812B.name
+            if queried_ic_type is not None:
+                for lt in LedType:
+                    if lt.value == queried_ic_type:
+                        default_led_type = lt.name
+                        break
+
+            # Map color order value to enum name
+            queried_color_order = queried.get("color_order")
+            default_color_order = ColorOrder.GRB.name
+            if queried_color_order is not None:
+                for co in ColorOrder:
+                    if co.value == queried_color_order:
+                        default_color_order = co.name
+                        break
+
             schema_dict.update({
-                vol.Optional(CONF_LED_COUNT, default=DEFAULT_LED_COUNT): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=1000)
+                vol.Optional(CONF_LED_COUNT, default=default_led_count): NumberSelector(
+                    NumberSelectorConfig(min=1, max=1000, mode=NumberSelectorMode.BOX)
                 ),
-                vol.Optional(CONF_LED_TYPE, default=LedType.WS2812B.name): vol.In(
+                vol.Optional(CONF_SEGMENTS, default=default_segments): NumberSelector(
+                    NumberSelectorConfig(min=1, max=100, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_LED_TYPE, default=default_led_type): vol.In(
                     [t.name for t in LedType]
                 ),
-                vol.Optional(CONF_COLOR_ORDER, default=ColorOrder.GRB.name): vol.In(
+                vol.Optional(CONF_COLOR_ORDER, default=default_color_order): vol.In(
                     [o.name for o in ColorOrder]
                 ),
             })
 
+        # Color order for SIMPLE devices (0x33, etc.) - only RGB, GRB, BRG
+        elif caps.get("has_color_order"):
+            queried_color_order = self._discovery_info.get("queried_color_order")
+            default_color_order = SimpleColorOrder.GRB.name
+            if queried_color_order is not None:
+                for co in SimpleColorOrder:
+                    if co.value == queried_color_order:
+                        default_color_order = co.name
+                        break
+
+            schema_dict.update({
+                vol.Optional(CONF_COLOR_ORDER, default=default_color_order): vol.In(
+                    [o.name for o in SimpleColorOrder]
+                ),
+            })
+
+        # Calculate total LEDs for display in description
+        placeholders = {"name": self._discovery_info["name"]}
+        if caps.get("has_ic_config"):
+            total_leds = default_led_count * default_segments
+            placeholders["total_leds"] = str(total_leds)
+
         return self.async_show_form(
             step_id="options",
             data_schema=vol.Schema(schema_dict),
-            description_placeholders={"name": self._discovery_info["name"]},
+            description_placeholders=placeholders,
         )
 
     def _create_entry(self, options: dict[str, Any]) -> FlowResult:
@@ -291,11 +366,21 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
 
         if CONF_LED_COUNT in options:
-            processed_options[CONF_LED_COUNT] = options[CONF_LED_COUNT]
+            processed_options[CONF_LED_COUNT] = int(options[CONF_LED_COUNT])
+        if CONF_SEGMENTS in options:
+            processed_options[CONF_SEGMENTS] = int(options[CONF_SEGMENTS])
         if CONF_LED_TYPE in options:
             processed_options[CONF_LED_TYPE] = LedType[options[CONF_LED_TYPE]].value
         if CONF_COLOR_ORDER in options:
-            processed_options[CONF_COLOR_ORDER] = ColorOrder[options[CONF_COLOR_ORDER]].value
+            color_order_name = options[CONF_COLOR_ORDER]
+            # Check if it's a SimpleColorOrder (for SIMPLE devices) or ColorOrder (for addressable)
+            caps = get_device_capabilities(self._discovery_info.get("product_id"))
+            if caps.get("has_color_order") and not caps.get("has_ic_config"):
+                # SIMPLE device - use SimpleColorOrder
+                processed_options[CONF_COLOR_ORDER] = SimpleColorOrder[color_order_name].value
+            else:
+                # Addressable/Symphony device - use ColorOrder
+                processed_options[CONF_COLOR_ORDER] = ColorOrder[color_order_name].value
 
         return self.async_create_entry(
             title=self._discovery_info["name"],
@@ -338,6 +423,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         }
 
         if caps.get("has_ic_config"):
+            current_led_count = options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+            current_segments = options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
             current_led_type = options.get(CONF_LED_TYPE, LedType.WS2812B.value)
             current_color_order = options.get(CONF_COLOR_ORDER, ColorOrder.GRB.value)
 
@@ -352,10 +439,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
 
             schema_dict.update({
-                vol.Optional(
-                    CONF_LED_COUNT,
-                    default=options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
+                vol.Optional(CONF_LED_COUNT, default=current_led_count): NumberSelector(
+                    NumberSelectorConfig(min=1, max=1000, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_SEGMENTS, default=current_segments): NumberSelector(
+                    NumberSelectorConfig(min=1, max=100, mode=NumberSelectorMode.BOX)
+                ),
                 vol.Optional(CONF_LED_TYPE, default=led_type_name): vol.In(
                     [t.name for t in LedType]
                 ),
@@ -364,13 +453,39 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
             })
 
+        # Color order for SIMPLE devices (0x33, etc.)
+        elif caps.get("has_color_order"):
+            current_color_order = options.get(CONF_COLOR_ORDER, SimpleColorOrder.GRB.value)
+
+            # Convert value back to name for display
+            color_order_name = next(
+                (o.name for o in SimpleColorOrder if o.value == current_color_order),
+                SimpleColorOrder.GRB.name,
+            )
+
+            schema_dict.update({
+                vol.Optional(CONF_COLOR_ORDER, default=color_order_name): vol.In(
+                    [o.name for o in SimpleColorOrder]
+                ),
+            })
+
+        # Calculate total LEDs for display in description
+        placeholders = {}
+        if caps.get("has_ic_config"):
+            total_leds = current_led_count * current_segments
+            placeholders["total_leds"] = str(total_leds)
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(schema_dict),
+            description_placeholders=placeholders if placeholders else None,
         )
 
     def _save_options(self, user_input: dict[str, Any]) -> FlowResult:
         """Save options."""
+        product_id = self._config_entry.data.get(CONF_PRODUCT_ID)
+        caps = get_device_capabilities(product_id)
+
         new_options = {
             CONF_DISCONNECT_DELAY: user_input.get(
                 CONF_DISCONNECT_DELAY, DEFAULT_DISCONNECT_DELAY
@@ -378,10 +493,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         }
 
         if CONF_LED_COUNT in user_input:
-            new_options[CONF_LED_COUNT] = user_input[CONF_LED_COUNT]
+            new_options[CONF_LED_COUNT] = int(user_input[CONF_LED_COUNT])
+        if CONF_SEGMENTS in user_input:
+            new_options[CONF_SEGMENTS] = int(user_input[CONF_SEGMENTS])
         if CONF_LED_TYPE in user_input:
             new_options[CONF_LED_TYPE] = LedType[user_input[CONF_LED_TYPE]].value
         if CONF_COLOR_ORDER in user_input:
-            new_options[CONF_COLOR_ORDER] = ColorOrder[user_input[CONF_COLOR_ORDER]].value
+            color_order_name = user_input[CONF_COLOR_ORDER]
+            # Check if it's a SimpleColorOrder (for SIMPLE devices) or ColorOrder (for addressable)
+            if caps.get("has_color_order") and not caps.get("has_ic_config"):
+                # SIMPLE device - use SimpleColorOrder
+                new_options[CONF_COLOR_ORDER] = SimpleColorOrder[color_order_name].value
+            else:
+                # Addressable/Symphony device - use ColorOrder
+                new_options[CONF_COLOR_ORDER] = ColorOrder[color_order_name].value
 
         return self.async_create_entry(title="", data=new_options)

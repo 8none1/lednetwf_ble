@@ -12,12 +12,14 @@ CONF_MODEL: Final = "model"
 CONF_PRODUCT_ID: Final = "product_id"
 CONF_DISCONNECT_DELAY: Final = "disconnect_delay"
 CONF_LED_COUNT: Final = "led_count"
+CONF_SEGMENTS: Final = "segments"
 CONF_LED_TYPE: Final = "led_type"
 CONF_COLOR_ORDER: Final = "color_order"
 
 # Default values
 DEFAULT_DISCONNECT_DELAY: Final = 30  # seconds
 DEFAULT_LED_COUNT: Final = 60
+DEFAULT_SEGMENTS: Final = 1
 DEFAULT_EFFECT_SPEED: Final = 50  # 0-100
 
 # BLE UUIDs
@@ -40,28 +42,44 @@ MAX_KELVIN: Final = 6500
 
 
 class LedType(IntEnum):
-    """LED chip types for addressable strips."""
-    UCS1903 = 1
-    SM16703 = 2
-    WS2811 = 3
-    WS2812B = 4
-    SK6812 = 5
-    INK1003 = 6
-    WS2801 = 7
-    WS2815 = 8
-    APA102 = 9
-    TM1914 = 10
+    """LED chip types for addressable strips.
+
+    Values must match device protocol (0x63 IC settings response byte 5).
+    Confirmed via device testing and protocol documentation.
+    """
+    SM16703 = 0
+    WS2812B = 1   # Confirmed: device returns 1 for WS2812B
+    SM16716 = 2
+    SK6812 = 3
+    INK1003 = 4
+    WS2811 = 5
+    WS2801 = 6
+    WS2815 = 7
+    SK6812_RGBW = 8
+    TM1914 = 9
+    UCS1903 = 10
     UCS2904B = 11
 
 
 class ColorOrder(IntEnum):
-    """RGB color ordering for LED strips."""
+    """RGB color ordering for LED strips (addressable/Symphony devices)."""
     RGB = 0
     RBG = 1
     GRB = 2
     GBR = 3
     BRG = 4
     BGR = 5
+
+
+class SimpleColorOrder(IntEnum):
+    """RGB color ordering for SIMPLE devices (0x33, etc.).
+
+    SIMPLE devices use different values than addressable strips.
+    Source: protocol_docs/17_color_order_settings.md
+    """
+    RGB = 1
+    GRB = 2
+    BRG = 3
 
 
 class EffectType(IntEnum):
@@ -371,7 +389,7 @@ PRODUCT_CAPABILITIES: Final = {
     # Controllers with RGB only
     8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True},
     16:  {"name": "ChristmasLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
-    51:  {"name": "Ctrl_Mini_RGB", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
+    51:  {"name": "Ctrl_Mini_RGB", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_color_order": True},
 
     # CCT only - no RGB
     9:   {"name": "Ctrl_Ceiling_CCT", "has_rgb": False, "has_ww": True, "has_cw": True, "effect_type": EffectType.NONE},

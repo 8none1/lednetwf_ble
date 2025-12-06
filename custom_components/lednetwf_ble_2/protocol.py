@@ -721,6 +721,30 @@ def build_led_settings_query_a3() -> bytearray:
     return wrap_command(raw_cmd, cmd_family=0x0a)
 
 
+def build_color_order_command_simple(color_order: int) -> bytearray:
+    """
+    Build color order command for SIMPLE devices (0x33, etc.).
+
+    This is a simplified 0x62 command that only sets color order.
+    For SIMPLE devices, ic_type should be 0.
+
+    Source: protocol_docs/17_color_order_settings.md
+
+    Args:
+        color_order: 1=RGB, 2=GRB, 3=BRG
+
+    Format: [0x62, ic_type, color_order, 0x0F, checksum]
+    """
+    raw_cmd = bytearray([
+        0x62,
+        0x00,                      # IC type (0 for SIMPLE devices)
+        color_order & 0xFF,
+        0x0F,                      # Terminator
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+
+
 # =============================================================================
 # RESPONSE PARSING
 # =============================================================================
@@ -779,7 +803,13 @@ def parse_state_response(data: bytes) -> dict | None:
     # Byte 4: Sub-mode
     # In static mode: 0xF0/0x01/0x0B = RGB, 0x0F = white
     # In effect mode: effect ID
+    # For SIMPLE devices with has_color_order: upper nibble contains color order
     sub_mode = data[4]
+
+    # Extract color order from upper nibble (for SIMPLE devices like 0x33)
+    # Source: protocol_docs/17_color_order_settings.md
+    # Values: 1=RGB, 2=GRB, 3=BRG
+    color_order_nibble = (data[4] & 0xF0) >> 4
 
     # Determine color mode from sub_mode (when in static mode)
     is_rgb_mode = False
@@ -819,49 +849,85 @@ def parse_state_response(data: bytes) -> dict | None:
         "is_effect_mode": is_effect_mode,
         "is_rgb_mode": is_rgb_mode,
         "is_white_mode": is_white_mode,
+        "color_order_nibble": color_order_nibble,  # For SIMPLE devices with has_color_order
     }
 
 
 def parse_led_settings_response(data: bytes) -> dict | None:
     """
-    Parse LED settings response (0x63 format - Original).
+    Parse LED settings response (0x63 format - IC Settings).
 
-    Source: tc/b.java inner class a, method g() lines 180-195
-    Source: protocol_docs/09_effects_addressable_led_support.md
+    Source: protocol_docs/16_query_formats_0x63_vs_0x44.md
+    Used by Symphony devices (0xA1-0xAD) only.
 
-    Response format (12 bytes):
+    Response format (10 bytes):
         Byte 0: Header (0x63)
-        Byte 1: LED count low byte
-        Byte 2: LED count high byte
-        Byte 3: IC Type
-        Byte 4: Color Order
-        Byte 5-7: Timing params D, E, F
-        Byte 8: Frequency low byte
-        Byte 9: Frequency high byte
-        Byte 10: Reserved
-        Byte 11: Checksum
+        Byte 1: Direction (0 = forward, 1 = reverse)
+        Byte 2-3: LED count per segment (little-endian uint16)
+        Byte 4: Segments (single byte)
+        Byte 5: IC Type (WS2812B=1, etc.)
+        Byte 6: Color Order (RGB=0, RBG=1, GRB=2, etc.)
+        Byte 7: Music Point
+        Byte 8: Music Part
+        Byte 9: Checksum (if present)
+
+    Note: Total LED count = led_count × segments
 
     Returns dict with:
         - led_count: int
+        - segments: int
         - ic_type: int
         - color_order: int
-        - frequency: int (Hz)
+        - direction: int (0 = forward, 1 = reverse)
+        - music_point: int
     """
-    if len(data) < 12 or data[0] != 0x63:
+    if len(data) < 10:
+        _LOGGER.debug("LED settings response too short: %d bytes (need 10)", len(data))
+        return None
+    if data[0] != 0x63:
+        _LOGGER.debug("LED settings response wrong header: 0x%02X (expected 0x63)", data[0])
         return None
 
-    # LED count: byte 1 is low, byte 2 is high
-    led_count = (data[2] << 8) | data[1]
-    ic_type = data[3]
-    color_order = data[4]
-    # Frequency: byte 8 is low, byte 9 is high
-    frequency = (data[9] << 8) | data[8]
+    # Log raw bytes for debugging format issues
+    # Different devices may have different formats - see protocol_docs/16_query_formats_0x63_vs_0x44.md
+    raw_hex = ' '.join(f'0x{b:02X}' for b in data[:10])
+    _LOGGER.debug("LED settings raw bytes: %s", raw_hex)
+
+    direction = data[1]
+    # LED count: bytes 2-3 little-endian (LEDs per segment, not total)
+    led_count = data[2] | (data[3] << 8)
+    # Segments: byte 4 only (single byte, NOT 16-bit!)
+    # Total LEDs = led_count × segments
+    segments = data[4]
+    # IC Type: byte 5
+    ic_type = data[5]
+    # Color Order: byte 6
+    color_order = data[6]
+    # Music point/part: bytes 7-8
+    music_point = data[7]
+    music_part = data[8] if len(data) > 8 else 0
+
+    # Log parsed values for verification
+    _LOGGER.debug(
+        "LED settings parsed: dir=%d, count=%d, seg=%d, ic=%d, order=%d, music=%d/%d",
+        direction, led_count, segments, ic_type, color_order, music_point, music_part
+    )
+
+    # Sanity check: color_order should be 0-5 for addressable, 1-3 for SIMPLE
+    if color_order > 5:
+        _LOGGER.warning(
+            "LED settings color_order=%d is outside expected range (0-5). "
+            "Response format may differ from expected - check raw bytes above.",
+            color_order
+        )
 
     return {
         "led_count": led_count,
+        "segments": segments,
         "ic_type": ic_type,
         "color_order": color_order,
-        "frequency": frequency,
+        "direction": direction,
+        "music_point": music_point,
     }
 
 

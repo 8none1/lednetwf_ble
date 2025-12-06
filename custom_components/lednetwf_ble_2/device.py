@@ -86,6 +86,9 @@ class LEDNetWFDevice:
         self._led_count: int | None = None
         self._led_type: int | None = None
         self._color_order: int | None = None
+        self._segments: int | None = None
+        self._direction: int | None = None  # 0 = forward, 1 = reverse
+        self._pending_led_settings_response: asyncio.Event | None = None
 
         # Firmware info
         self._fw_version: str | None = None
@@ -211,7 +214,19 @@ class LEDNetWFDevice:
 
     @property
     def led_count(self) -> int | None:
-        """Return LED count for addressable strips."""
+        """Return LED count per segment for addressable strips."""
+        return self._led_count
+
+    @property
+    def segments(self) -> int | None:
+        """Return number of segments for addressable strips."""
+        return self._segments
+
+    @property
+    def total_leds(self) -> int | None:
+        """Return total LED count (led_count × segments)."""
+        if self._led_count is not None and self._segments is not None:
+            return self._led_count * self._segments
         return self._led_count
 
     @property
@@ -233,6 +248,20 @@ class LEDNetWFDevice:
         effect type but have different effect sets.
         """
         return bool(self._capabilities.get("has_ic_config"))
+
+    @property
+    def has_color_order(self) -> bool:
+        """Return True if device supports color order configuration.
+
+        SIMPLE devices like 0x33 (Ctrl_Mini_RGB) support color order via 0x62 command.
+        Color order is stored in byte 4 upper nibble of state response.
+        """
+        return bool(self._capabilities.get("has_color_order"))
+
+    @property
+    def color_order(self) -> int | None:
+        """Return current color order (1=RGB, 2=GRB, 3=BRG)."""
+        return self._color_order
 
     @property
     def bg_rgb_color(self) -> tuple[int, int, int] | None:
@@ -432,11 +461,17 @@ class LEDNetWFDevice:
         payload_hex = ' '.join(f'0x{b:02X}' for b in payload)
         _LOGGER.debug("Notification payload (%d bytes): %s", len(payload), payload_hex)
 
-        # Parse based on first byte
+        # Parse based on first byte (or first two bytes for status+type responses)
         if payload[0] == 0x81:
             self._parse_state_response(payload)
         elif payload[0] == 0x63:
             self._parse_led_settings_response(payload)
+        elif len(payload) >= 2 and payload[0] == 0x00 and payload[1] == 0x63:
+            # LED settings response with leading status byte (0x00 = success)
+            # Format: [0x00 status] [0x63 type] [data...]
+            # Pass from byte 1 onwards so parser sees 0x63 as first byte
+            _LOGGER.debug("LED settings response with status byte prefix")
+            self._parse_led_settings_response(payload[1:])
         else:
             _LOGGER.debug("Unknown notification type: 0x%02X", payload[0])
 
@@ -524,6 +559,15 @@ class LEDNetWFDevice:
 
         self._is_on = result["is_on"]
 
+        # Debug: trace which condition will match
+        _LOGGER.debug(
+            "State parse conditions: is_effect=%s, is_white=%s, is_rgb=%s, "
+            "has_ic_config=%s, effect_type=%s (SIMPLE=%s), mode_type=0x%02X",
+            result.get("is_effect_mode"), result.get("is_white_mode"), result.get("is_rgb_mode"),
+            self.has_ic_config, self.effect_type, self.effect_type == EffectType.SIMPLE,
+            result["mode_type"]
+        )
+
         # Handle different modes
         if result.get("is_effect_mode"):
             # Effect mode (mode_type=0x25) - this is Function Mode for Symphony devices
@@ -575,6 +619,43 @@ class LEDNetWFDevice:
             self._color_temp_kelvin = int(MIN_KELVIN + temp_pct * (MAX_KELVIN - MIN_KELVIN) / 100)
             _LOGGER.debug("White mode: brightness=%d (value1=%d), color_temp=%dK (pct=%d)",
                           self._brightness, result["value1"], self._color_temp_kelvin, temp_pct)
+
+        elif (self.effect_type == EffectType.SIMPLE and
+              result["mode_type"] == 0x61):
+            # SIMPLE devices: mode_type=0x61 is RGB mode regardless of sub_mode
+            # sub_mode often echoes power state (0x23=ON, 0x24=OFF) rather than mode info
+            # Must check BEFORE is_rgb_mode since SIMPLE sub_modes don't match standard RGB sub_modes
+            self._color_temp_kelvin = None
+            # Don't clear effect for SIMPLE devices - they report 0x61 even when running effects
+
+            # Extract color order from upper nibble if device supports it
+            if self.has_color_order and "color_order_nibble" in result:
+                color_order = result["color_order_nibble"]
+                if 1 <= color_order <= 3:  # Valid range: 1=RGB, 2=GRB, 3=BRG
+                    self._color_order = color_order
+
+            r, g, b = result["r"], result["g"], result["b"]
+            h, s, v = protocol.rgb_to_hsv(r, g, b)
+            brightness_raw = round(v * 255 / 100)
+            if brightness_raw == 0 and (r > 0 or g > 0 or b > 0):
+                brightness_raw = 1
+            self._brightness = brightness_raw
+
+            if v > 0 or (r > 0 or g > 0 or b > 0):
+                max_rgb = max(r, g, b)
+                if max_rgb > 0:
+                    scale = 255 / max_rgb
+                    pure_r = min(255, int(round(r * scale)))
+                    pure_g = min(255, int(round(g * scale)))
+                    pure_b = min(255, int(round(b * scale)))
+                    self._rgb = (pure_r, pure_g, pure_b)
+                else:
+                    self._rgb = (r, g, b)
+            else:
+                self._rgb = (r, g, b)
+
+            _LOGGER.debug("SIMPLE RGB mode (0x61/0x%02X): device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d, color_order=%s",
+                          result["sub_mode"], r, g, b, self._rgb, self._brightness, self._color_order)
 
         elif result.get("is_rgb_mode"):
             # RGB mode - brightness derived from RGB via HSV conversion
@@ -694,9 +775,17 @@ class LEDNetWFDevice:
         self._led_count = result["led_count"]
         self._led_type = result["ic_type"]
         self._color_order = result["color_order"]
+        self._segments = result.get("segments")
+        self._direction = result.get("direction")
 
-        _LOGGER.debug("Parsed LED settings: count=%s, type=%s, order=%s",
-                      self._led_count, self._led_type, self._color_order)
+        _LOGGER.debug(
+            "Parsed LED settings: count=%s, segments=%s, type=%s, order=%s, direction=%s",
+            self._led_count, self._segments, self._led_type, self._color_order, self._direction
+        )
+
+        # Signal waiting coroutine if any
+        if self._pending_led_settings_response:
+            self._pending_led_settings_response.set()
 
     def _effect_id_to_name(self, effect_id: int) -> str | None:
         """Convert effect ID to name.
@@ -1126,24 +1215,117 @@ class LEDNetWFDevice:
         packet = protocol.build_state_query()
         return await self._send_command(packet)
 
+    async def query_state_and_wait(self, timeout: float = 3.0) -> dict | None:
+        """Query device state and wait for response.
+
+        This sends a state query and waits for the response. The notification
+        handler will update all internal state (is_on, brightness, rgb, effect,
+        color_order, etc.) when the response is received.
+
+        Args:
+            timeout: Maximum seconds to wait for response
+
+        Returns:
+            Parsed state response dict, or None if timeout/error
+        """
+        return await self._query_state_and_wait(timeout)
+
     async def query_led_settings(self) -> bool:
         """Query LED settings (for addressable strips)."""
         packet = protocol.build_led_settings_query()
         return await self._send_command(packet)
+
+    async def query_led_settings_and_wait(self, timeout: float = 3.0) -> dict | None:
+        """Query LED settings and wait for response.
+
+        Args:
+            timeout: Maximum seconds to wait for response
+
+        Returns:
+            Dict with led_count, ic_type, color_order, segments, direction
+            or None if timeout/error
+        """
+        self._pending_led_settings_response = asyncio.Event()
+
+        try:
+            if not await self.query_led_settings():
+                return None
+
+            try:
+                await asyncio.wait_for(
+                    self._pending_led_settings_response.wait(),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                _LOGGER.warning("Timeout waiting for LED settings response")
+                return None
+
+            # Return the captured settings
+            if self._led_count is not None:
+                return {
+                    "led_count": self._led_count,
+                    "ic_type": self._led_type,
+                    "color_order": self._color_order,
+                    "segments": self._segments,
+                    "direction": self._direction,
+                }
+            return None
+        finally:
+            self._pending_led_settings_response = None
 
     async def set_led_settings(
         self,
         led_count: int,
         led_type: int,
         color_order: int,
+        segments: int = 1,
     ) -> bool:
-        """Set LED settings for addressable strips."""
-        packet = protocol.build_led_settings_command(led_count, led_type, color_order)
+        """Set LED settings for addressable strips.
+
+        Args:
+            led_count: LEDs per segment
+            led_type: IC type (see LedType enum)
+            color_order: RGB ordering (see ColorOrder enum)
+            segments: Number of segments (for IC config devices)
+
+        For devices with has_ic_config (Symphony A3+), uses the A3 format
+        which includes segment support. Other devices use the original format.
+        """
+        if self.has_ic_config:
+            # A3+ format with segment support
+            packet = protocol.build_led_settings_command_a3(
+                led_count, segments, led_type, color_order
+            )
+        else:
+            # Original format without segments
+            packet = protocol.build_led_settings_command(led_count, led_type, color_order)
 
         if await self._send_command(packet):
             self._led_count = led_count
             self._led_type = led_type
             self._color_order = color_order
+            self._segments = segments
+            return True
+        return False
+
+    async def set_color_order(self, color_order: int) -> bool:
+        """Set color order for SIMPLE devices (0x33, etc.).
+
+        Args:
+            color_order: 1=RGB, 2=GRB, 3=BRG
+
+        Returns:
+            True if command was sent successfully
+        """
+        if not self.has_color_order:
+            _LOGGER.warning("Device %s does not support color order configuration", self._name)
+            return False
+
+        packet = protocol.build_color_order_command_simple(color_order)
+
+        if await self._send_command(packet):
+            self._color_order = color_order
+            _LOGGER.debug("Set color order to %d for %s", color_order, self._name)
             return True
         return False
 

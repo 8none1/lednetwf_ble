@@ -17,10 +17,11 @@
       },
       "options": {
         "title": "Device Options",
-        "description": "Configure options for '{name}'.",
+        "description": "Configure options for '{name}'. Total LEDs: {total_leds}",
         "data": {
           "disconnect_delay": "Disconnect delay (seconds)",
-          "led_count": "LED count",
+          "led_count": "LEDs per segment",
+          "segments": "Number of segments",
           "led_type": "LED chip type",
           "color_order": "Color order"
         }
@@ -41,9 +42,11 @@
     "step": {
       "init": {
         "title": "Device Options",
+        "description": "Total LEDs: {total_leds}",
         "data": {
           "disconnect_delay": "Disconnect delay (seconds)",
-          "led_count": "LED count",
+          "led_count": "LEDs per segment",
+          "segments": "Number of segments",
           "led_type": "LED chip type",
           "color_order": "Color order"
         }

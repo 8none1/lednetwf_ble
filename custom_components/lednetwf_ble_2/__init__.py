@@ -17,7 +17,16 @@ from .const import (
     DOMAIN,
     CONF_PRODUCT_ID,
     CONF_DISCONNECT_DELAY,
+    CONF_LED_COUNT,
+    CONF_SEGMENTS,
+    CONF_LED_TYPE,
+    CONF_COLOR_ORDER,
     DEFAULT_DISCONNECT_DELAY,
+    DEFAULT_LED_COUNT,
+    DEFAULT_SEGMENTS,
+    LedType,
+    ColorOrder,
+    get_device_capabilities,
 )
 from .device import LEDNetWFDevice
 from . import protocol
@@ -56,6 +65,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Applying probed capabilities: %s", probed_caps)
         device._capabilities.update(probed_caps)
         device._capabilities["needs_probing"] = False
+
+    # Store LED settings from options in device state
+    # These will be sent to the device when needed
+    caps = get_device_capabilities(product_id)
+    if caps.get("has_ic_config"):
+        device._led_count = entry.options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+        device._segments = entry.options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
+        device._led_type = entry.options.get(CONF_LED_TYPE, LedType.WS2812B.value)
+        device._color_order = entry.options.get(CONF_COLOR_ORDER, ColorOrder.GRB.value)
+        _LOGGER.debug(
+            "Initialized LED settings: count=%d, segments=%d, type=%d, order=%d",
+            device._led_count, device._segments, device._led_type, device._color_order
+        )
 
     # Store device instance
     hass.data.setdefault(DOMAIN, {})
@@ -100,5 +122,58 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
-    # Reload the entry to apply new options
-    await hass.config_entries.async_reload(entry.entry_id)
+    _LOGGER.debug("Options update triggered for entry %s", entry.entry_id)
+
+    device: LEDNetWFDevice = hass.data[DOMAIN].get(entry.entry_id)
+    if device is None:
+        _LOGGER.warning("Device not found for options update")
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
+    # Update disconnect delay
+    new_delay = entry.options.get(CONF_DISCONNECT_DELAY, DEFAULT_DISCONNECT_DELAY)
+    device._disconnect_delay = new_delay
+
+    # Check if LED settings need to be applied
+    product_id = entry.data.get(CONF_PRODUCT_ID)
+    caps = get_device_capabilities(product_id)
+
+    if caps.get("has_ic_config"):
+        new_led_count = entry.options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+        new_segments = entry.options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
+        new_led_type = entry.options.get(CONF_LED_TYPE, LedType.WS2812B.value)
+        new_color_order = entry.options.get(CONF_COLOR_ORDER, ColorOrder.GRB.value)
+
+        _LOGGER.debug(
+            "LED settings comparison - Current: count=%s, segments=%s, type=%s, order=%s; "
+            "New: count=%s, segments=%s, type=%s, order=%s",
+            device._led_count, device._segments, device._led_type, device._color_order,
+            new_led_count, new_segments, new_led_type, new_color_order
+        )
+
+        # Check if settings changed
+        if (device._led_count != new_led_count or
+            device._segments != new_segments or
+            device._led_type != new_led_type or
+            device._color_order != new_color_order):
+
+            _LOGGER.info(
+                "LED settings changed, applying: count=%d, segments=%d, type=%d, order=%d",
+                new_led_count, new_segments, new_led_type, new_color_order
+            )
+
+            # Apply new settings to device
+            success = await device.set_led_settings(
+                new_led_count, new_led_type, new_color_order, new_segments
+            )
+            if success:
+                # Update device's internal state to match new values
+                device._led_count = new_led_count
+                device._segments = new_segments
+                device._led_type = new_led_type
+                device._color_order = new_color_order
+                _LOGGER.debug("LED settings applied and device state updated")
+            else:
+                _LOGGER.warning("Failed to apply LED settings to device")
+        else:
+            _LOGGER.debug("LED settings unchanged, no update needed")

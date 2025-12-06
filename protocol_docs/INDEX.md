@@ -1,7 +1,7 @@
 # LEDnetWF BLE Protocol Documentation
 
-**Version**: 3.0
-**Updated**: 5 December 2025
+**Version**: 3.5
+**Updated**: 6 December 2025
 
 ---
 
@@ -24,6 +24,7 @@
 | 14 | [14_symphony_background_colors.md](14_symphony_background_colors.md) | Symphony FG/BG color effects (0x41 cmd) |
 | 15 | [15_static_effects_with_bg_color.md](15_static_effects_with_bg_color.md) | **Static effects with FG+BG** for 0x56/Symphony |
 | 16 | [16_query_formats_0x63_vs_0x44.md](16_query_formats_0x63_vs_0x44.md) | **Query commands** 0x63 (IC settings) vs 0x44 (Settled Mode) |
+| 17 | [17_device_configuration.md](17_device_configuration.md) | **Query commands by device**, IOTBT protocol, color order & LED count |
 
 ---
 
@@ -66,6 +67,9 @@ All commands must be wrapped in transport layer. See [04_connection_transport.md
 | Set effect | [06_effect_commands.md](06_effect_commands.md) |
 | Set effect with FG+BG colors | [15_static_effects_with_bg_color.md](15_static_effects_with_bg_color.md) |
 | Parse state response | [08_state_query_response_parsing.md](08_state_query_response_parsing.md) |
+| Query device settings | [17_device_configuration.md](17_device_configuration.md) |
+| Set color order / LED count | [17_device_configuration.md](17_device_configuration.md) |
+| IOTBT (0x80) protocol | [17_device_configuration.md](17_device_configuration.md) |
 
 ---
 
@@ -103,12 +107,27 @@ Key files in `/home/will/source/jadx/projects/zengee/`:
 | `com/zengge/wifi/Device/a.java` | Product ID mapping |
 | `dd/i.java` | IC types, effects |
 
+Key files in `/home/will/source/jadx/projects/surplife/` (IOTBT protocol):
+
+| File | Purpose |
+|------|---------|
+| `ok/a.java` | IOTBT state query commands (0x81, 0xEA) |
+| `ok/b.java` | IOTBT connection and query handling |
+| `zk/f.java` | IOTBT transport layer (0xB0 header) |
+| `com/zengge/wifi/Device/DeviceState2.java` | IOTBT response parsing |
+| `com/telink/bluetooth/light/Opcode.java` | Telink BLE Mesh opcodes |
+
 ---
 
 ## Version History
 
 | Date | Changes |
 |------|---------|
+| 6 Dec 2025 | v3.5 - Added complete IOTBT (0x80) protocol from surplife sources |
+| 6 Dec 2025 | v3.4 - Added query commands by device type to doc 17 |
+| 6 Dec 2025 | v3.3 - Expanded doc 17: color order + LED count settings |
+| 6 Dec 2025 | v3.2 - Added color order settings doc for 0x33 devices |
+| 6 Dec 2025 | v3.1 - Added query formats doc (0x63 vs 0x44) |
 | 5 Dec 2025 | v3.0 - Consolidated 18 files → 11 |
 | 4 Dec 2025 | v2.1 - Effect formats by device |
 | 3 Dec 2025 | v2.0 - Initial split documentation |

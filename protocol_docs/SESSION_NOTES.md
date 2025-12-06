@@ -31,7 +31,7 @@ Help develop the integration by analyzing and documenting the Android app's BLE 
 
 ## Current Investigation Status
 
-**Date**: 5 December 2025
+**Date**: 6 December 2025
 **Branch**: 8none1/version_2
 
 ### Device Under Test
@@ -59,6 +59,14 @@ Help develop the integration by analyzing and documenting the Android app's BLE 
    - Detection must be payload-based, not type-bit-based
    - See [04_connection_transport.md](04_connection_transport.md)
 
+5. **IOTBT (0x80) protocol fully researched**
+   - Uses Telink BLE Mesh opcodes (0xE0-0xEA range)
+   - Different transport layer with `{0xB0, 0xB1, 0xB2, 0xB3}` header
+   - Firmware < 11: Uses legacy 0x81 query
+   - Firmware >= 11: Uses 0xEA 0x81 query with special transport
+   - Response magic header: `{0xEA, 0x81}`
+   - See [17_device_configuration.md](17_device_configuration.md)
+
 ### Known Issues
 
 - **Linux BLE notifications**: Some devices don't trigger notification callbacks on Linux
@@ -69,6 +77,8 @@ Help develop the integration by analyzing and documenting the Android app's BLE 
 
 ## Key Java Files
 
+**Zengee sources** (`/home/will/source/jadx/projects/zengee/`):
+
 | File | Purpose |
 |------|---------|
 | `tc/b.java` | Main protocol - state query, power, color commands |
@@ -76,6 +86,16 @@ Help develop the integration by analyzing and documenting the Android app's BLE 
 | `tc/a.java` | Custom color arrays (0xA3, 0xA0) |
 | `com/zengge/wifi/Device/a.java` | Product ID → device class mapping |
 | `dd/i.java` | IC chip types, effect definitions |
+
+**Surplife sources** (`/home/will/source/jadx/projects/surplife/`) - IOTBT protocol:
+
+| File | Purpose |
+|------|---------|
+| `ok/a.java` | IOTBT state query commands (0x81, 0xEA) |
+| `ok/b.java` | IOTBT connection and query handling |
+| `zk/f.java` | IOTBT transport layer (0xB0 header) |
+| `DeviceState2.java` | IOTBT response parsing |
+| `Opcode.java` | Telink BLE Mesh opcodes (0xE0-0xEA) |
 
 ---
 
