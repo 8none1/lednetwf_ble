@@ -91,6 +91,7 @@ class EffectType(IntEnum):
     SIMPLE = 1              # 0x61 command, effects 37-56
     SYMPHONY = 2            # 0x38 command WITH checksum (5 bytes)
     ADDRESSABLE_0x53 = 3    # 0x38 command NO checksum (4 bytes), brightness in byte 3
+    IOTBT = 4               # 0xE0 0x02 command, effects 1-12 (Telink BLE Mesh based)
 
 
 class ValueScale(IntEnum):
@@ -363,6 +364,24 @@ ADDRESSABLE_0x53_EFFECTS: Final = {
     255: "Cycle Through All Modes",  # Special effect ID 0xFF
 }
 
+# IOTBT effects (0xE0 0x02 command) - IDs 1-12
+# Source: protocol_docs/17_device_configuration.md - Effect Command (0xE0 0x02)
+# IOTBT devices (product_id=0x00/0x80 with Telink BLE Mesh) have 12 effects
+IOTBT_EFFECTS: Final = {
+    1: "Effect 1",
+    2: "Effect 2",
+    3: "Effect 3",
+    4: "Effect 4",
+    5: "Effect 5",
+    6: "Effect 6",
+    7: "Effect 7",
+    8: "Effect 8",
+    9: "Effect 9",
+    10: "Effect 10",
+    11: "Effect 11",
+    12: "Effect 12",
+}
+
 # Product IDs with special speed encoding (inverted 0x01-0x1F scale)
 # Source: model_0x54.py, protocol_docs/07a_effect_commands_by_device.md
 # These devices use inverted speed where 0x01=fastest, 0x1F=slowest
@@ -426,9 +445,13 @@ PRODUCT_CAPABILITIES: Final = {
     41:  {"name": "MirrorLight", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SIMPLE},
     209: {"name": "Digital_Light", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True},
 
+    # IOTBT devices (Telink BLE Mesh based)
+    # Source: protocol_docs/17_device_configuration.md - IOTBT Command Reference
+    # Uses different protocol: 0x71 power, 0xE2 hue-based color, 0xE0 0x02 effects
+    0:   {"name": "IOTBT_Device", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.IOTBT, "is_iotbt": True},
+
     # Ring/Strip lights with background color support
     # Note: product_id 0x53 (83) uses ADDRESSABLE_0x53 effect format (4 bytes, NO checksum)
-    0:   {"name": "RingLight_Generic", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.ADDRESSABLE_0x53, "has_segments": True},
     83:  {"name": "RingLight_0x53", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.ADDRESSABLE_0x53, "has_segments": True},  # 0x53
     86:  {"name": "RingLight_0x56", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_bg_color": True},  # 0x56
     128: {"name": "RingLight_0x80", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_bg_color": True},  # 0x80
@@ -595,6 +618,9 @@ def get_effect_list(
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         # 0x53 Ring Light effects (113 effects + Cycle All)
         effects = list(ADDRESSABLE_0x53_EFFECTS.values())
+    elif effect_type == EffectType.IOTBT:
+        # IOTBT devices have 12 effects via 0xE0 0x02 command
+        effects = list(IOTBT_EFFECTS.values())
 
     # Add sound reactive option for devices with built-in microphone
     if has_builtin_mic:
@@ -670,6 +696,10 @@ def get_effect_id(
                     return eid
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         for eid, name in ADDRESSABLE_0x53_EFFECTS.items():
+            if name == effect_name:
+                return eid
+    elif effect_type == EffectType.IOTBT:
+        for eid, name in IOTBT_EFFECTS.items():
             if name == effect_name:
                 return eid
     return None

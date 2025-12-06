@@ -286,6 +286,22 @@ class LEDNetWFDevice:
         return self._capabilities.get("mic_cmd_format", "simple")
 
     @property
+    def is_iotbt(self) -> bool:
+        """Return True if device is an IOTBT device (Telink BLE Mesh based).
+
+        IOTBT devices use a different protocol:
+        - Power: 0x71 command (no checksum)
+        - Color: 0xE2 command with hue-based color (not RGB)
+        - Effect: 0xE0 0x02 command with 12 effects
+        - State query: 0xEA 0x81 format (firmware >= 11)
+
+        Source: protocol_docs/17_device_configuration.md - IOTBT Command Reference
+        """
+        # Check capabilities for is_iotbt flag (product_id=0x00 has is_iotbt=True)
+        # Also check product_id directly for backwards compatibility
+        return self._capabilities.get("is_iotbt", False) or self._product_id == 0x00
+
+    @property
     def color_order(self) -> int | None:
         """Return current color order (1=RGB, 2=GRB, 3=BRG)."""
         return self._color_order
@@ -618,32 +634,22 @@ class LEDNetWFDevice:
 
         self._is_on = is_on
 
-        # Try to extract RGB from bytes 7-9 if available
+        # NOTE: DeviceState2 format (IOTBT devices) does NOT use standard RGB encoding
+        # in bytes 7-9. IOTBT devices use hue-based color commands (0xE2) not RGB.
+        # The values in bytes 7-9 are unreliable for color display.
+        # DO NOT parse RGB from DeviceState2 - it would overwrite user's color selection
+        # with incorrect values and cause the UI color picker to jump around.
+        #
+        # For proper IOTBT color support, we would need to:
+        # 1. Send 0xE2 commands with hue-based colors instead of RGB
+        # 2. Parse the hue response format from DeviceState2
+        # Source: protocol_docs/17_device_configuration.md - IOTBT Command Reference
         if len(data) >= 10:
-            r, g, b = data[7], data[8], data[9]
-            if r > 0 or g > 0 or b > 0:
-                # Device returns RGB pre-scaled by brightness
-                h, s, v = protocol.rgb_to_hsv(r, g, b)
-                brightness_raw = round(v * 255 / 100)
-                if brightness_raw == 0 and (r > 0 or g > 0 or b > 0):
-                    brightness_raw = 1
-                self._brightness = brightness_raw
-
-                # Reconstruct pure RGB at full brightness
-                max_rgb = max(r, g, b)
-                if max_rgb > 0:
-                    scale = 255 / max_rgb
-                    pure_r = min(255, int(round(r * scale)))
-                    pure_g = min(255, int(round(g * scale)))
-                    pure_b = min(255, int(round(b * scale)))
-                    self._rgb = (pure_r, pure_g, pure_b)
-                else:
-                    self._rgb = (r, g, b)
-
-                _LOGGER.debug(
-                    "DeviceState2 RGB: device=(%d,%d,%d), pure=%s, brightness=%d",
-                    r, g, b, self._rgb, self._brightness
-                )
+            # Just log the raw bytes for debugging, don't update state
+            _LOGGER.debug(
+                "DeviceState2 raw bytes 7-9: (0x%02X, 0x%02X, 0x%02X) - not parsed as RGB",
+                data[7], data[8], data[9]
+            )
 
         # Signal waiting coroutine if any
         if self._pending_state_response:
@@ -987,7 +993,11 @@ class LEDNetWFDevice:
 
     async def turn_on(self) -> bool:
         """Turn on the device."""
-        packet = protocol.build_power_command_0x3B(turn_on=True)
+        if self.is_iotbt:
+            # IOTBT devices use different power command format
+            packet = protocol.build_iotbt_power_command(turn_on=True)
+        else:
+            packet = protocol.build_power_command_0x3B(turn_on=True)
         if await self._send_command(packet):
             self._is_on = True
             self._notify_callbacks()
@@ -996,7 +1006,11 @@ class LEDNetWFDevice:
 
     async def turn_off(self) -> bool:
         """Turn off the device."""
-        packet = protocol.build_power_command_0x3B(turn_on=False)
+        if self.is_iotbt:
+            # IOTBT devices use different power command format
+            packet = protocol.build_iotbt_power_command(turn_on=False)
+        else:
+            packet = protocol.build_power_command_0x3B(turn_on=False)
         if await self._send_command(packet):
             self._is_on = False
             self._notify_callbacks()
@@ -1075,7 +1089,18 @@ class LEDNetWFDevice:
 
         # Standard color command (exits effect mode)
         eff_type = self.effect_type
-        if eff_type == EffectType.SIMPLE:
+        if self.is_iotbt:
+            # IOTBT devices use 0xE2 command with hue-based color (not RGB)
+            # Source: protocol_docs/17_device_configuration.md - Color Command (0xE2)
+            brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
+            packet = protocol.build_iotbt_color_command(
+                rgb[0], rgb[1], rgb[2], brightness_pct
+            )
+            _LOGGER.debug(
+                "IOTBT device: RGB=(%d,%d,%d), brightness=%d%% -> hue-based color",
+                rgb[0], rgb[1], rgb[2], brightness_pct
+            )
+        elif eff_type == EffectType.SIMPLE:
             # SIMPLE devices use 0x31 command format (9-byte RGB)
             # Brightness is applied directly to RGB values (no separate brightness field)
             # Scale RGB by brightness factor
@@ -1350,7 +1375,11 @@ class LEDNetWFDevice:
 
     async def query_state(self) -> bool:
         """Query current device state."""
-        packet = protocol.build_state_query()
+        if self.is_iotbt:
+            # IOTBT devices use 0xEA 0x81 query format (firmware >= 11)
+            packet = protocol.build_iotbt_state_query()
+        else:
+            packet = protocol.build_state_query()
         return await self._send_command(packet)
 
     async def query_state_and_wait(self, timeout: float = 3.0) -> dict | None:
@@ -1711,7 +1740,11 @@ class LEDNetWFDevice:
         self._last_state_response = None
 
         try:
-            packet = protocol.build_state_query()
+            if self.is_iotbt:
+                # IOTBT devices use 0xEA 0x81 query format (firmware >= 11)
+                packet = protocol.build_iotbt_state_query()
+            else:
+                packet = protocol.build_state_query()
             if not await self._send_command(packet):
                 return None
 

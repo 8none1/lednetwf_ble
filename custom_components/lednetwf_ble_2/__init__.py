@@ -79,6 +79,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             device._led_count, device._segments, device._led_type, device._color_order
         )
 
+    # For devices that don't report power state in advertisements (like IOTBT),
+    # query state on startup to ensure proper availability
+    # Source: protocol_docs/17_device_configuration.md - IOTBT uses DeviceState2 format
+    if device.is_on is None and product_id == 0x00:
+        _LOGGER.info(
+            "Device %s (product_id=0x00) has no power state from advertisement, "
+            "querying device state...", name
+        )
+        try:
+            await device.query_state_and_wait(timeout=5.0)
+            _LOGGER.debug("Initial state query result: is_on=%s", device.is_on)
+        except Exception as ex:
+            _LOGGER.warning("Failed to query initial state for %s: %s", name, ex)
+            # Device will show as unavailable until first command or advertisement update
+
     # Store device instance
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = device

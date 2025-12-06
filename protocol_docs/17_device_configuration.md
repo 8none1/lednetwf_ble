@@ -991,3 +991,462 @@ Both settings persist across power cycles. Query once on connection and update o
 | `ActivityTabForRGB.java:56-62` | LED count UI handler |
 | `kd/z0.java` | LED count picker popup |
 | `ucPopupWiringSetting.java` | Color order picker popup |
+
+---
+
+## BLE Advertisement Data Formats
+
+Different device families encode state information in BLE advertisements differently. Understanding these formats is essential for detecting power state without connecting.
+
+### Standard ZengGe Format (Company ID 0x5A**)
+
+**Company ID Range**: 23040-23295 (0x5A00-0x5AFF)
+
+**Used by**: Most LEDnetWF devices
+
+**Source**: `com/zengge/hagallbjarkan/device/ZGHBDevice.java`
+
+#### Manufacturer Data (27 bytes)
+
+| Byte | Field | Description |
+|------|-------|-------------|
+| 0 | sta | Status byte (NOT for device identification) |
+| 1 | ble_version | BLE protocol version |
+| 2-7 | mac_address | Device MAC address |
+| 8-9 | product_id | Product ID (big-endian) |
+| 10 | firmware_ver | Firmware version (low byte) |
+| 11 | led_version | LED version |
+| 12 | check_key_flag | Check key (bits 0-1), firmware high (bits 2-7 for v6+) |
+| 13 | firmware_flag | Firmware flag (bits 0-4) |
+| **14** | **power** | **Power state: 0x23=ON, 0x24=OFF** |
+| 15 | mode_type | Mode type (0x61=color/white, 0x25=effect) |
+| 16 | sub_mode | Sub-mode or effect ID |
+| 17-24 | state_data | Color/brightness/speed data |
+| 25-26 | rfu | Reserved |
+
+#### With Service Data (BLE v7+)
+
+For BLE version >= 7, when both Type 22 (service data) AND Type 255 (manufacturer data) are present:
+
+- **Service Data (16 bytes)**: Product ID, BLE version, MAC (same format as mfr data bytes 0-15)
+- **Manufacturer Data**: State data at bytes 3-27 (25 bytes, different offset!)
+
+```python
+# BLE v7+ with service data
+if ble_version >= 7 and has_service_data:
+    state_data = mfr_data[3:28]  # 25 bytes starting at offset 3
+    power_state = state_data[11]  # Power at different offset!
+```
+
+### Telink Private Mesh Format (Company ID 0x1102)
+
+**Company ID**: 4354 (0x1102)
+
+**Used by**: IOTBT devices, Telink BLE mesh devices
+
+**Source**: `com/telink/bluetooth/light/c.java`
+
+#### Manufacturer Data (~13+ bytes)
+
+Telink devices use a completely different format in manufacturer data:
+
+| Offset | Field | Description |
+|--------|-------|-------------|
+| 0-1 | manufacturer_id | 4354 (0x1102) for Telink |
+| 2-3 | mesh_uuid | Mesh network ID (little-endian) |
+| 4-7 | reserved | MAC or reserved bytes |
+| 8-9 | product_uuid | Product UUID (little-endian) |
+| **10** | **status** | **Power/brightness: non-zero = ON** |
+| 11-12 | mesh_address | Device mesh address (little-endian) |
+
+#### Parsing Telink Advertisement
+
+```python
+def parse_telink_advertisement(mfr_data: bytes) -> dict | None:
+    """Parse Telink BLE Mesh advertisement format.
+
+    Returns None if not a Telink device.
+    """
+    if len(mfr_data) < 13:
+        return None
+
+    # Company ID is first 2 bytes (big-endian in Android parsing)
+    company_id = (mfr_data[0] << 8) | mfr_data[1]
+    if company_id != 4354:  # 0x1102 - Telink
+        return None
+
+    # Parse Telink format
+    mesh_uuid = (mfr_data[3] << 8) | mfr_data[2]  # Little-endian
+    product_uuid = (mfr_data[9] << 8) | mfr_data[8]  # Little-endian
+    status = mfr_data[10] & 0xFF  # Status byte
+    mesh_address = (mfr_data[12] << 8) | mfr_data[11]  # Little-endian
+
+    # In Telink format: non-zero status = device is ON
+    # Status may also encode brightness level
+    power_on = status > 0
+
+    return {
+        "format": "telink",
+        "mesh_uuid": mesh_uuid,
+        "product_uuid": product_uuid,
+        "status": status,
+        "power_on": power_on,
+        "mesh_address": mesh_address,
+    }
+```
+
+### Service Data Format (BLE v5+)
+
+Service data provides device identification and version information. For BLE v7+ devices, state data is in manufacturer data at a different offset.
+
+**Service UUID**: `0000FFFF-0000-1000-8000-00805f9b34fb` (short: 0xFFFF)
+
+**Source**: `ZGHBDevice.java` lines 134-167, `Service.java` line 7
+
+#### Service Data Layout (16 or 29 bytes)
+
+**Important**: Service data can be **16 bytes** (device ID + version info) OR **29 bytes** (full format with state).
+
+**Source**: `ZGHBDevice.java` line 139: `if (bArr6.length != 16 && bArr6.length != 29)`
+
+##### 16-byte Service Data (Device Identification)
+
+| Byte | Field | Description |
+|------|-------|-------------|
+| 0 | sta | Status byte (255 = OTA mode) |
+| 1 | mfr_hi | Manufacturer prefix (0x5A or 0x5B) |
+| 2 | mfr_lo | Manufacturer low byte |
+| 3 | ble_version | BLE protocol version (e.g., 5, 6, 7) |
+| 4-9 | mac_address | Device MAC address (6 bytes) |
+| 10-11 | product_id | Product ID (big-endian) |
+| 12 | firmware_ver_lo | Firmware version low byte |
+| 13 | led_version | LED/hardware version |
+| 14 | check_key + fw_hi | Bits 0-1: check_key_flag, Bits 2-7: firmware_ver high (BLE v6+) |
+| 15 | firmware_flag | Firmware feature flags (bits 0-4) |
+
+##### Field Details
+
+**sta (byte 0)**: Device status byte
+
+- `0xFF` (255) = Device is in OTA firmware update mode
+- Other values: Normal operation
+
+**ble_version (byte 3)**: BLE protocol version
+
+- Determines which features and command formats the device supports
+- v5+: Service data with device ID
+- v6+: Extended firmware version (high bits in byte 14)
+- v7+: State data at offset 3 in manufacturer data
+
+**firmware_ver (bytes 12 + 14)**: Full firmware version calculation
+
+```python
+# For BLE v6+, firmware version spans two bytes:
+if ble_version >= 6:
+    firmware_ver = byte12 | ((byte14 >> 2) << 8)
+else:
+    firmware_ver = byte12
+# Example: byte12=0x23, byte14=0x08 → fw = 0x23 | (0x02 << 8) = 0x0223 = 547
+```
+
+**led_version (byte 13)**: LED/hardware version
+
+- Indicates hardware revision or LED controller type
+- Used in combination with product_id for device capability detection
+
+**check_key_flag (byte 14, bits 0-1)**: Key validation flag
+
+- Used during device binding/authentication
+- Values: 0-3
+
+**firmware_flag (byte 15, bits 0-4)**: Firmware feature flags
+
+- Bit field indicating supported features
+- Device-specific interpretation
+
+##### 29-byte Service Data (Full format with state)
+
+When service data is 29 bytes, it follows the same format as manufacturer data:
+
+| Byte | Field | Description |
+|------|-------|-------------|
+| 0-15 | Device ID | Same as 16-byte format above |
+| **16** | **power** | **Power state: 0x23=ON, 0x24=OFF** |
+| 17 | mode_type | Mode type (0x61=color/white, 0x25=effect) |
+| 18 | sub_mode | Sub-mode or effect ID |
+| 19 | brightness | Brightness % (white mode) |
+| 20-22 | rgb | R, G, B values |
+| 23 | color_temp | Color temp % (white mode) |
+| 24-25 | speed/ww/cw | Effect speed or warm/cool white |
+| 26 | ? | Additional state |
+| 27-28 | rfu | Reserved |
+
+**Note**: The Android app ALWAYS reads state from manufacturer data, even when 29-byte service data is present. However, for devices that ONLY have service data (no manufacturer data), the 29-byte format likely contains valid state/color info.
+
+#### When Service Data Present (v7+)
+
+When both service data AND manufacturer data are present:
+
+1. **Device identification**: Parsed from service data
+2. **State data**: Parsed from manufacturer data at **offset 3** (25 bytes)
+3. **The app ignores state in service data** even if it's 29 bytes
+
+```python
+def parse_service_data(service_data: bytes) -> dict | None:
+    """Parse LEDnetWF service data (16 or 29 bytes).
+
+    Returns device identification and version information.
+    """
+    if len(service_data) < 16:
+        return None
+
+    # Check manufacturer prefix
+    mfr_hi = service_data[1] & 0xFF
+    if mfr_hi not in (0x5A, 0x5B):
+        return None
+
+    sta = service_data[0] & 0xFF
+    manufacturer = (mfr_hi << 8) | (service_data[2] & 0xFF)
+    ble_version = service_data[3] & 0xFF
+    mac_bytes = service_data[4:10]
+    product_id = (service_data[10] << 8) | service_data[11]
+    firmware_ver_lo = service_data[12] & 0xFF
+    led_version = service_data[13] & 0xFF
+
+    # Extended firmware version for BLE v6+
+    firmware_ver = firmware_ver_lo
+    check_key_flag = 0
+    firmware_flag = 0
+
+    if ble_version >= 6 and len(service_data) >= 16:
+        byte14 = service_data[14] & 0xFF
+        byte15 = service_data[15] & 0xFF
+        check_key_flag = byte14 & 0x03        # bits 0-1
+        firmware_ver_hi = (byte14 >> 2) & 0x3F  # bits 2-7
+        firmware_ver = firmware_ver_lo | (firmware_ver_hi << 8)
+        firmware_flag = byte15 & 0x1F         # bits 0-4
+
+    return {
+        "sta": sta,
+        "is_ota_mode": sta == 0xFF,
+        "manufacturer": manufacturer,
+        "ble_version": ble_version,
+        "mac_address": ":".join(f"{b:02X}" for b in mac_bytes),
+        "product_id": product_id,
+        "firmware_ver": firmware_ver,
+        "led_version": led_version,
+        "check_key_flag": check_key_flag,
+        "firmware_flag": firmware_flag,
+    }
+
+
+def parse_v7_with_service_data(service_data: bytes, mfr_data: bytes) -> dict:
+    """Parse BLE v7+ advertisement with service data.
+
+    Args:
+        service_data: 16 bytes from service data AD type
+        mfr_data: 27+ bytes from manufacturer data AD type
+    """
+    # Device ID and version from service data
+    device_info = parse_service_data(service_data)
+    if device_info is None:
+        return None
+
+    ble_version = device_info["ble_version"]
+
+    # State from manufacturer data at OFFSET 3 (not 14!)
+    if ble_version >= 7 and len(mfr_data) >= 28:
+        state_data = mfr_data[3:28]  # 25 bytes starting at offset 3
+
+        # Power state in state_data
+        # For v7+ with service data, power is at state_data[11] (= mfr_data[14])
+        power_byte = state_data[11]
+        power_on = power_byte == 0x23
+
+        device_info["power_on"] = power_on
+        device_info["state_data"] = state_data
+
+    return device_info
+```
+
+### Service Data UUIDs
+
+| UUID | Short | Name | Used By |
+|------|-------|------|---------|
+| `0000FFFF-0000-1000-8000-00805f9b34fb` | 0xFFFF | LEDnetWF Service | Standard LEDnetWF (v7+) |
+| `00001827-0000-1000-8000-00805f9b34fb` | 0x1827 | MESH_PROVISIONING | SIG Mesh unprovisioned |
+| `00001828-0000-1000-8000-00805f9b34fb` | 0x1828 | MESH_PROXY | SIG Mesh provisioned |
+
+**Source**: `Service.java`, `xj/b.java`, `ZGSigMeshApi.java`
+
+### Home Assistant Service Data Access
+
+In bleak/Home Assistant, service data is keyed by UUID string:
+
+```python
+from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
+
+def _parse_discovery(discovery: BluetoothServiceInfoBleak) -> dict | None:
+    # Manufacturer data: dict[company_id: int, data: bytes]
+    manu_data = discovery.manufacturer_data
+
+    # Service data: dict[uuid_string: str, data: bytes]
+    service_data = discovery.service_data
+
+    # Check for service data (BLE v7+)
+    # UUID may be full string or short form
+    lednetwf_service_data = None
+    for uuid_str, data in service_data.items():
+        if "ffff" in uuid_str.lower():
+            lednetwf_service_data = data
+            break
+
+    # Parse based on what's available
+    if lednetwf_service_data is not None:
+        # BLE v7+ format with service data
+        return parse_v7_advertisement(lednetwf_service_data, manu_data)
+
+    # Fall back to manufacturer data only
+    for company_id, data in manu_data.items():
+        if 23040 <= company_id <= 23295:  # 0x5A** ZengGe
+            return parse_zengge_advertisement(data)
+        if company_id == 4354:  # 0x1102 Telink
+            return parse_telink_advertisement(data)
+
+    return None
+```
+
+### Complete Parsing Example
+
+```python
+def parse_lednetwf_advertisement(
+    manu_data: dict[int, bytes],
+    service_data: dict[str, bytes]
+) -> dict | None:
+    """Parse LEDnetWF BLE advertisement data.
+
+    Handles:
+    - Standard ZengGe format (company ID 0x5A**)
+    - BLE v7+ with service data + manufacturer data
+    - Service data ONLY (29-byte format with state)
+    - Telink/IOTBT format (company ID 0x1102)
+    """
+    # 1. Check for service data (BLE v7+)
+    sd = None
+    for uuid_str, data in service_data.items():
+        if "ffff" in uuid_str.lower() and len(data) >= 16:
+            sd = data
+            break
+
+    # 2. Find manufacturer data
+    md = None
+    for cid, data in manu_data.items():
+        if 23040 <= cid <= 23295:  # ZengGe
+            md = data
+            break
+        if cid == 4354:  # Telink
+            return _parse_telink(data)
+
+    # 3. Parse based on what's available
+    power_on = None
+    rgb = None
+    mode_type = None
+    sub_mode = None
+
+    if sd is not None and md is not None:
+        # Case A: Both service data AND manufacturer data (BLE v7+)
+        ble_version = sd[3]
+        product_id = (sd[10] << 8) | sd[11]
+
+        if ble_version >= 7 and len(md) >= 28:
+            # State at offset 3 in manufacturer data
+            state = md[3:28]  # 25 bytes
+            power_byte = state[11]  # = md[14]
+            mode_type = state[12]   # = md[15]
+            sub_mode = state[13]    # = md[16]
+            rgb = (state[15], state[16], state[17])  # = md[18:21]
+        else:
+            power_byte = md[14] if len(md) > 14 else None
+
+    elif sd is not None and len(sd) >= 29:
+        # Case B: Service data ONLY (29-byte format with state)
+        # Some surplife devices may only advertise service data
+        ble_version = sd[3]
+        product_id = (sd[10] << 8) | sd[11]
+
+        # State in service data bytes 16-26
+        power_byte = sd[16]
+        mode_type = sd[17]
+        sub_mode = sd[18]
+        rgb = (sd[20], sd[21], sd[22])
+
+    elif sd is not None:
+        # Case C: Service data only (16-byte, ID only - no state)
+        ble_version = sd[3]
+        product_id = (sd[10] << 8) | sd[11]
+        power_byte = None
+
+    elif md is not None and len(md) >= 27:
+        # Case D: Manufacturer data only (standard format)
+        ble_version = md[1]
+        product_id = (md[8] << 8) | md[9]
+
+        if ble_version >= 5 and len(md) > 14:
+            power_byte = md[14]
+            mode_type = md[15]
+            sub_mode = md[16]
+            rgb = (md[18], md[19], md[20])
+        else:
+            power_byte = None
+
+    else:
+        return None
+
+    # Parse power state
+    if power_byte is not None:
+        if power_byte == 0x23:
+            power_on = True
+        elif power_byte == 0x24:
+            power_on = False
+
+    return {
+        "product_id": product_id,
+        "ble_version": ble_version,
+        "power_on": power_on,
+        "mode_type": mode_type,
+        "sub_mode": sub_mode,
+        "rgb": rgb,
+        "has_service_data": sd is not None,
+        "has_manufacturer_data": md is not None,
+    }
+
+
+def _parse_telink(data: bytes) -> dict | None:
+    """Parse Telink BLE Mesh format."""
+    if len(data) < 13:
+        return None
+
+    status = data[10] & 0xFF
+    return {
+        "product_id": 0x80,  # IOTBT
+        "ble_version": 0,
+        "power_on": status > 0,
+        "format": "telink",
+        "mesh_address": (data[12] << 8) | data[11],
+    }
+```
+
+### Implementation Notes for lednetwf_ble_2
+
+The current `parse_manufacturer_data()` in `protocol.py` only handles ZengGe format (0x5A** company IDs). To fully support all device types:
+
+1. **Add service data parsing**: Check for UUID containing "ffff" in `discovery.service_data`
+2. **Add Telink format detection**: Check for company ID 4354 (0x1102)
+3. **Handle BLE v7+ format**: When service data present, parse state from mfr_data offset 3
+4. **Parse Telink status byte at offset 10**: This contains power/brightness
+
+**Key differences for product_id=0x00 devices**:
+
+- If you see product_id=0x00 with ZengGe format, the device may be using Telink format
+- Check if manufacturer data has company ID 4354 instead of 0x5A**
+- Parse power from offset 10, not offset 14

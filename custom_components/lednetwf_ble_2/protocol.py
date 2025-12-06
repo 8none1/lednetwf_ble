@@ -156,6 +156,188 @@ def build_power_command_0x71(turn_on: bool) -> bytearray:
 
 
 # =============================================================================
+# IOTBT COMMANDS (product_id=0x00, Telink BLE Mesh based)
+# =============================================================================
+
+def build_iotbt_power_command(turn_on: bool) -> bytearray:
+    """
+    Build IOTBT power command (0x71 format, no checksum).
+
+    Source: protocol_docs/17_device_configuration.md - IOTBT Command Reference
+
+    Format: [0x71, state] - NO checksum, NO 0x0F terminator
+    State: 0x23 = ON, 0x24 = OFF
+    Uses cmd_family=0x0a (expects response)
+    """
+    state = 0x23 if turn_on else 0x24
+    raw_cmd = bytearray([0x71, state])
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+def rgb_to_iotbt_hue(r: int, g: int, b: int) -> int:
+    """
+    Convert RGB (0-255) to IOTBT quantized hue (1-240, 0=white).
+
+    Source: model_iotbt_0x80.py - hue_to_cc_240() function
+
+    IOTBT uses a 240-step hue wheel with 24-bin QUANTIZATION to avoid
+    washed-out colors. Colors are snapped to 24 discrete hue bins.
+
+    - 0 = white (special case for low saturation)
+    - 1-240 = quantized hue values
+
+    The quantization helps produce more vivid, saturated colors on the device.
+    """
+    if r == g == b:
+        # Pure grayscale (white/gray/black) - return white mode
+        return 0
+
+    # Convert RGB to HSV
+    h, s, v = rgb_to_hsv(r, g, b)
+
+    # If saturation is too low (< 5%), treat as white
+    # This threshold matches the old integration: sat < 0.05
+    if s < 5:
+        return 0
+
+    # Quantize to 24 hue bins then map to 240-step ring
+    # Source: model_iotbt_0x80.py hue_to_cc_240()
+    N_HUES = 24
+    bin_idx = int(round((h % 360) / 360 * N_HUES)) % N_HUES
+    step = 240 / N_HUES  # = 10
+    ring_pos = int(round(bin_idx * step)) % 240
+    cc = ring_pos + 1  # 1..240
+
+    # Ensure we never return 0 for colored values
+    return max(1, min(240, cc))
+
+
+def iotbt_hue_to_rgb(hue: int, brightness: int = 100) -> Tuple[int, int, int]:
+    """
+    Convert IOTBT hue (1-240, 0=white) to RGB (0-255).
+
+    Args:
+        hue: IOTBT hue value (0=white, 1-240=colors)
+        brightness: Brightness percentage (0-100)
+
+    Returns:
+        RGB tuple (0-255)
+    """
+    if hue == 0:
+        # White mode
+        level = int(brightness * 255 / 100)
+        return (level, level, level)
+
+    # Map IOTBT hue (1-240) back to standard hue (0-360)
+    std_hue = int((hue - 1) * 360 / 239)
+    std_hue = max(0, min(360, std_hue))
+
+    # Convert HSV to RGB
+    return hsv_to_rgb(std_hue, 100, brightness)
+
+
+def iotbt_brightness_to_level(brightness_0_255: int, gamma: float = 2.2, max_level: int = 31) -> int:
+    """
+    Convert brightness (0-255) to IOTBT level (0-31) with gamma correction.
+
+    Source: model_iotbt_0x80.py - brightness_to_level() function
+
+    Gamma correction makes brightness perception more linear on the device.
+    """
+    x = max(0.0, min(1.0, brightness_0_255 / 255.0))
+    x_gamma = x ** gamma
+    return int(round(x_gamma * max_level))
+
+
+def build_iotbt_color_command(r: int, g: int, b: int, brightness: int = 100) -> bytearray:
+    """
+    Build IOTBT color command (0xE2 format).
+
+    Source: protocol_docs/17_device_configuration.md - Color Command (0xE2)
+    Source: model_iotbt_0x80.py - set_color() method
+
+    Format: [0xE2, 0x0B, hue, brightness_byte]
+    - hue: Quantized hue (1-240, 0=white) using 24-bin quantization
+    - brightness_byte: 0xE0 | level (level = 0-31, gamma corrected)
+
+    Uses cmd_family=0x0a (expects response)
+    """
+    # Convert RGB to IOTBT quantized hue
+    hue = rgb_to_iotbt_hue(r, g, b)
+
+    # Convert brightness from 0-100 to 0-255 for gamma calculation
+    brightness_255 = int(brightness * 255 / 100)
+
+    # Apply gamma correction (2.2) for proper brightness perception
+    level = iotbt_brightness_to_level(brightness_255)
+    level = max(0, min(31, level))
+    brightness_byte = 0xE0 | level
+
+    raw_cmd = bytearray([0xE2, 0x0B, hue & 0xFF, brightness_byte])
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+def build_iotbt_white_command(brightness: int = 100) -> bytearray:
+    """
+    Build IOTBT white color command (0xE2 with hue=0).
+
+    Args:
+        brightness: Brightness percentage (0-100)
+
+    Returns:
+        Command packet for white mode
+    """
+    # Hue 0 = white mode
+    # Convert brightness to 0-255 for gamma calculation
+    brightness_255 = int(brightness * 255 / 100)
+    level = iotbt_brightness_to_level(brightness_255)
+    level = max(0, min(31, level))
+    brightness_byte = 0xE0 | level
+
+    raw_cmd = bytearray([0xE2, 0x0B, 0x00, brightness_byte])
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+def build_iotbt_effect_command(effect_id: int, speed: int = 50, brightness: int = 100) -> bytearray:
+    """
+    Build IOTBT effect command (0xE0 0x02 format).
+
+    Source: protocol_docs/17_device_configuration.md - Effect Command (0xE0 0x02)
+    Source: model_iotbt_0x80.py - set_effect() method
+
+    Format: [0xE0, 0x02, 0x00, effect_id, speed, brightness] - 6 bytes!
+    - 0x00: Constant byte (required!)
+    - effect_id: 1-12 (IOTBT has 12 effects)
+    - speed: 1-100
+    - brightness: 1-100 (percentage)
+
+    Uses cmd_family=0x0a (expects response)
+    """
+    effect_id = max(1, min(12, effect_id))
+    speed = max(1, min(100, speed))
+    brightness = max(1, min(100, brightness))
+
+    # Note: The 0x00 byte after 0x02 is REQUIRED - old integration shows 6-byte payload
+    raw_cmd = bytearray([0xE0, 0x02, 0x00, effect_id & 0xFF, speed & 0xFF, brightness & 0xFF])
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+def build_iotbt_state_query() -> bytearray:
+    """
+    Build IOTBT state query command (0xEA format for firmware >= 11).
+
+    Source: protocol_docs/17_device_configuration.md - Query Command: 0xEA
+
+    Format: [0xEA, 0x81, 0x8A, 0x8B] - NO checksum
+    Response will be DeviceState2 format (0xEA 0x81 magic header)
+
+    Uses cmd_family=0x0a (expects response)
+    """
+    raw_cmd = bytearray([0xEA, 0x81, 0x8A, 0x8B])
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+# =============================================================================
 # COLOR COMMANDS
 # =============================================================================
 
@@ -534,7 +716,7 @@ def build_effect_command(
     Build effect command based on device effect type.
 
     Args:
-        effect_type: SIMPLE, SYMPHONY, or ADDRESSABLE_0x53
+        effect_type: SIMPLE, SYMPHONY, ADDRESSABLE_0x53, or IOTBT
         effect_id: Effect ID (can be encoded for special effect types)
         speed: Effect speed (0-100)
         brightness: Effect brightness (0-100)
@@ -550,8 +732,14 @@ def build_effect_command(
         - Static effects: (effect_id >> 8) where result is 2-10
         - Sound reactive: (effect_id >> 8) where result is 0x33-0x41
         - Regular effects: effect_id directly (1-99, 255)
+
+    IOTBT devices (product_id=0x00):
+        - Uses 0xE0 0x02 command format with effect IDs 1-12
     """
-    if effect_type == EffectType.ADDRESSABLE_0x53:
+    if effect_type == EffectType.IOTBT:
+        # IOTBT devices use 0xE0 0x02 command format
+        return build_iotbt_effect_command(effect_id, speed, brightness)
+    elif effect_type == EffectType.ADDRESSABLE_0x53:
         # 4 bytes, NO checksum - brightness is critical!
         return build_effect_command_0x53(effect_id, speed, brightness)
     elif effect_type == EffectType.SYMPHONY:
@@ -1120,6 +1308,101 @@ def parse_manufacturer_data(
     if not manu_data:
         return None
 
+    # Check for Telink BLE Mesh format (Company ID 4354)
+    # Source: protocol_docs/17_device_configuration.md
+    # Used by IOTBT devices (product_id=0x00/0x80)
+    TELINK_COMPANY_ID = 4354  # 0x1102
+
+    if TELINK_COMPANY_ID in manu_data:
+        data = manu_data[TELINK_COMPANY_ID]
+
+        # IOTBT devices use a CUSTOM format (NOT standard Telink BLE Mesh)
+        # Source: old integration model_iotbt_0x80.py _parse_state_from_manu_data()
+        # Format (bleak - company ID is dict key, not in data):
+        #   Byte 0: unknown (sta or mesh prefix)
+        #   Byte 1: power state (0x23=ON, 0x24=OFF)
+        #   Byte 2: mode (0x66=solid color, 0x67=effect, 0x69=music)
+        #   Byte 3: effect_id (when in effect/music mode)
+
+        if len(data) >= 4:
+            # Detect IOTBT custom format by checking byte 1 for power markers
+            byte1 = data[1] & 0xFF
+            if byte1 in (0x23, 0x24):
+                # IOTBT custom format detected
+                power_on = (byte1 == 0x23)
+                mode = data[2] & 0xFF
+                effect_id = data[3] & 0xFF if len(data) > 3 else None
+
+                # Determine color mode from mode byte
+                color_mode = None
+                if mode == 0x66:
+                    color_mode = 'rgb'  # Solid color mode
+                elif mode == 0x67:
+                    color_mode = 'effect'  # Regular effect mode
+                elif mode == 0x69:
+                    color_mode = 'music'  # Music reactive mode
+                    # For music mode, effect_id is shifted
+                    if effect_id is not None:
+                        effect_id = effect_id << 8
+
+                _LOGGER.debug(
+                    "%sParsed IOTBT manu data: power=%s, mode=0x%02X (%s), effect_id=%s",
+                    log_prefix, "ON" if power_on else "OFF", mode,
+                    color_mode or "unknown", effect_id
+                )
+
+                return {
+                    "product_id": 0x00,  # IOTBT device - use 0x00 (const.py defines IOTBT at product_id=0)
+                    "power_state": power_on,
+                    "format": "iotbt",
+                    "manu_id": TELINK_COMPANY_ID,
+                    "ble_version": None,  # IOTBT doesn't use BLE version in advertisement
+                    "fw_version": None,   # Firmware version not in advertisement
+                    "sta": data[0] & 0xFF,
+                    "color_mode": color_mode,
+                    "rgb": None,  # IOTBT doesn't include RGB in advertisement
+                    "color_temp_percent": None,
+                    "brightness_percent": None,
+                    "effect_id": effect_id,
+                    "effect_speed": None,
+                }
+            else:
+                # Standard Telink BLE Mesh format (fallback)
+                # Raw offsets: mesh_uuid@2-3, product_uuid@8-9, status@10, mesh_addr@11-12
+                # Bleak offsets (subtract 2): mesh_uuid@0-1, product_uuid@6-7, status@8
+                if len(data) >= 11:
+                    status = data[8] & 0xFF
+                    power_on = status > 0
+                    mesh_address = (data[10] << 8) | data[9]
+
+                    _LOGGER.debug(
+                        "%sParsed Telink mesh manu data: status=%d, power=%s, mesh_addr=0x%04X",
+                        log_prefix, status, "ON" if power_on else "OFF", mesh_address
+                    )
+
+                    return {
+                        "product_id": 0x00,  # IOTBT device - use 0x00 (const.py defines IOTBT at product_id=0)
+                        "power_state": power_on,
+                        "format": "telink_mesh",
+                        "manu_id": TELINK_COMPANY_ID,
+                        "mesh_address": mesh_address,
+                        "status": status,
+                        "ble_version": None,
+                        "fw_version": None,
+                        "sta": None,
+                        "color_mode": None,
+                        "rgb": None,
+                        "color_temp_percent": None,
+                        "brightness_percent": None,
+                        "effect_id": None,
+                        "effect_speed": None,
+                    }
+        else:
+            _LOGGER.debug(
+                "%sTelink data too short: %d bytes (expected 4+)",
+                log_prefix, len(data)
+            )
+
     # Find valid company ID in 0x5A** range (23040-23295)
     # Source: protocol_docs/03_manufacturer_data_parsing.md
     VALID_COMPANY_ID_MIN = 23040  # 0x5A00
@@ -1136,7 +1419,53 @@ def parse_manufacturer_data(
             )
             continue
 
-        # Parse Format B fields
+        # Check for IOTBT device advertising with 0x5Axx company ID
+        # Source: old integration model_iotbt_0x80.py
+        # IOTBT format has power marker (0x23/0x24) at byte 1 and product_id=0x00
+        byte1 = data[1] & 0xFF
+        bytes8_9_product = (data[8] << 8) | data[9]
+
+        if bytes8_9_product == 0x00 and byte1 in (0x23, 0x24):
+            # IOTBT device using 0x5Axx company ID with IOTBT data format
+            # Byte 1 = power state (0x23=ON, 0x24=OFF)
+            # Byte 2 = mode (0x66=solid, 0x67=effect, 0x69=music)
+            # Byte 3 = effect_id
+            power_on = (byte1 == 0x23)
+            mode = data[2] & 0xFF if len(data) > 2 else 0
+            iotbt_effect_id = data[3] & 0xFF if len(data) > 3 else None
+
+            color_mode = None
+            if mode == 0x66:
+                color_mode = 'rgb'
+            elif mode == 0x67:
+                color_mode = 'effect'
+            elif mode == 0x69:
+                color_mode = 'music'
+                if iotbt_effect_id is not None:
+                    iotbt_effect_id = iotbt_effect_id << 8
+
+            _LOGGER.debug(
+                "%sDetected IOTBT device (0x5Axx company ID): power=%s, mode=0x%02X (%s), effect=%s",
+                log_prefix, "ON" if power_on else "OFF", mode, color_mode or "unknown", iotbt_effect_id
+            )
+
+            return {
+                "product_id": 0x00,  # IOTBT device
+                "power_state": power_on,
+                "format": "iotbt_5axx",  # IOTBT format with 0x5Axx company ID
+                "manu_id": manu_id,
+                "ble_version": None,  # IOTBT doesn't use standard BLE version
+                "fw_version": None,   # Firmware version not in advertisement
+                "sta": data[0] & 0xFF,
+                "color_mode": color_mode,
+                "rgb": None,
+                "color_temp_percent": None,
+                "brightness_percent": None,
+                "effect_id": iotbt_effect_id,
+                "effect_speed": None,
+            }
+
+        # Parse Format B fields (standard ZengGe format)
         sta = data[0]
         ble_version = data[1]
 
@@ -1290,4 +1619,236 @@ def parse_manufacturer_data(
     # No valid manufacturer data found
     _LOGGER.debug("%sNo valid LEDnetWF manufacturer data found in: %s",
                   log_prefix, {hex(k): len(v) for k, v in manu_data.items()})
+    return None
+
+
+# =============================================================================
+# SERVICE DATA PARSING (BLE v5+)
+# =============================================================================
+
+# Service UUID for LEDnetWF devices
+SERVICE_UUID_FFFF = "0000ffff-0000-1000-8000-00805f9b34fb"
+SERVICE_UUID_SHORT = 0xFFFF
+
+
+def parse_service_data(service_data: bytes) -> dict | None:
+    """
+    Parse LEDnetWF service data (16 or 29 bytes).
+
+    Source: protocol_docs/17_device_configuration.md - Service Data Format
+
+    Service data provides device identification and version information.
+    For BLE v5+ devices, service data contains firmware version, LED version,
+    and other device-specific information.
+
+    Args:
+        service_data: Raw service data bytes (16 or 29 bytes)
+
+    Returns:
+        Dict with device identification and version info, or None if invalid
+
+    Format (16-byte minimum):
+        Byte 0: sta - Status byte (255 = OTA mode)
+        Byte 1: mfr_hi - Manufacturer prefix (0x5A or 0x5B)
+        Byte 2: mfr_lo - Manufacturer low byte
+        Byte 3: ble_version - BLE protocol version
+        Byte 4-9: mac_address - Device MAC (6 bytes)
+        Byte 10-11: product_id - Product ID (big-endian)
+        Byte 12: firmware_ver_lo - Firmware version low byte
+        Byte 13: led_version - LED/hardware version
+        Byte 14: check_key + fw_hi - Bits 0-1: check_key, Bits 2-7: firmware high (BLE v6+)
+        Byte 15: firmware_flag - Feature flags (bits 0-4)
+    """
+    if len(service_data) < 16:
+        _LOGGER.debug("Service data too short: %d bytes (need 16)", len(service_data))
+        return None
+
+    # Check manufacturer prefix (0x5A or 0x5B)
+    mfr_hi = service_data[1] & 0xFF
+    if mfr_hi not in (0x5A, 0x5B):
+        _LOGGER.debug("Service data invalid manufacturer prefix: 0x%02X", mfr_hi)
+        return None
+
+    sta = service_data[0] & 0xFF
+    manufacturer = (mfr_hi << 8) | (service_data[2] & 0xFF)
+    ble_version = service_data[3] & 0xFF
+    mac_bytes = service_data[4:10]
+    product_id = (service_data[10] << 8) | service_data[11]
+    firmware_ver_lo = service_data[12] & 0xFF
+    led_version = service_data[13] & 0xFF
+
+    # Extended firmware version for BLE v6+
+    firmware_ver = firmware_ver_lo
+    check_key_flag = 0
+    firmware_flag = 0
+
+    if ble_version >= 6 and len(service_data) >= 16:
+        byte14 = service_data[14] & 0xFF
+        byte15 = service_data[15] & 0xFF
+        check_key_flag = byte14 & 0x03        # bits 0-1
+        firmware_ver_hi = (byte14 >> 2) & 0x3F  # bits 2-7
+        firmware_ver = firmware_ver_lo | (firmware_ver_hi << 8)
+        firmware_flag = byte15 & 0x1F         # bits 0-4
+
+    # Format MAC address for display
+    mac_address = ":".join(f"{b:02X}" for b in mac_bytes)
+
+    # Format firmware version string
+    fw_version_str = f"{firmware_ver}"
+    if ble_version >= 6 and firmware_ver > 255:
+        fw_version_str = f"{firmware_ver >> 8}.{firmware_ver & 0xFF}"
+
+    _LOGGER.debug(
+        "Parsed service data: sta=%d, mfr=0x%04X, ble_v=%d, mac=%s, "
+        "product_id=0x%02X (%d), fw=%s, led_ver=%d",
+        sta, manufacturer, ble_version, mac_address,
+        product_id, product_id, fw_version_str, led_version
+    )
+
+    return {
+        "sta": sta,
+        "is_ota_mode": sta == 0xFF,
+        "manufacturer": manufacturer,
+        "ble_version": ble_version,
+        "mac_address": mac_address,
+        "product_id": product_id,
+        "firmware_ver": firmware_ver,
+        "firmware_ver_str": fw_version_str,
+        "led_version": led_version,
+        "check_key_flag": check_key_flag,
+        "firmware_flag": firmware_flag,
+    }
+
+
+def parse_service_data_with_state(service_data: bytes) -> dict | None:
+    """
+    Parse 29-byte service data that includes power state.
+
+    Source: protocol_docs/17_device_configuration.md - 29-byte Service Data
+
+    When service data is 29 bytes, byte 16 contains power state:
+        Byte 16: power - 0x23 = ON, 0x24 = OFF
+
+    Args:
+        service_data: Raw service data (29 bytes)
+
+    Returns:
+        Dict with device info and power state, or None if invalid
+    """
+    if len(service_data) < 29:
+        return parse_service_data(service_data)
+
+    result = parse_service_data(service_data)
+    if result is None:
+        return None
+
+    # Extract power state from byte 16
+    power_byte = service_data[16] & 0xFF
+    if power_byte == 0x23:
+        result["power_on"] = True
+    elif power_byte == 0x24:
+        result["power_on"] = False
+    else:
+        result["power_on"] = None
+
+    _LOGGER.debug(
+        "Service data (29-byte): power=%s (byte16=0x%02X)",
+        "ON" if result.get("power_on") else "OFF" if result.get("power_on") is False else "unknown",
+        power_byte
+    )
+
+    return result
+
+
+def parse_v7_with_service_data(
+    service_data: bytes,
+    mfr_data: bytes,
+    device_name: str | None = None
+) -> dict | None:
+    """
+    Parse BLE v7+ advertisement with service data.
+
+    Source: protocol_docs/17_device_configuration.md - BLE v7+ with Service Data
+
+    For BLE v7+ devices that have both service data AND manufacturer data:
+    - Device identification comes from service data
+    - State data comes from manufacturer data at OFFSET 3 (not 14!)
+
+    Args:
+        service_data: 16 bytes from service data AD type (UUID 0xFFFF)
+        mfr_data: 27+ bytes from manufacturer data AD type
+
+    Returns:
+        Dict with device info and state, or None if invalid
+    """
+    log_prefix = f"[{device_name}] " if device_name else ""
+
+    # Device ID and version from service data
+    device_info = parse_service_data(service_data)
+    if device_info is None:
+        _LOGGER.debug("%sService data parsing failed", log_prefix)
+        return None
+
+    ble_version = device_info["ble_version"]
+
+    # For v7+, state is in manufacturer data at offset 3
+    if ble_version >= 7 and len(mfr_data) >= 28:
+        state_data = mfr_data[3:28]  # 25 bytes starting at offset 3
+
+        # Power state is at state_data[11] (= mfr_data[14])
+        power_byte = state_data[11] & 0xFF
+        if power_byte == 0x23:
+            device_info["power_on"] = True
+        elif power_byte == 0x24:
+            device_info["power_on"] = False
+        else:
+            device_info["power_on"] = None
+
+        # Mode type at state_data[12] (= mfr_data[15])
+        mode_type = state_data[12] & 0xFF
+        sub_mode = state_data[13] & 0xFF
+
+        device_info["state_data"] = state_data
+        device_info["mode_type"] = mode_type
+        device_info["sub_mode"] = sub_mode
+
+        _LOGGER.debug(
+            "%sBLE v7+ parsed: power=%s, mode=0x%02X, sub_mode=0x%02X",
+            log_prefix,
+            "ON" if device_info.get("power_on") else "OFF",
+            mode_type, sub_mode
+        )
+
+    return device_info
+
+
+def get_service_data_from_advertisement(
+    service_data_dict: dict[str, bytes]
+) -> bytes | None:
+    """
+    Extract LEDnetWF service data from advertisement service data dict.
+
+    Home Assistant's BluetoothServiceInfoBleak provides service_data as a dict
+    mapping UUID strings to bytes.
+
+    Args:
+        service_data_dict: Dict from BluetoothServiceInfoBleak.service_data
+
+    Returns:
+        Service data bytes if found, or None
+    """
+    # Try full UUID
+    if SERVICE_UUID_FFFF in service_data_dict:
+        return service_data_dict[SERVICE_UUID_FFFF]
+
+    # Try short UUID as string (some platforms use this format)
+    short_uuid_str = f"0000{SERVICE_UUID_SHORT:04x}-0000-1000-8000-00805f9b34fb"
+    if short_uuid_str in service_data_dict:
+        return service_data_dict[short_uuid_str]
+
+    # Try just "ffff" or "FFFF"
+    for key in service_data_dict:
+        if "ffff" in key.lower():
+            return service_data_dict[key]
+
     return None
