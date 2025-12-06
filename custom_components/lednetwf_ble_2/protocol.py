@@ -322,6 +322,54 @@ def build_iotbt_effect_command(effect_id: int, speed: int = 50, brightness: int 
     return wrap_command(raw_cmd, cmd_family=0x0a)
 
 
+def build_iotbt_music_command(effect_id: int, brightness: int = 100, sensitivity: int = 100) -> bytearray:
+    """
+    Build IOTBT music reactive command (0xE1 0x05 format).
+
+    Source: protocol_docs/17_device_configuration.md - Music Mode Command (0xE1 0x05)
+    Source: model_iotbt_0x80.py - set_effect() method for music mode
+
+    This is a 54-byte packet that enables music reactive mode with a specific effect.
+
+    Args:
+        effect_id: Music effect ID (1, 2, 3, 4, 7, 8, 12, 13 - other IDs don't exist)
+        brightness: Brightness percentage (0-100)
+        sensitivity: Mic sensitivity percentage (0-100)
+
+    Packet structure (raw payload, 46 bytes):
+        Byte 0: 0xE1 - Music mode opcode
+        Byte 1: 0x05 - Sub-command
+        Byte 2: 0x01 - Enable
+        Byte 3: brightness (0-100)
+        Byte 4: effect_id (1-13)
+        Byte 5-6: 0x00 0x00
+        Byte 7: sensitivity (0-100)
+        Bytes 8-45: Color palette data (fixed pattern)
+
+    Uses cmd_family=0x0a (expects response)
+    """
+    # Valid music effects: 1, 2, 3, 4, 7, 8, 12, 13 (5, 6, 9, 10, 11 don't exist)
+    effect_id = max(1, min(13, effect_id))
+    brightness = max(1, min(100, brightness))
+    sensitivity = max(1, min(100, sensitivity))
+
+    # Base packet from old integration (46 bytes raw payload)
+    # The full wrapped packet is 54 bytes (8-byte header + 46-byte payload)
+    raw_cmd = bytearray.fromhex(
+        "e1 05 01 64 08 00 00 64 "
+        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
+        "a1 00 00 00 06 a1 00 64 64 a1 96 64 64 a1 78 64 64 "
+        "a1 5a 64 64 a1 3c 64 64 a1 1e 64 64"
+    )
+
+    # Set the variable bytes
+    raw_cmd[3] = brightness & 0xFF    # Brightness at offset 3
+    raw_cmd[4] = effect_id & 0xFF     # Effect ID at offset 4
+    raw_cmd[7] = sensitivity & 0xFF   # Sensitivity at offset 7
+
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
 def build_iotbt_state_query() -> bytearray:
     """
     Build IOTBT state query command (0xEA format for firmware >= 11).
@@ -734,11 +782,21 @@ def build_effect_command(
         - Regular effects: effect_id directly (1-99, 255)
 
     IOTBT devices (product_id=0x00):
-        - Uses 0xE0 0x02 command format with effect IDs 1-12
+        - Regular effects (1-12): 0xE0 0x02 command format
+        - Music effects (encoded as effect_num << 8): 0xE1 0x05 command format
+          Speed parameter is used as mic sensitivity for music mode
     """
     if effect_type == EffectType.IOTBT:
-        # IOTBT devices use 0xE0 0x02 command format
-        return build_iotbt_effect_command(effect_id, speed, brightness)
+        # IOTBT devices use different commands for regular effects vs music effects
+        if effect_id >= 0x100:
+            # Music reactive effect (encoded as effect_num << 8)
+            # Decode the effect ID and use music command
+            music_effect_id = effect_id >> 8
+            # Speed is used as sensitivity for music mode
+            return build_iotbt_music_command(music_effect_id, brightness, speed)
+        else:
+            # Regular effect (1-12) via 0xE0 0x02 command
+            return build_iotbt_effect_command(effect_id, speed, brightness)
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         # 4 bytes, NO checksum - brightness is critical!
         return build_effect_command_0x53(effect_id, speed, brightness)
@@ -1659,11 +1717,44 @@ def parse_service_data(service_data: bytes) -> dict | None:
         Byte 14: check_key + fw_hi - Bits 0-1: check_key, Bits 2-7: firmware high (BLE v6+)
         Byte 15: firmware_flag - Feature flags (bits 0-4)
     """
+    # Handle IOTBT 14-byte format (Telink BLE Mesh)
+    # Format: [type][ble_ver][MAC 6 bytes][mesh_addr 2 bytes][led_ver][mode][flags][flags2]
+    if len(service_data) == 14 and service_data[0] == 0x80:
+        ble_version = service_data[1] & 0xFF
+        mac_bytes = service_data[2:8]
+        mesh_addr = (service_data[8] << 8) | service_data[9]
+        led_version = service_data[10] & 0xFF
+        mode = service_data[11] & 0xFF
+        flags = service_data[12] & 0xFF
+        flags2 = service_data[13] & 0xFF
+
+        mac_address = ":".join(f"{b:02X}" for b in mac_bytes)
+
+        _LOGGER.debug(
+            "Parsed IOTBT service data: ble_v=%d, mac=%s, mesh_addr=0x%04X, "
+            "led_ver=%d, mode=0x%02X, flags=0x%02X",
+            ble_version, mac_address, mesh_addr, led_version, mode, flags
+        )
+
+        return {
+            "sta": 0,
+            "is_ota_mode": False,
+            "is_iotbt": True,
+            "ble_version": ble_version,
+            "mac_address": mac_address,
+            "mesh_address": mesh_addr,
+            "led_version": led_version,
+            "firmware_ver": led_version,  # Use led_version as firmware indicator
+            "firmware_ver_str": str(led_version),
+            "firmware_flag": flags,
+            "product_id": 0,  # IOTBT always product_id=0
+        }
+
     if len(service_data) < 16:
         _LOGGER.debug("Service data too short: %d bytes (need 16)", len(service_data))
         return None
 
-    # Check manufacturer prefix (0x5A or 0x5B)
+    # Check manufacturer prefix (0x5A or 0x5B) for standard ZengGe format
     mfr_hi = service_data[1] & 0xFF
     if mfr_hi not in (0x5A, 0x5B):
         _LOGGER.debug("Service data invalid manufacturer prefix: 0x%02X", mfr_hi)
@@ -1831,13 +1922,18 @@ def get_service_data_from_advertisement(
     Home Assistant's BluetoothServiceInfoBleak provides service_data as a dict
     mapping UUID strings to bytes.
 
+    LEDnetWF devices may use different service UUIDs:
+    - 0xFFFF: Standard service UUID
+    - 0x5A00: ZengGe manufacturer-specific (seen on IOTBT devices)
+    - 0x5B00: ZengGe manufacturer-specific variant
+
     Args:
         service_data_dict: Dict from BluetoothServiceInfoBleak.service_data
 
     Returns:
         Service data bytes if found, or None
     """
-    # Try full UUID
+    # Try full UUID (0xFFFF)
     if SERVICE_UUID_FFFF in service_data_dict:
         return service_data_dict[SERVICE_UUID_FFFF]
 
@@ -1846,7 +1942,14 @@ def get_service_data_from_advertisement(
     if short_uuid_str in service_data_dict:
         return service_data_dict[short_uuid_str]
 
-    # Try just "ffff" or "FFFF"
+    # Try ZengGe manufacturer-specific UUIDs (0x5A00, 0x5B00)
+    # These are used by IOTBT and possibly other devices
+    for prefix in ("5a00", "5b00"):
+        uuid_str = f"0000{prefix}-0000-1000-8000-00805f9b34fb"
+        if uuid_str in service_data_dict:
+            return service_data_dict[uuid_str]
+
+    # Try just "ffff" or "FFFF" as fallback
     for key in service_data_dict:
         if "ffff" in key.lower():
             return service_data_dict[key]

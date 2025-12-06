@@ -95,8 +95,11 @@ class LEDNetWFDevice:
         self._direction: int | None = None  # 0 = forward, 1 = reverse
         self._pending_led_settings_response: asyncio.Event | None = None
 
-        # Firmware info
+        # Firmware info (from manufacturer data or service data)
         self._fw_version: str | None = None
+        self._ble_version: int | None = None
+        self._led_version: int | None = None
+        self._firmware_flag: int | None = None  # Feature flags from service data (bits 0-4)
 
         # Callbacks for state updates
         self._callbacks: list[Callable[[], None]] = []
@@ -218,6 +221,31 @@ class LEDNetWFDevice:
     def fw_version(self) -> str | None:
         """Return firmware version."""
         return self._fw_version
+
+    @property
+    def ble_version(self) -> int | None:
+        """Return BLE protocol version from service data.
+
+        Source: protocol_docs/17_device_configuration.md - Service Data Format
+        """
+        return self._ble_version
+
+    @property
+    def led_version(self) -> int | None:
+        """Return LED/hardware version from service data.
+
+        Source: protocol_docs/17_device_configuration.md - Service Data Format
+        """
+        return self._led_version
+
+    @property
+    def firmware_flag(self) -> int | None:
+        """Return firmware feature flags (bits 0-4) from service data.
+
+        Source: protocol_docs/17_device_configuration.md - Service Data Format
+        Byte 15 contains feature flags that may indicate device capabilities.
+        """
+        return self._firmware_flag
 
     @property
     def led_count(self) -> int | None:
@@ -1552,18 +1580,63 @@ class LEDNetWFDevice:
             return True
         return False
 
-    def update_from_advertisement(self, manu_data: dict[int, bytes]) -> bool:
-        """Update state from manufacturer advertisement data.
+    def update_from_advertisement(
+        self,
+        manu_data: dict[int, bytes],
+        service_data: dict[str, bytes] | None = None,
+    ) -> bool:
+        """Update state from manufacturer and service advertisement data.
 
-        Parses state_data bytes (14-24) which include:
+        Parses manufacturer data (state_data bytes 14-24) which includes:
         - Power state (byte 14)
         - Color mode (byte 15-16): RGB, CCT, or Effect
         - RGB color (bytes 18-20 when in RGB mode)
         - Brightness/CCT (bytes 17, 21 when in CCT mode)
         - Effect ID/speed (bytes 16, 18-19 when in effect mode)
 
+        Also parses service data (16 or 29 bytes) which includes:
+        - BLE protocol version (byte 3)
+        - Firmware version (bytes 12 + 14)
+        - LED/hardware version (byte 13)
+        - Firmware feature flags (byte 15, bits 0-4)
+
+        Source: protocol_docs/17_device_configuration.md - Service Data Format
+
         Returns True if state was updated.
         """
+        # Parse service data first if available (provides device info)
+        if service_data:
+            _LOGGER.debug(
+                "[%s] Service data UUIDs available: %s",
+                self._name, list(service_data.keys())
+            )
+            sd_bytes = protocol.get_service_data_from_advertisement(service_data)
+            if sd_bytes:
+                _LOGGER.debug(
+                    "[%s] Raw service data (%d bytes): %s",
+                    self._name, len(sd_bytes),
+                    ' '.join(f'{b:02X}' for b in sd_bytes[:20])  # First 20 bytes
+                )
+                sd_result = protocol.parse_service_data(sd_bytes)
+                if sd_result:
+                    # Update device info from service data
+                    if sd_result.get("ble_version") is not None:
+                        self._ble_version = sd_result["ble_version"]
+                    if sd_result.get("led_version") is not None:
+                        self._led_version = sd_result["led_version"]
+                    if sd_result.get("firmware_flag") is not None:
+                        self._firmware_flag = sd_result["firmware_flag"]
+                    if sd_result.get("firmware_ver_str"):
+                        self._fw_version = sd_result["firmware_ver_str"]
+                    _LOGGER.debug(
+                        "[%s] Service data: ble_v=%s, led_v=%s, fw_flag=%s, fw=%s",
+                        self._name,
+                        self._ble_version,
+                        self._led_version,
+                        self._firmware_flag,
+                        self._fw_version,
+                    )
+
         result = protocol.parse_manufacturer_data(manu_data, self._name)
         if not result:
             return False

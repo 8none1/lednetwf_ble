@@ -1450,3 +1450,111 @@ The current `parse_manufacturer_data()` in `protocol.py` only handles ZengGe for
 - If you see product_id=0x00 with ZengGe format, the device may be using Telink format
 - Check if manufacturer data has company ID 4354 instead of 0x5A**
 - Parse power from offset 10, not offset 14
+
+---
+
+## Feature Detection: Built-in Microphone
+
+**Last Updated**: 6 December 2025
+
+The Surplife/MagicHome app uses a **database-driven approach** to detect device features like built-in microphone capability. This section documents how mic detection works.
+
+### How the App Detects Microphone Support
+
+1. **Product ID Lookup**: The app maintains a device database (`data.mdb` - LMDB format) that maps `productId` to device capabilities.
+
+2. **Tab UI Configuration**: Each product ID has a `tab_ui` config defining available UI pages:
+   - `"music"` = Phone microphone mode (uses phone's mic, sends FFT data to device)
+   - `"musicMic"` = Device built-in microphone (device has hardware mic)
+
+3. **Protocol Naming Convention** (for BLE devices):
+   - `rgb_mini` = No built-in microphone
+   - `rgb_mini_mic` = Has built-in microphone
+
+4. **Function Codes**: Devices with built-in mic have these function codes in their config:
+   - `get_mic_info` / `set_mic_info` - Hardware microphone info commands
+   - `get_mic_info_v2` / `set_mic_info_v2` - Hardware mic with color support
+   - `microphone_V2` - Hardware microphone mode
+   - `symp_get_mic_info` / `symp_mic_info` - Symphony device mic info
+
+### Products with Built-in Microphone
+
+Based on analysis of `ble_devices.json` and the LMDB database:
+
+| Product ID | Protocol | Has Mic | Notes |
+|------------|----------|---------|-------|
+| 8 | rgb_mini_mic | Yes | Ctrl_Mini_RGB_Mic |
+| 60 | rgb_mini_mic | Yes | RGB controller with mic |
+| 51 | rgb_mini | No | Ctrl_Mini_RGB (no mic) |
+| 16 | common | Yes | Has mic functions |
+| 162-166 | symphony | Yes | Symphony devices (symp_mic_info) |
+| 170-188 | symphony_line | Yes | Symphony line lights (musicMic tab) |
+| 172-173 | symphony_curtain | Yes | Symphony curtain lights |
+
+### Phone Mic vs Device Mic
+
+The distinction is important:
+
+| Mode | Tab UI | Behavior |
+|------|--------|----------|
+| Phone Mic | `"music"` | App captures audio from phone microphone, performs FFT, sends audio data to device over BLE |
+| Device Mic | `"musicMic"` | Device has built-in microphone, performs own audio analysis, only needs effect selection command |
+
+### IOTBT (Telink Mesh) Microphone Detection
+
+For IOTBT devices (Telink BLE Mesh, company ID 0x1102):
+
+- IOTBT devices use `productId` from advertisement data for feature lookup
+- The app looks up the productId in `mesh_device.json` or `mesh_device_panel.json`
+- If `musicMic` is in `tab_ui`, device has built-in mic
+- IOTBT music command is `0xE1 0x05` (see doc 12)
+
+**IOTBT products observed with mic**:
+- Based on reverse engineering, IOTBT devices can have mic
+- Detection relies on productId lookup, same as other device types
+
+### Implementation Recommendations for Integration
+
+Since the app uses database lookups rather than dynamic detection:
+
+**Option 1: Hardcode per product ID** (Current approach)
+```python
+DEVICES = {
+    # Product ID 8: Has mic
+    0x08: {"name": "Ctrl_Mini_RGB_Mic", "has_builtin_mic": True, "mic_cmd_format": "simple"},
+    # Product ID 51: No mic
+    0x33: {"name": "Ctrl_Mini_RGB", "has_builtin_mic": False},
+    # IOTBT
+    0x00: {"name": "IOTBT_Device", "has_builtin_mic": True, "mic_cmd_format": "iotbt"},
+}
+```
+
+**Option 2: Protocol name detection**
+```python
+def has_builtin_mic(protocol_name: str) -> bool:
+    """Detect mic from protocol name convention."""
+    return "_mic" in protocol_name.lower()
+```
+
+**Option 3: Query device** (most reliable but requires connection)
+- Send `get_mic_info` command and check for response
+- If device responds, it has mic; if error/timeout, no mic
+- Downside: Requires BLE connection, may not work during discovery
+
+### Mic Detection Commands
+
+For devices that support mic queries:
+
+**Standard get_mic_info (Product 8, 16, 60)**:
+```
+Command: Device-specific, typically in JSON wrapper format
+Response: Contains mic mode, sensitivity, color settings
+```
+
+**Symphony get_mic_info (Products 162-166)**:
+```
+Command: symp_get_mic_info (parameters = null)
+Response: Contains mic configuration for symphony devices
+```
+
+**Note**: IOTBT devices don't use query commands - mic capability is determined at pairing time based on productId.

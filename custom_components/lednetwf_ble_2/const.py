@@ -382,6 +382,21 @@ IOTBT_EFFECTS: Final = {
     12: "Effect 12",
 }
 
+# IOTBT music reactive effects (0xE1 0x05 command)
+# Source: model_iotbt_0x80.py - Music mode uses effect IDs shifted by << 8
+# Only effects 1, 2, 3, 4, 7, 8, 12, 13 exist on the device (5, 6, 9, 10, 11 don't exist)
+# Effect IDs are encoded as (effect_num << 8) to distinguish from regular effects
+IOTBT_MUSIC_EFFECTS: Final = {
+    0x100: "Music 1",   # 1 << 8
+    0x200: "Music 2",   # 2 << 8
+    0x300: "Music 3",   # 3 << 8
+    0x400: "Music 4",   # 4 << 8
+    0x700: "Music 7",   # 7 << 8
+    0x800: "Music 8",   # 8 << 8
+    0xC00: "Music 12",  # 12 << 8
+    0xD00: "Music 13",  # 13 << 8
+}
+
 # Product IDs with special speed encoding (inverted 0x01-0x1F scale)
 # Source: model_0x54.py, protocol_docs/07a_effect_commands_by_device.md
 # These devices use inverted speed where 0x01=fastest, 0x1F=slowest
@@ -447,8 +462,8 @@ PRODUCT_CAPABILITIES: Final = {
 
     # IOTBT devices (Telink BLE Mesh based)
     # Source: protocol_docs/17_device_configuration.md - IOTBT Command Reference
-    # Uses different protocol: 0x71 power, 0xE2 hue-based color, 0xE0 0x02 effects
-    0:   {"name": "IOTBT_Device", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.IOTBT, "is_iotbt": True},
+    # Uses different protocol: 0x71 power, 0xE2 hue-based color, 0xE0 0x02 effects, 0xE1 0x05 music
+    0:   {"name": "IOTBT_Device", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.IOTBT, "is_iotbt": True, "has_builtin_mic": True, "mic_cmd_format": "iotbt"},
 
     # Ring/Strip lights with background color support
     # Note: product_id 0x53 (83) uses ADDRESSABLE_0x53 effect format (4 bytes, NO checksum)
@@ -620,10 +635,13 @@ def get_effect_list(
         effects = list(ADDRESSABLE_0x53_EFFECTS.values())
     elif effect_type == EffectType.IOTBT:
         # IOTBT devices have 12 effects via 0xE0 0x02 command
+        # Plus 8 music reactive effects via 0xE1 0x05 command
         effects = list(IOTBT_EFFECTS.values())
+        effects.extend(list(IOTBT_MUSIC_EFFECTS.values()))
 
-    # Add sound reactive option for devices with built-in microphone
-    if has_builtin_mic:
+    # Add sound reactive option for devices with built-in microphone (non-IOTBT)
+    # IOTBT devices have specific music effects listed above instead
+    if has_builtin_mic and effect_type != EffectType.IOTBT:
         effects.append("Sound Reactive")
 
     return effects
@@ -699,9 +717,14 @@ def get_effect_id(
             if name == effect_name:
                 return eid
     elif effect_type == EffectType.IOTBT:
+        # Regular effects (1-12)
         for eid, name in IOTBT_EFFECTS.items():
             if name == effect_name:
                 return eid
+        # Music reactive effects (encoded as effect_num << 8)
+        for eid, name in IOTBT_MUSIC_EFFECTS.items():
+            if name == effect_name:
+                return eid  # Already encoded (e.g., 0x100 for Music 1)
     return None
 
 

@@ -105,8 +105,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         change: BluetoothChange,
     ) -> None:
         """Handle Bluetooth advertisement updates."""
-        if service_info.manufacturer_data:
-            device.update_from_advertisement(service_info.manufacturer_data)
+        if service_info.manufacturer_data or service_info.service_data:
+            device.update_from_advertisement(
+                service_info.manufacturer_data,
+                service_info.service_data,
+            )
 
     entry.async_on_unload(
         async_register_callback(

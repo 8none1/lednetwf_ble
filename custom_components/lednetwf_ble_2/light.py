@@ -106,10 +106,14 @@ class LEDNetWFLight(LightEntity):
         effect_type = self._device.effect_type
         model_str = f"{cap_name} ({effect_type.name})"
 
-        # Product ID as hex for hardware version, e.g., "0x1D (29)"
+        # Hardware version: Product ID + LED version from service data
+        # e.g., "0x1D LED:5" or "0x00 LED:13" for IOTBT
         product_id = self._device.product_id
+        led_version = self._device.led_version
         if product_id is not None:
-            hw_version = f"0x{product_id:02X} ({product_id})"
+            hw_version = f"0x{product_id:02X}"
+            if led_version is not None:
+                hw_version += f" LED:{led_version}"
         else:
             hw_version = "Unknown"
 
@@ -182,6 +186,14 @@ class LEDNetWFLight(LightEntity):
         attrs["has_rgb"] = self._device.has_rgb
         attrs["has_color_temp"] = self._device.has_color_temp
         attrs["has_builtin_mic"] = self._device.has_builtin_mic
+
+        # Device info from service data (protocol_docs/17_device_configuration.md)
+        if self._device.ble_version is not None:
+            attrs["ble_version"] = self._device.ble_version
+        if self._device.led_version is not None:
+            attrs["led_version"] = self._device.led_version
+        if self._device.firmware_flag is not None:
+            attrs["firmware_flag"] = f"0x{self._device.firmware_flag:02X}"
 
         return attrs
 
