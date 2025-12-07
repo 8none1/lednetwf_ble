@@ -1,6 +1,6 @@
 {
     "domain": "lednetwf_ble",
-    "name": "LEDnetWF BLE v2",
+    "name": "LEDnetWF BLE",
     "bluetooth": [
         {
             "local_name": "LEDnetWF*"
