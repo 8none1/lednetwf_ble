@@ -17,7 +17,7 @@
       },
       "options": {
         "title": "Opções do dispositivo",
-        "description": "Configurar opções para '{name}'.",
+        "description": "Configurar opções para **{name}**.",
         "data": {
           "disconnect_delay": "Atraso de desconexão (segundos)",
           "led_count": "Quantidade de LEDs",

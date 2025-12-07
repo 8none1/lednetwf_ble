@@ -17,7 +17,7 @@
       },
       "options": {
         "title": "Device Options",
-        "description": "Configure options for '{name}'. Total LEDs: {total_leds}",
+        "description": "Configure options for **{name}**. Total LEDs: {total_leds}",
         "data": {
           "disconnect_delay": "Disconnect delay (seconds)",
           "led_count": "LEDs per segment",

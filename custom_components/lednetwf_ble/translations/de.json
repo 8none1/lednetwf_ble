@@ -17,7 +17,7 @@
       },
       "options": {
         "title": "Geräteoptionen",
-        "description": "Optionen für '{name}' konfigurieren.",
+        "description": "Optionen für **{name}** konfigurieren.",
         "data": {
           "disconnect_delay": "Trennverzögerung (Sekunden)",
           "led_count": "LED-Anzahl",

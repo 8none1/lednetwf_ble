@@ -17,7 +17,7 @@
       },
       "options": {
         "title": "Deefice-a Oopshuns",
-        "description": "Cunfeegoore-a oopshuns fur '{name}'.",
+        "description": "Cunfeegoore-a oopshuns fur **{name}**.",
         "data": {
           "disconnect_delay": "Deescunnect deley (secunds)",
           "led_count": "LED cuoont",
