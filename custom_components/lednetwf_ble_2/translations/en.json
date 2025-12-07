@@ -10,9 +10,9 @@
       },
       "confirm": {
         "title": "Add Device",
-        "description": "Found device '{name}'. Would you like to test the connection by flashing the light 3 times?",
+        "description": "Found device **{name}**\n\n- Address: `{address}`\n- Product ID: `{product_id}`\n- Firmware: `{fw_version}`\n\nWould you like to test the connection by flashing the light?",
         "data": {
-          "test_device": "Test device (flash 3 times)"
+          "test_device": "Test device (flash colors)"
         }
       },
       "options": {

@@ -720,6 +720,46 @@ def build_effect_command_0x61(effect_id: int, speed: int = 16, persist: bool = F
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
+def build_candle_command(
+    r: int, g: int, b: int, speed: int = 50, brightness: int = 100
+) -> bytearray:
+    """
+    Build candle flicker effect command (0x39).
+
+    Used for product IDs 0x54 and 0x5B devices.
+
+    Source: protocol_docs/06_effect_commands.md, model_0x54.py
+
+    Format (9 bytes): [0x39, enable, R, G, B, speed, brightness, reserved, checksum]
+
+    Args:
+        r, g, b: Candle color (0-255)
+        speed: Flicker speed 0-100 (converted to inverted 1-31 range)
+        brightness: Brightness 0-100
+
+    Note: Speed is inverted like SIMPLE effects: 1=fastest, 31=slowest
+    """
+    # Convert UI speed (0-100, 100=fast) to protocol speed (1-31, 1=fast)
+    # Formula: 1 + (30 * (1.0 - speed/100))
+    speed_byte = 1 + int(30 * (1.0 - max(0, min(100, speed)) / 100))
+    speed_byte = max(1, min(31, speed_byte))
+
+    brightness = max(1, min(100, brightness))
+
+    raw_cmd = bytearray([
+        0x39,
+        0x01,  # Enable candle mode
+        r & 0xFF,
+        g & 0xFF,
+        b & 0xFF,
+        speed_byte & 0xFF,
+        brightness & 0xFF,
+        0x00,  # Reserved
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+
+
 def build_effect_command_0x42(effect_id: int, speed: int = 50, brightness: int = 100) -> bytearray:
     """
     Build effect command (0x42) for Symphony and strip devices.
@@ -750,6 +790,42 @@ def build_effect_command_0x42(effect_id: int, speed: int = 50, brightness: int =
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
+def build_effect_command_0x38(
+    effect_id: int, speed: int = 50, brightness: int = 100
+) -> bytearray:
+    """
+    Build effect command (0x38) for addressable strip devices (0x54, 0x5B, etc.).
+
+    Used for devices that support SIMPLE effects (IDs 37-56) but use the 0x38
+    command format WITH brightness, unlike the 0x61 format.
+
+    Source: User's working implementation for 0x54 devices
+
+    Format (5 bytes): [0x38, effect_id, speed, brightness, checksum]
+
+    Args:
+        effect_id: Effect ID (37-56 for SIMPLE effects)
+        speed: Effect speed 0-100 (converted to inverted 1-31 range)
+        brightness: Effect brightness (0-100)
+
+    Note: Speed is inverted like 0x61: 1=fastest, 31=slowest
+    """
+    # Convert UI speed (0-100, 100=fast) to protocol speed (1-31, 1=fast)
+    speed_byte = 1 + int(30 * (1.0 - max(0, min(100, speed)) / 100))
+    speed_byte = max(1, min(31, speed_byte))
+
+    brightness = max(1, min(100, brightness))
+
+    raw_cmd = bytearray([
+        0x38,
+        effect_id & 0xFF,
+        speed_byte & 0xFF,
+        brightness & 0xFF,
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+
+
 def build_effect_command(
     effect_type: EffectType,
     effect_id: int,
@@ -757,6 +833,7 @@ def build_effect_command(
     brightness: int = 100,
     has_bg_color: bool = False,
     has_ic_config: bool = False,
+    uses_0x38_effects: bool = False,
     fg_rgb: tuple[int, int, int] | None = None,
     bg_rgb: tuple[int, int, int] | None = None,
 ) -> bytearray | None:
@@ -767,6 +844,7 @@ def build_effect_command(
         effect_type: SIMPLE, SYMPHONY, ADDRESSABLE_0x53, or IOTBT
         effect_id: Effect ID (can be encoded for special effect types)
         speed: Effect speed (0-100)
+        uses_0x38_effects: If True, use 0x38 command for SIMPLE effects (0x54, 0x5B devices)
         brightness: Effect brightness (0-100)
         has_bg_color: If True, device supports background colors
         has_ic_config: If True, device is a true Symphony controller (0xA1-0xAD)
@@ -848,13 +926,18 @@ def build_effect_command(
             # Fallback for unknown Symphony devices - use 0x38 command
             return build_effect_command_0x38(effect_id, speed, brightness)
     elif effect_type == EffectType.SIMPLE:
-        # 0x61 command - speed uses INVERTED 1-31 range
-        # Formula from ad/e.java: protocol_speed = 1 + (30 * (1.0 - ui_speed/100))
-        # 100% UI speed (fast) → 1 (fastest protocol value)
-        # 0% UI speed (slow) → 31 (slowest protocol value)
-        speed_byte = 1 + int(30 * (1.0 - speed / 100))
-        speed_byte = max(1, min(31, speed_byte))  # Clamp to valid range
-        return build_effect_command_0x61(effect_id, speed_byte)
+        if uses_0x38_effects:
+            # 0x38 command for devices like 0x54, 0x5B that support brightness in effects
+            # Speed is still inverted 1-31 range, but brightness is included
+            return build_effect_command_0x38(effect_id, speed, brightness)
+        else:
+            # 0x61 command - speed uses INVERTED 1-31 range, NO brightness
+            # Formula from ad/e.java: protocol_speed = 1 + (30 * (1.0 - ui_speed/100))
+            # 100% UI speed (fast) → 1 (fastest protocol value)
+            # 0% UI speed (slow) → 31 (slowest protocol value)
+            speed_byte = 1 + int(30 * (1.0 - speed / 100))
+            speed_byte = max(1, min(31, speed_byte))  # Clamp to valid range
+            return build_effect_command_0x61(effect_id, speed_byte)
     return None
 
 
@@ -1028,7 +1111,7 @@ def build_sound_reactive_simple(enable: bool) -> bytearray:
         0xF0 if enable else 0x0F,  # State: 0xF0=on, 0x0F=off
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
-    return wrap_command(raw_cmd, cmd_family=0x0a)
+    return wrap_command(raw_cmd, cmd_family=0x0b)  # 0x0b for commands
 
 
 def build_sound_reactive_symphony(
@@ -1087,7 +1170,7 @@ def build_sound_reactive_symphony(
         brightness & 0xFF,              # Brightness
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
-    return wrap_command(raw_cmd, cmd_family=0x0a)
+    return wrap_command(raw_cmd, cmd_family=0x0b)  # 0x0b for commands
 
 
 # =============================================================================
@@ -1608,16 +1691,29 @@ def parse_manufacturer_data(
                         log_prefix, sub_mode, state_bytes
                     )
             elif mode_type == 0x25:
-                # Effect mode (Symphony/Addressable devices)
-                # Effect ID is in sub_mode byte
+                # Effect mode - interpretation depends on device type
+                # For Symphony/Addressable: sub_mode is the effect ID directly
+                # For SIMPLE devices: sub_mode may be offset by 20 from actual effect ID (37-56)
                 color_mode = 'effect'
                 effect_id = sub_mode  # Effect ID in sub_mode byte
+
+                # Check if this might be a SIMPLE effect (offset by 20)
+                # SIMPLE effects are 37-56, so sub_mode 17-36 → effect_id 37-56
+                if 17 <= sub_mode <= 36:
+                    # Could be SIMPLE effect with 20 offset
+                    possible_simple_id = sub_mode + 20
+                    _LOGGER.debug("%sManu data effect mode (0x25): sub_mode=%d, "
+                                  "possible_simple_id=%d, bright_pct=%d, speed=%d",
+                                  log_prefix, sub_mode, possible_simple_id, data[18], data[19])
+                    effect_id = possible_simple_id
+                else:
+                    _LOGGER.debug("%sManu data effect mode (0x25): id=%d, bright_pct=%d, speed=%d",
+                                  log_prefix, effect_id, data[18], data[19])
+
                 brightness_percent = data[18]  # 0-100
                 effect_speed = data[19]  # 0-100
-                _LOGGER.debug("%sManu data effect mode (0x25): id=%d, bright_pct=%d, speed=%d",
-                              log_prefix, effect_id, brightness_percent, effect_speed)
             elif 37 <= mode_type <= 56:
-                # SIMPLE effect mode - mode_type IS the effect ID (37-56)
+                # SIMPLE effect mode (0x61 command) - mode_type IS the effect ID (37-56)
                 # For SIMPLE devices (0x33, etc.), when running effects like
                 # "Yellow gradual change" (41), the mode_type contains the effect ID directly
                 color_mode = 'effect'
@@ -1630,6 +1726,14 @@ def parse_manufacturer_data(
                 _LOGGER.debug("%sManu data SIMPLE effect mode: id=%d (0x%02X), "
                               "sub_mode=0x%02X, bright_pct=%s",
                               log_prefix, effect_id, mode_type, sub_mode, brightness_percent)
+            elif mode_type in (0x5D, 0x62):
+                # Sound reactive mode (built-in microphone)
+                # 0x5D (93) - SIMPLE devices with mic (e.g., product 0x08 Ctrl_Mini_RGB_Mic)
+                # 0x62 (98) - Symphony devices with mic
+                color_mode = 'effect'
+                effect_id = 0x100  # Special ID for Sound Reactive (same as IOTBT_MUSIC_EFFECTS)
+                _LOGGER.debug("%sManu data sound reactive mode: mode_type=0x%02X",
+                              log_prefix, mode_type)
             else:
                 # Log full state bytes for debugging unknown modes
                 state_bytes = ' '.join(f'{b:02X}' for b in data[14:min(25, len(data))])

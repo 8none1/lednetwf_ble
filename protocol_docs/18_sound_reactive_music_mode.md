@@ -24,13 +24,20 @@ Determined by which UI fragment the device uses:
 
 | Product ID | Device Name | Command Format | Notes |
 |------------|-------------|----------------|-------|
-| 0x08 (8) | Ctrl_Mini_RGB_Mic | 5-byte simple | RGB only, SYMPHONY type |
-| 0x48 (72) | Ctrl_Mini_RGBW_Mic | 5-byte simple | RGBW, SIMPLE type |
+| 0x08 (8) | Ctrl_Mini_RGB_Mic | 5-byte simple | RGB only (rgb_mini_mic protocol) |
+| 0x48 (72) | Ctrl_Mini_RGBW_Mic | 5-byte simple | RGBW (rgb_mini_mic protocol) |
 | 0xA2 (162) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller |
 | 0xA3 (163) | Ctrl_RGB_Symphony_new | 13-byte full | Symphony controller |
+| 0xA4 (164) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller (has symp_mic_info) |
 | 0xA6 (166) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Extends 0xA3 |
-| 0xA7 (167) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller |
-| 0xA9 (169) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller |
+| 0xA7 (167) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller (†) |
+| 0xA9 (169) | Ctrl_Mini_RGB_Symphony_new | 13-byte full | Symphony controller (†) |
+| 0xAA (170) | Symphony_Line | 13-byte full | Symphony strip (musicMic UI) |
+| 0xAB (171) | Symphony_Line | 13-byte full | Symphony strip (musicMic UI) |
+| 0xAC (172) | Symphony_Curtain | 13-byte full | LED curtain (musicMic UI) |
+| 0xAD (173) | Symphony_Curtain | 13-byte full | LED curtain (musicMic UI) |
+
+**(†)** = Not found in current app database, may be legacy
 
 ### Devices WITHOUT Built-in Microphone
 
@@ -38,8 +45,9 @@ These devices support music mode but only via phone audio processing (not suppor
 
 | Product ID | Device Name | Notes |
 |------------|-------------|-------|
-| 0xA1 (161) | Ctrl_Mini_RGB_Symphony | No music mode tabs in UI |
-| 0xA4 (164) | Ctrl_Mini_RGB_Symphony_new | Uses `MusicModeFragmentWithoutMic` |
+| 0xA1 (161) | Ctrl_Mini_RGB_Symphony | Old Symphony protocol, NO mic functions |
+
+**Note**: Previous documentation incorrectly listed 0xA4 (164) as having no mic. App database shows 0xA4 HAS `symp_mic_info` functions.
 
 ### How to Detect
 
@@ -49,11 +57,36 @@ product_id = (mfr_data[8] << 8) | mfr_data[9]
 # Simple mic devices (5-byte command)
 SIMPLE_MIC_DEVICES = {0x08, 0x48}
 
-# Symphony mic devices (13-byte command)
-SYMPHONY_MIC_DEVICES = {0xA2, 0xA3, 0xA6, 0xA7, 0xA9}
+# Symphony mic devices (13-byte command) - verified from app database
+SYMPHONY_MIC_DEVICES = {0xA2, 0xA3, 0xA4, 0xA6, 0xA7, 0xA9}  # 0xA4 HAS mic!
 
-has_builtin_mic = product_id in (SIMPLE_MIC_DEVICES | SYMPHONY_MIC_DEVICES)
+# Symphony line/curtain devices with mic (musicMic UI tab)
+SYMPHONY_LINE_MIC_DEVICES = {0xAA, 0xAB, 0xAC, 0xAD}  # 170-173
+
+# 0xA1 (161) specifically does NOT have mic
+SYMPHONY_NO_MIC = {0xA1}
+
+has_builtin_mic = product_id in (SIMPLE_MIC_DEVICES | SYMPHONY_MIC_DEVICES | SYMPHONY_LINE_MIC_DEVICES)
 ```
+
+### How the Android App Detects Mic Support
+
+The app uses a **database-driven approach**:
+
+1. **Product ID lookup** in `data.mdb` (LMDB format) maps productId to capabilities
+2. **Tab UI config** determines available modes:
+   - `"music"` = Phone mic only (app analyzes audio, sends to device)
+   - `"musicMic"` = Device has built-in mic
+3. **Protocol naming**: `rgb_mini_mic` = has mic, `rgb_mini` = no mic
+
+**Additional products with built-in mic** (from database analysis):
+
+| Product ID | Protocol | Notes |
+|------------|----------|-------|
+| 60 | rgb_mini_mic | RGB controller with mic |
+| 16 | common | Has mic functions |
+| 170-188 | symphony_line | Symphony line lights |
+| 172-173 | symphony_curtain | Symphony curtain lights |
 
 ---
 

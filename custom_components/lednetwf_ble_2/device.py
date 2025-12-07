@@ -30,8 +30,8 @@ from .const import (
     get_effect_id,
     convert_brightness_from_adv,
     convert_speed_from_adv,
-    SYMPHONY_SCENE_EFFECTS,
     SOUND_REACTIVE_MARKER,
+    CANDLE_MODE_MARKER,
 )
 from . import protocol
 
@@ -99,6 +99,7 @@ class LEDNetWFDevice:
         self._fw_version: str | None = None
         self._ble_version: int | None = None
         self._led_version: int | None = None
+        self._firmware_ver: int | None = None  # Combined firmware version (hi << 8 | lo)
         self._firmware_flag: int | None = None  # Feature flags from service data (bits 0-4)
 
         # Callbacks for state updates
@@ -194,7 +195,8 @@ class LEDNetWFDevice:
     def effect_list(self) -> list[str]:
         """Return list of available effects."""
         return get_effect_list(
-            self.effect_type, self.has_bg_color, self.has_ic_config, self.has_builtin_mic
+            self.effect_type, self.has_bg_color, self.has_ic_config,
+            self.has_builtin_mic, self.has_candle_mode
         )
 
     @property
@@ -246,6 +248,50 @@ class LEDNetWFDevice:
         Byte 15 contains feature flags that may indicate device capabilities.
         """
         return self._firmware_flag
+
+    @property
+    def firmware_ver(self) -> int | None:
+        """Return combined firmware version (hi << 8 | lo) from service data."""
+        return self._firmware_ver
+
+    @property
+    def app_firmware_version(self) -> str | None:
+        """Return firmware version string formatted like the LEDnetWF app.
+
+        App format: "{product_id:02X}.{firmware_ver:04d}.{ble_version:02d},V{led_version}"
+        Example: "62.0008.25.05,V3" for a device with:
+            - product_id = 0x62 (98)
+            - firmware_ver = 8 (combined hi+lo)
+            - ble_version = 5
+            - led_version = 3
+
+        Source: ZGHBDevice.java firmware version display
+        """
+        product_id = self._product_id
+        firmware_ver = self._firmware_ver
+        ble_version = self._ble_version
+        led_version = self._led_version
+
+        # Need at least product_id and ble_version for a meaningful string
+        if product_id is None or ble_version is None:
+            return self._fw_version  # Fall back to raw version string
+
+        # Build the app-style version string
+        parts = [f"{product_id:02X}"]
+
+        if firmware_ver is not None:
+            parts.append(f"{firmware_ver:04d}")
+        else:
+            parts.append("0000")
+
+        parts.append(f"{ble_version:02d}")
+
+        version_str = ".".join(parts)
+
+        if led_version is not None:
+            version_str += f",V{led_version}"
+
+        return version_str
 
     @property
     def led_count(self) -> int | None:
@@ -301,6 +347,23 @@ class LEDNetWFDevice:
         Sound reactive mode is enabled via 0x73 command.
         """
         return bool(self._capabilities.get("has_builtin_mic"))
+
+    @property
+    def has_candle_mode(self) -> bool:
+        """Return True if device supports candle mode (0x39 command).
+
+        Devices 0x54 and 0x5B support a special candle flicker effect.
+        """
+        return bool(self._capabilities.get("has_candle_mode"))
+
+    @property
+    def uses_0x38_effects(self) -> bool:
+        """Return True if device uses 0x38 command format for effects with brightness.
+
+        Devices 0x54 and 0x5B use 0x38 command format which includes brightness,
+        unlike standard SIMPLE devices that use 0x61 format without brightness.
+        """
+        return bool(self._capabilities.get("uses_0x38_effects"))
 
     @property
     def mic_command_format(self) -> str:
@@ -804,6 +867,42 @@ class LEDNetWFDevice:
             _LOGGER.debug("SIMPLE RGB mode (0x61/0x%02X): device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d, color_order=%s",
                           result["sub_mode"], r, g, b, self._rgb, self._brightness, self._color_order)
 
+        elif (self.effect_type == EffectType.SIMPLE and
+              result["mode_type"] == 0x03):
+            # SIMPLE devices: mode_type=0x03 is initialization/standby state
+            # Device reports this on power-on before any color has been set
+            # Treat as RGB mode with current RGB values (usually black)
+            self._color_temp_kelvin = None
+            r, g, b = result["r"], result["g"], result["b"]
+            h, s, v = protocol.rgb_to_hsv(r, g, b)
+            brightness_raw = round(v * 255 / 100)
+            if brightness_raw == 0 and (r > 0 or g > 0 or b > 0):
+                brightness_raw = 1
+            # Keep existing brightness if RGB is black (device just powered on)
+            if r == 0 and g == 0 and b == 0:
+                if self._brightness is None or self._brightness == 0:
+                    self._brightness = 255  # Default to full brightness
+            else:
+                self._brightness = brightness_raw
+
+            if v > 0 or (r > 0 or g > 0 or b > 0):
+                max_rgb = max(r, g, b)
+                if max_rgb > 0:
+                    scale = 255 / max_rgb
+                    pure_r = min(255, int(round(r * scale)))
+                    pure_g = min(255, int(round(g * scale)))
+                    pure_b = min(255, int(round(b * scale)))
+                    self._rgb = (pure_r, pure_g, pure_b)
+                else:
+                    self._rgb = (r, g, b)
+            else:
+                # Keep existing color if device reports black (just powered on)
+                if self._rgb is None:
+                    self._rgb = (r, g, b)
+
+            _LOGGER.debug("SIMPLE init mode (0x03/0x%02X): device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d",
+                          result["sub_mode"], r, g, b, self._rgb, self._brightness)
+
         elif result.get("is_rgb_mode"):
             # RGB mode - brightness derived from RGB via HSV conversion
             self._effect = None
@@ -877,12 +976,38 @@ class LEDNetWFDevice:
             _LOGGER.debug("Settled effect mode: effect=%s (id=%d), fg_rgb=%s, pure_rgb=%s, brightness=%d, speed=%d",
                           self._effect, effect_id, (r, g, b), self._rgb, self._brightness, self._effect_speed)
 
-        elif result["mode_type"] == 0x62 and self.has_builtin_mic:
+        elif result["mode_type"] in (0x5D, 0x62) and self.has_builtin_mic:
             # Sound reactive mode (built-in microphone)
             # Device is listening to ambient audio and controlling LEDs autonomously
+            # Mode 0x5D (93) is used by SIMPLE devices (e.g., product 0x08 Ctrl_Mini_RGB_Mic)
+            # Mode 0x62 (98) is used by Symphony devices with built-in mic
             self._effect = "Sound Reactive"
             self._color_temp_kelvin = None
-            _LOGGER.debug("Sound reactive mode detected (mode_type=0x62)")
+            _LOGGER.debug("Sound reactive mode detected (mode_type=0x%02X)", result["mode_type"])
+
+        elif 37 <= result["mode_type"] <= 56 and self.effect_type == EffectType.SIMPLE:
+            # SIMPLE effect mode - mode_type IS the effect ID (37-56)
+            # State response for SIMPLE devices running effects like "White strobe flash" (55)
+            # will have mode_type = 0x37 (55 decimal)
+            effect_id = result["mode_type"]
+            self._effect = self._effect_id_to_name(effect_id)
+            self._color_temp_kelvin = None
+
+            # For SIMPLE effects, speed is in value1 (byte 5), NOT sub_mode (byte 4)
+            # sub_mode echoes power state (0x23) and is unreliable for speed
+            # value1 contains speed in protocol format (1-31, where 1=fastest, 31=slowest)
+            raw_speed = result["value1"]
+            if 1 <= raw_speed <= 31:
+                # Convert 1-31 to 0-100 (1=fastest=100%, 31=slowest=0%)
+                self._effect_speed = int((31 - raw_speed) * 100 / 30)
+            elif raw_speed <= 100:
+                self._effect_speed = raw_speed
+
+            # SIMPLE effects (0x61 command) don't report brightness in state response
+            # Keep the commanded brightness value (don't overwrite from response)
+
+            _LOGGER.debug("SIMPLE effect mode: effect=%s (id=%d), speed=%d, brightness=%d",
+                          self._effect, effect_id, self._effect_speed, self._brightness)
 
         else:
             # Unknown mode - use raw values with same HSV reconstruction
@@ -985,6 +1110,14 @@ class LEDNetWFDevice:
         elif eff_type == EffectType.ADDRESSABLE_0x53:
             from .const import ADDRESSABLE_0x53_EFFECTS
             return ADDRESSABLE_0x53_EFFECTS.get(effect_id)
+        elif eff_type == EffectType.IOTBT:
+            # IOTBT devices: regular effects (1-12) and music effects (0x100+)
+            from .const import IOTBT_EFFECTS, IOTBT_MUSIC_EFFECTS
+            if effect_id in IOTBT_EFFECTS:
+                return IOTBT_EFFECTS[effect_id]
+            elif effect_id in IOTBT_MUSIC_EFFECTS:
+                return IOTBT_MUSIC_EFFECTS[effect_id]
+            return None
         return None
 
     async def _send_command(self, packet: bytearray, with_response: bool = False) -> bool:
@@ -1129,7 +1262,7 @@ class LEDNetWFDevice:
                 rgb[0], rgb[1], rgb[2], brightness_pct
             )
         elif eff_type == EffectType.SIMPLE:
-            # SIMPLE devices use 0x31 command format (9-byte RGB)
+            # SIMPLE devices use 0x31 command format (9-byte direct RGB)
             # Brightness is applied directly to RGB values (no separate brightness field)
             # Scale RGB by brightness factor
             scale = brightness / 255.0
@@ -1138,7 +1271,7 @@ class LEDNetWFDevice:
             scaled_b = int(rgb[2] * scale)
 
             _LOGGER.debug(
-                "SIMPLE device: RGB=(%d,%d,%d), brightness=%d -> scaled RGB=(%d,%d,%d)",
+                "0x31 color command: RGB=(%d,%d,%d), brightness=%d -> scaled RGB=(%d,%d,%d)",
                 rgb[0], rgb[1], rgb[2], brightness, scaled_r, scaled_g, scaled_b
             )
 
@@ -1227,7 +1360,8 @@ class LEDNetWFDevice:
 
         eff_type = self.effect_type
         effect_id = get_effect_id(
-            effect_name, eff_type, self.has_bg_color, self.has_ic_config, self.has_builtin_mic
+            effect_name, eff_type, self.has_bg_color, self.has_ic_config,
+            self.has_builtin_mic, self.has_candle_mode
         )
 
         if effect_id is None:
@@ -1237,6 +1371,10 @@ class LEDNetWFDevice:
         # Handle sound reactive mode specially (uses different command)
         if effect_id == SOUND_REACTIVE_MARKER:
             return await self.set_sound_reactive(enable=True)
+
+        # Handle candle mode specially (uses 0x39 command)
+        if effect_id == CANDLE_MODE_MARKER:
+            return await self._set_candle_mode(speed, brightness)
 
         # Exit sound reactive mode before switching to another effect
         if self._effect == "Sound Reactive" and self.has_builtin_mic:
@@ -1292,6 +1430,7 @@ class LEDNetWFDevice:
             has_ic_config=self.has_ic_config,
             fg_rgb=fg_rgb,
             bg_rgb=bg_rgb,
+            uses_0x38_effects=self.uses_0x38_effects,
         )
         if packet is None:
             return False
@@ -1524,6 +1663,57 @@ class LEDNetWFDevice:
             return True
         return False
 
+    async def _set_candle_mode(
+        self, speed: int | None = None, brightness: int | None = None
+    ) -> bool:
+        """Set candle flicker effect mode (0x39 command).
+
+        Used by devices 0x54 and 0x5B which support a special candle effect.
+
+        Args:
+            speed: Flicker speed 0-100 (or None to use current/default)
+            brightness: Brightness 0-255 (or None to use current)
+
+        Returns:
+            True if command was sent successfully
+        """
+        if not self.has_candle_mode:
+            _LOGGER.warning("Device %s does not support candle mode", self._name)
+            return False
+
+        # Use current or default speed
+        if speed is None:
+            speed = self._effect_speed if self._effect_speed > 0 else 50
+
+        # Use current or default brightness
+        if brightness is None:
+            brightness = self._brightness if self._brightness > 0 else 255
+
+        # Get current RGB color or use warm candle color
+        if self._rgb:
+            r, g, b = self._rgb
+        else:
+            # Default to warm candle color (orange-yellow)
+            r, g, b = 255, 147, 41
+
+        # Convert brightness from 0-255 to 0-100 for protocol
+        brightness_pct = max(1, round(brightness * 100 / 255))
+
+        packet = protocol.build_candle_command(r, g, b, speed, brightness_pct)
+
+        _LOGGER.debug(
+            "Setting candle mode for %s: rgb=(%d,%d,%d), speed=%d, brightness=%d%%",
+            self._name, r, g, b, speed, brightness_pct
+        )
+
+        if await self._send_command(packet):
+            self._effect = "Candle Mode"
+            self._effect_speed = speed
+            self._brightness = brightness
+            self._notify_callbacks()
+            return True
+        return False
+
     async def set_sound_reactive(self, enable: bool) -> bool:
         """Enable or disable sound reactive mode for devices with built-in microphone.
 
@@ -1624,17 +1814,19 @@ class LEDNetWFDevice:
                         self._ble_version = sd_result["ble_version"]
                     if sd_result.get("led_version") is not None:
                         self._led_version = sd_result["led_version"]
+                    if sd_result.get("firmware_ver") is not None:
+                        self._firmware_ver = sd_result["firmware_ver"]
                     if sd_result.get("firmware_flag") is not None:
                         self._firmware_flag = sd_result["firmware_flag"]
                     if sd_result.get("firmware_ver_str"):
                         self._fw_version = sd_result["firmware_ver_str"]
                     _LOGGER.debug(
-                        "[%s] Service data: ble_v=%s, led_v=%s, fw_flag=%s, fw=%s",
+                        "[%s] Service data: ble_v=%s, led_v=%s, fw_ver=%s, fw_flag=%s",
                         self._name,
                         self._ble_version,
                         self._led_version,
+                        self._firmware_ver,
                         self._firmware_flag,
-                        self._fw_version,
                     )
 
         result = protocol.parse_manufacturer_data(manu_data, self._name)

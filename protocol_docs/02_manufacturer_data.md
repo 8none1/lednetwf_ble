@@ -1,127 +1,267 @@
-# MANUFACTURER DATA PARSING
+# BLE Advertisement Data Parsing
 
-**CRITICAL: TWO DIFFERENT FORMATS DEPENDING ON DATA SOURCE**
+**Last Updated**: 6 December 2025
 
-## FORMAT A: Raw AD Type 255 Payload (29 bytes)
+This document covers all BLE advertisement data formats used by LEDnetWF/Zengge devices.
 
-**Source**: Android scanRecord.getBytes() → parse TLV → Type 255 value
+---
 
-This includes the 2-byte company ID at the start of the payload.
+## Device Families by Company ID
 
-| Byte | Field           | Size | Description                              |
-|------|-----------------|------|------------------------------------------|
-| 0    | sta             | 1    | Status/State byte                        |
-| 1-2  | company_id      | 2    | Company ID (big-endian)                  |
-| 3    | ble_version     | 1    | BLE protocol version                     |
-| 4-9  | mac_address     | 6    | Device MAC address                       |
-| 10-11| product_id      | 2    | Product identifier (big-endian)          |
-| 12   | firmware_ver    | 1    | Firmware version                         |
-| 13   | led_version     | 1    | LED controller version                   |
-| 14   | check_key_flag  | 1    | Bits 0-1 only (if bleVersion >= 5)       |
-| 15   | firmware_flag   | 1    | Bits 0-4 only (if bleVersion >= 5)       |
-| 16-26| state_data      | 11   | Device state (if bleVersion >= 5)        |
-| 27-28| rfu             | 2    | Reserved for future use                  |
+| Company ID | Range | Device Type | Format |
+|------------|-------|-------------|--------|
+| 0x5A00-0x5AFF | 23040-23295 | Standard LEDnetWF | ZengGe format |
+| 0x1102 | 4354 | IOTBT/Telink Mesh | Telink format |
 
-## FORMAT B: bleak Manufacturer Data (27 bytes) - RECOMMENDED
+---
 
-**Source**: Python bleak: `advertisement_data.manufacturer_data[company_id]`
+## ZengGe Format (Company ID 0x5A**)
 
-The company ID is returned as the DICTIONARY KEY, not in the payload!
+### Format A: Raw AD Type 255 (29 bytes)
 
-| Byte | Field           | Size | Description                              |
-|------|-----------------|------|------------------------------------------|
-| 0    | sta             | 1    | Status/State byte                        |
-| 1    | ble_version     | 1    | BLE protocol version                     |
-| 2-7  | mac_address     | 6    | Device MAC address                       |
-| 8-9  | product_id      | 2    | Product identifier (big-endian)          |
-| 10   | firmware_ver    | 1    | Firmware version                         |
-| 11   | led_version     | 1    | LED controller version                   |
-| 12   | check_key_flag  | 1    | Bits 0-1 only (if bleVersion >= 5)       |
-| 13   | firmware_flag   | 1    | Bits 0-4 only (if bleVersion >= 5)       |
-| 14-24| state_data      | 11   | Device state (if bleVersion >= 5)        |
-| 25-26| rfu             | 2    | Reserved for future use                  |
+**Source**: Android `scanRecord.getBytes()` → parse TLV → Type 255 value
 
-## Parsing Example (Format B - bleak)
+Includes 2-byte company ID at the start.
 
-Raw hex (27 bytes): `5B 05 E4 98 BB 95 EE 8E 00 33 29 0A 01 02 24 2F...`
-Company ID (dict key): 23040 (0x5A00)
+| Byte | Field | Description |
+|------|-------|-------------|
+| 0 | sta | Status byte |
+| 1-2 | company_id | Company ID (big-endian) |
+| 3 | ble_version | BLE protocol version |
+| 4-9 | mac_address | Device MAC (6 bytes) |
+| 10-11 | product_id | Product ID (big-endian) |
+| 12 | firmware_ver | Firmware version (low byte) |
+| 13 | led_version | LED version |
+| 14 | check_key_flag | Bits 0-1: check_key, Bits 2-7: fw high (v6+) |
+| 15 | firmware_flag | Firmware flags (bits 0-4) |
+| 16-26 | state_data | Device state (BLE v5+) |
+| 27-28 | rfu | Reserved |
 
-- Byte 0: 0x5B = sta
-- Byte 1: 0x05 = ble_version (5)
-- Bytes 2-7: E4:98:BB:95:EE:8E = mac_address
-- Bytes 8-9: 0x0033 = product_id (51 = Ctrl_Mini_RGB_0x33)
-- Byte 10: 0x29 = firmware_ver (41)
-- Byte 11: 0x0A = led_version (10)
+### Format B: bleak/Python (27 bytes) - RECOMMENDED
 
-### Python Parsing Example
+**Source**: `advertisement_data.manufacturer_data[company_id]`
+
+Company ID is the dictionary key, NOT in the payload.
+
+| Byte | Field | Description |
+|------|-------|-------------|
+| 0 | sta | Status byte |
+| 1 | ble_version | BLE protocol version |
+| 2-7 | mac_address | Device MAC (6 bytes) |
+| 8-9 | product_id | Product ID (big-endian) |
+| 10 | firmware_ver | Firmware version (low byte) |
+| 11 | led_version | LED version |
+| 12 | check_key_flag | Bits 0-1: check_key, Bits 2-7: fw high (v6+) |
+| 13 | firmware_flag | Firmware flags (bits 0-4) |
+| **14** | **power** | **0x23=ON, 0x24=OFF** (v5+) |
+| 15 | mode_type | 0x61=color/white, 0x25=effect |
+| 16 | sub_mode | Effect ID or 0xF0=RGB, 0x0F=white |
+| 17-24 | state_data | Color/brightness/speed |
+| 25-26 | rfu | Reserved |
+
+### State Data (Bytes 14-24, BLE v5+)
+
+| Offset | Field | Description |
+|--------|-------|-------------|
+| 0 (14) | Power | 0x23=ON, 0x24=OFF |
+| 1 (15) | Mode | 0x61=static, 0x25=effect |
+| 2 (16) | Sub-mode | 0xF0=RGB, 0x0F=white, or effect# |
+| 3 (17) | Value1 | White brightness or effect param |
+| 4-6 (18-20) | R, G, B | RGB values (0-255) |
+| 7 (21) | WW | Warm white or color temp |
+| 8 (22) | LED Ver | LED version (NOT brightness!) |
+| 9 (23) | CW | Cool white |
+
+---
+
+## BLE v7+ with Service Data
+
+For BLE version >= 7, devices advertise BOTH service data AND manufacturer data.
+
+### Service Data (16 bytes)
+
+**UUID**: `0000FFFF-0000-1000-8000-00805f9b34fb`
+
+| Byte | Field | Description |
+|------|-------|-------------|
+| 0 | sta | Status (0xFF = OTA mode) |
+| 1 | mfr_hi | Manufacturer prefix (0x5A/0x5B) |
+| 2 | mfr_lo | Manufacturer low byte |
+| 3 | ble_version | BLE protocol version |
+| 4-9 | mac_address | Device MAC (6 bytes) |
+| 10-11 | product_id | Product ID (big-endian) |
+| 12 | firmware_ver_lo | Firmware low byte |
+| 13 | led_version | LED version |
+| 14 | check_key+fw_hi | Bits 0-1: check_key, Bits 2-7: fw high |
+| 15 | firmware_flag | Feature flags (bits 0-4) |
+
+### When Both Present (v7+)
+
+- **Device ID**: From service data
+- **State data**: From manufacturer data at **offset 3** (NOT 14!)
 
 ```python
-def parse_lednetwf_device_bleak(device, advertisement_data):
-    if device.name is None:
-        return None
-    if "LEDnetWF" not in device.name and "IOTWF" not in device.name:
-        return None
+if ble_version >= 7 and has_service_data:
+    state_data = mfr_data[3:28]  # 25 bytes at offset 3
+    power_state = state_data[11]  # Power at offset 11 within state
+```
 
-    mfr_data = advertisement_data.manufacturer_data
-    if not mfr_data:
-        return None
+---
 
-    # Find valid company ID in 0x5A** range
+## Telink Mesh Format (Company ID 0x1102)
+
+**Used by**: IOTBT devices, Telink BLE Mesh
+
+| Offset | Field | Description |
+|--------|-------|-------------|
+| 0-1 | company_id | 4354 (0x1102) |
+| 2-3 | mesh_uuid | Mesh network ID (little-endian) |
+| 4-7 | reserved | MAC or reserved |
+| 8-9 | product_uuid | Product UUID (little-endian) |
+| **10** | **status** | **Power/brightness: non-zero = ON** |
+| 11-12 | mesh_address | Device mesh address (little-endian) |
+
+---
+
+## Python Parsing
+
+### Basic ZengGe Parsing (Format B)
+
+```python
+def parse_zengge_mfr_data(mfr_data: dict[int, bytes]) -> dict | None:
+    """Parse standard ZengGe manufacturer data."""
     for cid, payload in mfr_data.items():
-        if 23040 <= cid <= 23295 and len(payload) == 27:
+        if 23040 <= cid <= 23295 and len(payload) >= 27:
+            ble_version = payload[1]
             return {
-                'sta': payload[0],
-                'ble_version': payload[1],
-                'mac_address': ':'.join(f'{b:02X}' for b in payload[2:8]),
-                'product_id': (payload[8] << 8) | payload[9],
-                'firmware_ver': payload[10],
-                'led_version': payload[11],
+                "format": "zengge",
+                "sta": payload[0],
+                "ble_version": ble_version,
+                "mac": ":".join(f"{b:02X}" for b in payload[2:8]),
+                "product_id": (payload[8] << 8) | payload[9],
+                "firmware_ver": payload[10],
+                "led_version": payload[11],
+                "power_on": payload[14] == 0x23 if ble_version >= 5 else None,
             }
     return None
 ```
 
-## State Data Parsing (Bytes 14-24, BLE v5+ only)
-
-Devices with BLE protocol version 5 or higher include 11 bytes of current device state in manufacturer data.
-
-**Format B offsets**: bytes 14-24 (11 bytes)
-**Format A offsets**: bytes 16-26 (11 bytes)
-
-| Offset in state_data | Format B byte | Field | Description |
-|---------------------|---------------|-------|-------------|
-| 0 | 14 | Power | 0x23=ON, 0x24=OFF |
-| 1 | 15 | Mode | 0x61=static, 0x25=effect |
-| 2 | 16 | Sub-mode | 0xF0=RGB, 0x0F=white, or effect# |
-| 3 | 17 | Value1 | White brightness (0-100) or effect param |
-| 4-6 | 18-20 | R, G, B | RGB values (0-255) |
-| 7 | 21 | Warm White | WW value (0-255) or color temp |
-| 8 | 22 | LED Version | Firmware/LED version (NOT brightness!) |
-| 9 | 23 | Cool White | CW value (0-255) |
-| 10 | 24 | Reserved | Device-specific |
-
-**IMPORTANT**: The state_data format matches the 0x81 state query response format (see file 08). Byte 8 (offset 22 in Format B) is LED version, NOT brightness. Brightness must be derived based on mode - see file 08 for brightness derivation formulas.
-
-### Python State Parsing Example
+### Telink Parsing
 
 ```python
-def parse_state_from_mfr_data(payload):
-    """Parse state data from Format B manufacturer data (bleak)"""
-    if len(payload) < 25:
-        return None
-    if payload[1] < 5:  # BLE version check
-        return None  # No state data in older versions
-    
-    state = {
-        'power': payload[14],  # 0x23=ON, 0x24=OFF
-        'mode': payload[15],   # 0x61=static, 0x25=effect
-        'sub_mode': payload[16],  # 0xF0=RGB, 0x0F=white
-        'value1': payload[17],    # White brightness or param
-        'r': payload[18],
-        'g': payload[19],
-        'b': payload[20],
-        'ww': payload[21],
-        'led_version': payload[22],  # NOT brightness!
-        'cw': payload[23],
-    }
-    return state
+def parse_telink_mfr_data(mfr_data: dict[int, bytes]) -> dict | None:
+    """Parse Telink BLE Mesh manufacturer data."""
+    for cid, payload in mfr_data.items():
+        if cid == 4354 and len(payload) >= 13:  # 0x1102
+            status = payload[10] & 0xFF
+            return {
+                "format": "telink",
+                "product_id": 0x80,  # IOTBT
+                "mesh_uuid": (payload[3] << 8) | payload[2],
+                "product_uuid": (payload[9] << 8) | payload[8],
+                "status": status,
+                "power_on": status > 0,
+                "mesh_address": (payload[12] << 8) | payload[11],
+            }
+    return None
 ```
+
+### Complete Parsing (All Formats)
+
+```python
+def parse_advertisement(
+    mfr_data: dict[int, bytes],
+    service_data: dict[str, bytes]
+) -> dict | None:
+    """Parse LEDnetWF advertisement - all formats."""
+
+    # Check for service data (BLE v7+)
+    sd = None
+    for uuid_str, data in service_data.items():
+        if "ffff" in uuid_str.lower() and len(data) >= 16:
+            sd = data
+            break
+
+    # Check manufacturer data
+    md = None
+    for cid, data in mfr_data.items():
+        if 23040 <= cid <= 23295:  # ZengGe
+            md = data
+            break
+        if cid == 4354:  # Telink
+            return parse_telink_mfr_data(mfr_data)
+
+    if md is None and sd is None:
+        return None
+
+    # Parse based on what's available
+    if sd is not None and md is not None:
+        # BLE v7+: ID from service data, state from mfr_data offset 3
+        ble_version = sd[3]
+        product_id = (sd[10] << 8) | sd[11]
+        if ble_version >= 7 and len(md) >= 28:
+            power_byte = md[14]  # state_data[11] = mfr_data[3+11]
+        else:
+            power_byte = md[14] if len(md) > 14 else None
+    elif sd is not None:
+        # Service data only
+        ble_version = sd[3]
+        product_id = (sd[10] << 8) | sd[11]
+        power_byte = sd[16] if len(sd) >= 29 else None
+    else:
+        # Manufacturer data only
+        ble_version = md[1]
+        product_id = (md[8] << 8) | md[9]
+        power_byte = md[14] if ble_version >= 5 and len(md) > 14 else None
+
+    power_on = None
+    if power_byte == 0x23:
+        power_on = True
+    elif power_byte == 0x24:
+        power_on = False
+
+    return {
+        "format": "zengge",
+        "product_id": product_id,
+        "ble_version": ble_version,
+        "power_on": power_on,
+        "has_service_data": sd is not None,
+    }
+```
+
+---
+
+## Home Assistant / bleak Integration
+
+```python
+from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
+
+def parse_discovery(info: BluetoothServiceInfoBleak) -> dict | None:
+    """Parse BLE discovery for LEDnetWF device."""
+    # Service data: dict[uuid_string, bytes]
+    service_data = info.service_data
+
+    # Manufacturer data: dict[company_id: int, bytes]
+    mfr_data = info.manufacturer_data
+
+    return parse_advertisement(mfr_data, service_data)
+```
+
+---
+
+## Key Points
+
+1. **Company ID identifies format**: 0x5A** = ZengGe, 0x1102 = Telink
+2. **BLE v7+ uses service data**: Device ID in service data, state at mfr_data offset 3
+3. **Power state**: 0x23 = ON, 0x24 = OFF (ZengGe); non-zero = ON (Telink)
+4. **Product ID is big-endian**: `(byte[8] << 8) | byte[9]`
+
+---
+
+## Source Files
+
+| File | Purpose |
+|------|---------|
+| `ZGHBDevice.java` | ZengGe advertisement parsing |
+| `com/telink/bluetooth/light/c.java` | Telink format parsing |
+| `Service.java` | Service UUID definitions |

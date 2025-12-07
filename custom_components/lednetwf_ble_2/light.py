@@ -100,30 +100,21 @@ class LEDNetWFLight(LightEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
-        # Build model string with effect type for easier debugging
-        # e.g., "FillLight (ADDRESSABLE_0x53)" or "Ctrl_RGB_Symphony_new (SYMPHONY)"
+        # Model string: capability name from product ID mapping
         cap_name = self._device.capabilities.get("name", "Unknown")
-        effect_type = self._device.effect_type
-        model_str = f"{cap_name} ({effect_type.name})"
+        model_str = cap_name
 
-        # Hardware version: Product ID + LED version from service data
-        # e.g., "0x1D LED:5" or "0x00 LED:13" for IOTBT
-        product_id = self._device.product_id
-        led_version = self._device.led_version
-        if product_id is not None:
-            hw_version = f"0x{product_id:02X}"
-            if led_version is not None:
-                hw_version += f" LED:{led_version}"
-        else:
-            hw_version = "Unknown"
+        # Software version: app-style firmware string
+        # Format: "{product_id:02X}.{firmware_ver:04d}.{ble_version:02d},V{led_version}"
+        # Example: "62.0008.05,V3" matching the LEDnetWF Android app display
+        sw_version = self._device.app_firmware_version
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._device.address)},
             name=self._device.name,
             manufacturer="LEDnetWF",
             model=model_str,
-            sw_version=self._device.fw_version,
-            hw_version=hw_version,
+            sw_version=sw_version,
         )
 
     @property
@@ -167,31 +158,38 @@ class LEDNetWFLight(LightEntity):
         """Return extra state attributes for diagnostics."""
         attrs: dict[str, Any] = {}
 
-        # Product ID
+        # Product ID (hex format for easy lookup in docs)
         if self._device.product_id is not None:
             attrs["product_id"] = f"0x{self._device.product_id:02X}"
 
-        # Effect type (command format)
+        # Effect type (command format used by device)
         attrs["effect_type"] = self._device.effect_type.name
 
         # Effect speed (when effect is active)
         if self._device.effect:
             attrs["effect_speed"] = self._device.effect_speed
 
-        # LED count (if known)
+        # LED configuration (for addressable strips)
         if self._device.led_count:
             attrs["led_count"] = self._device.led_count
+        if self._device.segments:
+            attrs["segments"] = self._device.segments
+        if self._device.total_leds:
+            attrs["total_leds"] = self._device.total_leds
 
-        # Capabilities
+        # Capabilities (useful for debugging)
         attrs["has_rgb"] = self._device.has_rgb
         attrs["has_color_temp"] = self._device.has_color_temp
-        attrs["has_builtin_mic"] = self._device.has_builtin_mic
+        if self._device.has_builtin_mic:
+            attrs["has_builtin_mic"] = True
 
         # Device info from service data (protocol_docs/17_device_configuration.md)
         if self._device.ble_version is not None:
             attrs["ble_version"] = self._device.ble_version
         if self._device.led_version is not None:
             attrs["led_version"] = self._device.led_version
+        if self._device.firmware_ver is not None:
+            attrs["firmware_ver"] = self._device.firmware_ver
         if self._device.firmware_flag is not None:
             attrs["firmware_flag"] = f"0x{self._device.firmware_flag:02X}"
 

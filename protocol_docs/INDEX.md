@@ -1,6 +1,6 @@
 # LEDnetWF BLE Protocol Documentation
 
-**Version**: 3.6
+**Version**: 3.7
 **Updated**: 6 December 2025
 
 ---
@@ -11,7 +11,7 @@
 |---|------|-------------|
 | - | [SESSION_NOTES.md](SESSION_NOTES.md) | AI assistant role, investigation status |
 | 01 | [01_quick_reference.md](01_quick_reference.md) | UUIDs, device discovery, essential commands |
-| 02 | [02_manufacturer_data.md](02_manufacturer_data.md) | Advertisement data format (27 bytes) |
+| 02 | [02_manufacturer_data.md](02_manufacturer_data.md) | **BLE advertisement parsing** - ZengGe, Telink, Service Data |
 | 03 | [03_device_identification.md](03_device_identification.md) | Product ID mapping, capability detection |
 | 04 | [04_connection_transport.md](04_connection_transport.md) | BLE connection, transport layer, JSON handling |
 | 05 | [05_basic_commands.md](05_basic_commands.md) | RGB, CCT, brightness, power commands |

@@ -421,7 +421,10 @@ PRODUCT_CAPABILITIES: Final = {
     72:  {"name": "Ctrl_Mini_RGBW_Mic", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True, "mic_cmd_format": "simple"},
 
     # Controllers with RGB only
-    8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True, "has_builtin_mic": True, "mic_cmd_format": "simple"},
+    # Product 0x08 uses rgb_mini_mic protocol (NOT Symphony)
+    # Color: 0x31 format, State: wifibleLightStandardV1 (mode 0x61)
+    # Source: Expert research confirmed this is NOT a Symphony device
+    8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True, "mic_cmd_format": "simple", "uses_0x38_effects": True, "has_candle_mode": True},  # 0x08
     16:  {"name": "ChristmasLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
     51:  {"name": "Ctrl_Mini_RGB", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_color_order": True},
 
@@ -443,7 +446,8 @@ PRODUCT_CAPABILITIES: Final = {
     53:  {"name": "Bulb_RGBCW_R120", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SIMPLE},
     59:  {"name": "Bulb_RGBCW", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SIMPLE},
     68:  {"name": "Bulb_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
-    84:  {"name": "Downlight_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
+    84:  {"name": "Downlight_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_candle_mode": True, "uses_0x38_effects": True},  # 0x54
+    91:  {"name": "Strip_Controller", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_candle_mode": True, "uses_0x38_effects": True},  # 0x5B
 
     # Switches and Sockets - not supported as lights
     11:  {"name": "Switch_1c", "is_switch": True, "effect_type": EffectType.NONE},
@@ -598,6 +602,7 @@ def get_effect_list(
     has_bg_color: bool = False,
     has_ic_config: bool = False,
     has_builtin_mic: bool = False,
+    has_candle_mode: bool = False,
 ) -> list[str]:
     """Get list of effect names for the given effect type.
 
@@ -606,6 +611,7 @@ def get_effect_list(
         has_bg_color: If True, include static effects that support background color
         has_ic_config: If True, device is a Symphony controller (0xA1-0xAD), not 0x56/0x80
         has_builtin_mic: If True, include "Sound Reactive" option for devices with built-in mic
+        has_candle_mode: If True, include "Candle Mode" option (0x54, 0x5B devices)
 
     Returns:
         List of effect names
@@ -644,11 +650,19 @@ def get_effect_list(
     if has_builtin_mic and effect_type != EffectType.IOTBT:
         effects.append("Sound Reactive")
 
+    # Add candle mode option for devices that support it (0x54, 0x5B)
+    if has_candle_mode:
+        effects.append("Candle Mode")
+
     return effects
 
 
 # Special marker for sound reactive mode (not a real effect ID)
 SOUND_REACTIVE_MARKER: Final = 0xFFFF
+
+# Special marker for candle mode (0x39 command, not a standard effect)
+# Used by product IDs 0x54 and 0x5B
+CANDLE_MODE_MARKER: Final = 0xFFFE
 
 
 def get_effect_id(
@@ -657,6 +671,7 @@ def get_effect_id(
     has_bg_color: bool = False,
     has_ic_config: bool = False,
     has_builtin_mic: bool = False,
+    has_candle_mode: bool = False,
 ) -> int | None:
     """Get effect ID from name.
 
@@ -666,14 +681,18 @@ def get_effect_id(
         has_bg_color: If True, check static effects that support background color
         has_ic_config: If True, device is a Symphony controller (0xA1-0xAD), not 0x56/0x80
         has_builtin_mic: If True, recognize "Sound Reactive" effect
+        has_candle_mode: If True, recognize "Candle Mode" effect (0x54, 0x5B devices)
 
     Returns:
         Effect ID or None if not found.
         Returns SOUND_REACTIVE_MARKER (0xFFFF) for "Sound Reactive" effect.
+        Returns CANDLE_MODE_MARKER (0xFFFE) for "Candle Mode" effect.
     """
-    # Check for sound reactive mode first (special handling, not a real effect ID)
+    # Check for special modes first (not real effect IDs)
     if effect_name == "Sound Reactive" and has_builtin_mic:
         return SOUND_REACTIVE_MARKER
+    if effect_name == "Candle Mode" and has_candle_mode:
+        return CANDLE_MODE_MARKER
     if effect_type == EffectType.SIMPLE:
         for eid, name in SIMPLE_EFFECTS.items():
             if name == effect_name:

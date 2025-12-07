@@ -82,63 +82,72 @@ The BLE version field determines command compatibility:
 
 Source: `com/zengge/wifi/Device/a.java` method `k()`
 
-| productId (hex) | Device Class                    | BaseType         | Capabilities        |
-|-----------------|---------------------------------|------------------|---------------------|
-| 0x04 (4)        | Ctrl_RGBW_UFO_0x04              | RGBW             | RGB + W             |
-| 0x06 (6)        | Ctrl_Mini_RGBW_0x06             | RGBWBoth         | RGB + W             |
-| 0x07 (7)        | Ctrl_Mini_RGBCW_0x07            | RGBCWBoth + hd.l | RGB + WW + CW + IC  |
-| 0x08 (8)        | Ctrl_Mini_RGB_Mic_0x08          | RGBSymphony      | RGB + Mic effects   |
-| 0x09 (9)        | Ctrl_Ceiling_light_CCT_0x09     | CCT              | CCT only (WW+CW)    |
-| 0x0B (11)       | Switch_1c_0x0b                  | Switch           | On/Off only         |
-| 0x0E (14)       | FloorLamp_RGBCW_0x0E            | RGBCWBoth        | RGBCW               |
-| 0x10 (16)       | ChristmasLight_0x10             | RGB              | RGB effects         |
-| 0x16 (22)       | Magnetic_CCT_0x16               | CCT              | CCT only            |
-| 0x17 (23)       | Magnetic_Dim_0x17               | Brightness       | Dimmer only         |
-| 0x18 (24)       | PlantLight_0x18                 | Special          | Plant grow light    |
-| 0x19 (25)       | Socket_2Usb_0x19                | Switch           | Socket + USB        |
-| 0x1A (26)       | ChristmasLight_0x1A             | RGB              | Christmas effects   |
-| 0x1B (27)       | SprayLight_0x1B                 | Special          | Spray light         |
-| 0x1C (28)       | TableLamp_CCT_0x1C              | CCT              | CCT table lamp      |
-| 0x1D (29)       | FillLight_0x1D                  | Special*         | Fill light (probe!) |
-| 0x1E (30)       | CeilingLight_RGBCW_0x1E         | RGBCWBoth        | RGBCW               |
-| 0x20 (32)       | Ctrl_Mini_RGBW_0x20             | RGBWBoth         | RGB + W             |
-| 0x21 (33)       | Bulb_Dim_0x21                   | Brightness       | Dimmer bulb         |
-| 0x25 (37)       | Ctrl_RGBCW_Both_0x25            | RGBCWBoth        | RGBCW               |
-| 0x26 (38)       | Ctrl_Mini_RGBW_0x26             | RGBWBoth         | RGB + W             |
-| 0x27 (39)       | Ctrl_Mini_RGBW_0x27             | RGBWBoth         | RGB + W             |
-| 0x29 (41)       | MirrorLight_0x29                | Special          | Mirror light        |
-| 0x2D (45)       | GAON_PlantLight_0x2D            | Special          | GAON plant light    |
-| 0x33 (51)       | Ctrl_Mini_RGB_0x33              | RGB              | RGB only            |
-| 0x35 (53)       | Bulb_RGBCW_R120_0x35            | RGBCWBulb        | RGBCW bulb          |
-| 0x3B (59)       | Bulb_RGBCW_0x3B                 | RGBCWBulb        | RGBCW bulb          |
-| 0x41 (65)       | Ctrl_Dim_0x41                   | Brightness       | Dimmer controller   |
-| 0x44 (68)       | Bulb_RGBW_0x44                  | RGBWBulb         | RGBW bulb           |
-| 0x48 (72)       | Ctrl_Mini_RGBW_Mic_0x48         | RGBWBoth + hd.l  | RGBW + Mic + IC     |
-| 0x52 (82)       | Bulb_CCT_0x52                   | CCT              | CCT bulb            |
-| 0x54 (84)       | Downlight_RGBW_0x54             | RGBWBoth         | RGBW downlight      |
-| 0x62 (98)       | Ctrl_CCT_0x62                   | CCT              | CCT controller      |
-| 0x93 (147)      | Switch_1C_0x93                  | Switch           | 1-channel switch    |
-| 0x94 (148)      | Switch_1c_Watt_0x94             | Switch           | Switch + power      |
-| 0x95 (149)      | Switch_2c_0x95                  | Switch           | 2-channel switch    |
-| 0x96 (150)      | Switch_4c_0x96                  | Switch           | 4-channel switch    |
-| 0x97 (151)      | Socket_1c_0x97                  | Switch           | 1-channel socket    |
-| 0xA1 (161)      | Ctrl_Mini_RGB_Symphony_0xa1     | RGBSymphony+hd.g | Symphony effects    |
-| 0xA2 (162)      | Ctrl_Mini_RGB_Symphony_new_0xa2 | RGBNewSymphony   | New Symphony        |
-| 0xA3 (163)      | Ctrl_Mini_RGB_Symphony_new_0xA3 | RGBNewSymphony   | New Symphony        |
-| 0xA4 (164)      | Ctrl_Mini_RGB_Symphony_new_0xA4 | RGBNewSymphony   | New Symphony        |
-| 0xA6 (166)      | Ctrl_Mini_RGB_Symphony_new_0xA6 | RGBNewSymphony   | New Symphony        |
-| 0xA7 (167)      | Ctrl_Mini_RGB_Symphony_new_0xA7 | RGBNewSymphony   | New Symphony        |
-| 0xA9 (169)      | Ctrl_Mini_RGB_Symphony_new_0xA9 | RGBNewSymphony   | New Symphony        |
-| 0xAA (170)      | Symphony_Line_0xAA              | RGBNewSymphony   | Symphony strip      |
-| 0xAB (171)      | Symphony_Line_0xAB              | RGBNewSymphony   | Symphony strip      |
-| **0xAC (172)**  | **Symphony_Curtain_0xAC**       | **RGBNewSymphony**| **LED Curtain Light** |
-| **0xAD (173)**  | **Symphony_Curtain_0xAD**       | **RGBNewSymphony**| **LED Curtain Light** |
-| 0xD1 (209)      | Digital_Light_0xd1              | Special          | Digital LED panel   |
-| 0xE1 (225)      | Ctrl_Ceiling_light_0xe1         | Ceiling          | Ceiling light       |
-| 0xE2 (226)      | Ctrl_Ceiling_light_Assist_0xe2  | Ceiling          | Ceiling assist      |
-| 0x00 (0)        | TypeNone                        | None             | Unknown device      |
+| productId (hex) | Device Class                    | BaseType         | Capabilities        | Colour Cmd |
+|-----------------|---------------------------------|------------------|---------------------|------------|
+| 0x04 (4)        | Ctrl_RGBW_UFO_0x04              | RGBW             | RGB + W             | 0x31 (†)   |
+| 0x06 (6)        | Ctrl_Mini_RGBW_0x06             | RGBWBoth         | RGB + W + CCT       | 0x31       |
+| 0x07 (7)        | Ctrl_Mini_RGBCW_0x07            | RGBCWBoth        | RGB + WW + CW       | 0x31       |
+| 0x08 (8)        | Ctrl_Mini_RGB_Mic_0x08          | RGB              | RGB + built-in mic  | 0x31       |
+| 0x09 (9)        | Ctrl_Ceiling_light_CCT_0x09     | CCT              | CCT only (WW+CW)    | N/A        |
+| 0x0B (11)       | Switch_1c_0x0b                  | Switch           | On/Off only         | N/A        |
+| 0x0E (14)       | FloorLamp_RGBCW_0x0E            | RGBCWBoth        | RGBCW               | 0x31       |
+| 0x10 (16)       | ChristmasLight_0x10             | RGB (christmas)  | RGB + Christmas fx  | special    |
+| 0x16 (22)       | Magnetic_CCT_0x16               | CCT              | CCT only            | N/A        |
+| 0x17 (23)       | Magnetic_Dim_0x17               | Brightness       | Dimmer only         | N/A        |
+| 0x18 (24)       | PlantLight_0x18                 | Special          | Plant grow light    | N/A        |
+| 0x19 (25)       | Socket_2Usb_0x19                | Switch           | Socket + USB        | N/A        |
+| 0x1A (26)       | ChristmasLight_0x1A             | RGB              | Christmas effects   | special    |
+| 0x1B (27)       | SprayLight_0x1B                 | Special          | Spray light         | N/A        |
+| 0x1C (28)       | TableLamp_CCT_0x1C              | CCT              | CCT table lamp      | N/A        |
+| 0x1D (29)       | FillLight_0x1D                  | Special*         | Fill light (†probe) | varies     |
+| 0x1E (30)       | CeilingLight_RGBCW_0x1E         | RGBCWBoth        | RGBCW               | 0x31       |
+| 0x20 (32)       | Ctrl_Mini_RGBW_0x20             | RGBWBoth         | RGB + W             | 0x31       |
+| 0x21 (33)       | Bulb_Dim_0x21                   | Brightness       | Dimmer bulb         | N/A        |
+| 0x25 (37)       | Ctrl_RGBCW_Both_0x25            | RGBCWBoth        | RGBCW (†)           | 0x31 (†)   |
+| 0x26 (38)       | Ctrl_Mini_RGBW_0x26             | RGBWBoth         | RGB + W             | 0x31       |
+| 0x27 (39)       | Ctrl_Mini_RGBW_0x27             | RGBWBoth         | RGB + W             | 0x31       |
+| 0x29 (41)       | MirrorLight_0x29                | Special          | Mirror light        | N/A        |
+| 0x2D (45)       | GAON_PlantLight_0x2D            | Special          | GAON plant light    | N/A        |
+| 0x33 (51)       | Ctrl_Mini_RGB_0x33              | RGB              | RGB only            | 0x31       |
+| 0x35 (53)       | Bulb_RGBCW_R120_0x35            | RGBCWBulb        | RGBCW bulb          | 0x31       |
+| 0x3B (59)       | Bulb_RGBCW_0x3B                 | RGBCWBulb        | RGBCW bulb (†)      | 0x31 (†)   |
+| 0x41 (65)       | Ctrl_Dim_0x41                   | Brightness       | Dimmer controller   | N/A        |
+| 0x44 (68)       | Bulb_RGBW_0x44                  | RGBWBulb         | RGBW bulb           | 0x31       |
+| 0x48 (72)       | Ctrl_Mini_RGBW_Mic_0x48         | RGBWBoth         | RGBW + built-in mic | 0x31       |
+| 0x52 (82)       | Bulb_CCT_0x52                   | CCT              | CCT bulb            | N/A        |
+| 0x54 (84)       | Downlight_RGBW_0x54             | RGBWBoth         | RGBW downlight      | 0x31       |
+| 0x62 (98)       | Ctrl_CCT_0x62                   | CCT              | CCT controller      | N/A        |
+| 0x93 (147)      | Switch_1C_0x93                  | Switch           | 1-channel switch    | N/A        |
+| 0x94 (148)      | Switch_1c_Watt_0x94             | Switch           | Switch + power      | N/A        |
+| 0x95 (149)      | Switch_2c_0x95                  | Switch           | 2-channel switch    | N/A        |
+| 0x96 (150)      | Switch_4c_0x96                  | Switch           | 4-channel switch    | N/A        |
+| 0x97 (151)      | Socket_1c_0x97                  | Switch           | 1-channel socket    | N/A        |
+| 0xA1 (161)      | Ctrl_Mini_RGB_Symphony_0xa1     | RGBSymphony      | Symphony (**NO mic**)| 0x31      |
+| 0xA2 (162)      | Ctrl_Mini_RGB_Symphony_new_0xa2 | RGBNewSymphony   | Symphony + mic      | **0x46**   |
+| 0xA3 (163)      | Ctrl_Mini_RGB_Symphony_new_0xA3 | RGBNewSymphony   | Symphony + mic      | 0x46       |
+| 0xA4 (164)      | Ctrl_Mini_RGB_Symphony_new_0xA4 | RGBNewSymphony   | Symphony + mic      | 0x46       |
+| 0xA6 (166)      | Ctrl_Mini_RGB_Symphony_new_0xA6 | RGBNewSymphony   | Symphony + mic      | 0x46       |
+| 0xA7 (167)      | Ctrl_Mini_RGB_Symphony_new_0xA7 | RGBNewSymphony   | Symphony + mic (†)  | 0x46 (†)   |
+| 0xA9 (169)      | Ctrl_Mini_RGB_Symphony_new_0xA9 | RGBNewSymphony   | Symphony + mic (†)  | 0x46 (†)   |
+| 0xAA (170)      | Symphony_Line_0xAA              | SymphonyLine     | Strip + built-in mic| 0x46       |
+| 0xAB (171)      | Symphony_Line_0xAB              | SymphonyLine     | Strip + built-in mic| 0x46       |
+| 0xAC (172)      | Symphony_Curtain_0xAC           | SymphonyCurtain  | Curtain + mic       | 0x46       |
+| 0xAD (173)      | Symphony_Curtain_0xAD           | SymphonyCurtain  | Curtain + mic       | 0x46       |
+| 0xD1 (209)      | Digital_Light_0xd1              | Special          | Digital LED panel   | special    |
+| 0xE1 (225)      | Ctrl_Ceiling_light_0xe1         | Ceiling          | Ceiling light       | N/A        |
+| 0xE2 (226)      | Ctrl_Ceiling_light_Assist_0xe2  | Ceiling          | Ceiling assist      | N/A        |
+| 0x00 (0)        | TypeNone                        | None             | Unknown device      | N/A        |
 
-**Note**: FillLight_0x1D (29) is a "stub" device class - capabilities vary by hardware. Always probe capabilities with state query.
+**Legend**:
+- **(†)** = Not found in current app database - may be legacy/deprecated or handled dynamically
+- **0x31** = Standard colour command: `31{r}{g}{b}...`
+- **0x46** = New Symphony colour command: `46{r}{g}{b}0000`
+- **NO mic** = Product 0xA1 specifically does NOT have built-in microphone functions
+
+**Notes**:
+- FillLight_0x1D (29) is a "stub" device - capabilities vary by hardware. Always probe with state query.
+- Product 0xA1 (161) uses older `symphony_wifi` protocol and has NO mic functions unlike other Symphony devices.
+- Products 0xA2-0xAD (162-173) use `symphony_wifi_new` protocol with built-in mic support.
 
 ## State-Based Capability Detection
 
@@ -234,7 +243,7 @@ def get_device_capabilities(product_id: int) -> dict:
         dict with has_rgb, has_ww, has_cw, has_effects, effect_type
     """
     # Symphony devices - addressable LED with advanced effects
-    if product_id in [161, 162, 163, 164, 166, 167, 169, 8]:  # 0xA1-0xA9, 0x08
+    if product_id in [161, 162, 163, 164, 166, 167, 169]:  # 0xA1-0xA9
         return {
             'has_rgb': True,
             'has_ww': False,
@@ -276,8 +285,8 @@ def get_device_capabilities(product_id: int) -> dict:
             'effect_command': '0x61_5byte',
         }
     
-    # RGB only devices
-    if product_id in [33, 51]:  # RGB variants
+    # RGB only devices (8 = Ctrl_Mini_RGB_Mic has built-in mic but uses same 0x31 RGB command)
+    if product_id in [8, 33, 51]:  # RGB variants (8 with mic, 33/51 without)
         return {
             'has_rgb': True,
             'has_ww': False,

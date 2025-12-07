@@ -169,12 +169,26 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # First visit - just show the form, don't connect yet
         if user_input is None:
+            # Build description placeholders with device info
+            product_id = self._discovery_info.get("product_id")
+            placeholders = {
+                "name": self._discovery_info["name"],
+                "address": self._discovery_info["address"],
+                "product_id": f"0x{product_id:02X}" if product_id is not None else "Unknown",
+            }
+            # Add firmware version if available
+            fw_version = self._discovery_info.get("fw_version")
+            if fw_version:
+                placeholders["fw_version"] = str(fw_version)
+            else:
+                placeholders["fw_version"] = "Unknown"
+
             return self.async_show_form(
                 step_id="confirm",
                 data_schema=vol.Schema({
                     vol.Required("test_device", default=True): bool,
                 }),
-                description_placeholders={"name": self._discovery_info["name"]},
+                description_placeholders=placeholders,
             )
 
         # User wants to skip testing and just add
@@ -273,11 +287,19 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if device:
                 await device.stop()
             errors["base"] = "cannot_connect"
+            # Re-use the same placeholders
+            product_id = self._discovery_info.get("product_id")
+            placeholders = {
+                "name": self._discovery_info["name"],
+                "address": self._discovery_info["address"],
+                "product_id": f"0x{product_id:02X}" if product_id is not None else "Unknown",
+                "fw_version": str(self._discovery_info.get("fw_version") or "Unknown"),
+            }
             return self.async_show_form(
                 step_id="confirm",
                 data_schema=vol.Schema({vol.Required("test_device", default=True): bool}),
                 errors=errors,
-                description_placeholders={"name": self._discovery_info["name"]},
+                description_placeholders=placeholders,
             )
         except Exception as ex:
             # Clean up the device on failure
@@ -285,11 +307,19 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await device.stop()
             _LOGGER.exception("Validation error: %s", ex)
             errors["base"] = "unknown"
+            # Re-use the same placeholders
+            product_id = self._discovery_info.get("product_id")
+            placeholders = {
+                "name": self._discovery_info["name"],
+                "address": self._discovery_info["address"],
+                "product_id": f"0x{product_id:02X}" if product_id is not None else "Unknown",
+                "fw_version": str(self._discovery_info.get("fw_version") or "Unknown"),
+            }
             return self.async_show_form(
                 step_id="confirm",
                 data_schema=vol.Schema({vol.Required("test_device", default=True): bool}),
                 errors=errors,
-                description_placeholders={"name": self._discovery_info["name"]},
+                description_placeholders=placeholders,
             )
 
         # Device flashed successfully - create entry with defaults
