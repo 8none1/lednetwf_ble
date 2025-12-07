@@ -17,17 +17,18 @@
       },
       "options": {
         "title": "Device Options",
-        "description": "Configure options for **{name}**.",
+        "description": "Configure options for **{name}**. Total LEDs: {total_leds}",
         "data": {
           "disconnect_delay": "Disconnect delay (seconds)",
-          "led_count": "LED count",
+          "led_count": "LEDs per segment",
+          "segments": "Number of segments",
           "led_type": "LED chip type",
           "color_order": "Color order"
         }
       }
     },
     "error": {
-      "cannot_connect": "Could not connect to the device. Ensure it is powered on and in range.",
+      "cannot_connect": "The Home Assistant server wasn't able to establish a reliable connection to your device. Ensure it is powered on and in range, then try again.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {
@@ -41,9 +42,11 @@
     "step": {
       "init": {
         "title": "Device Options",
+        "description": "Total LEDs: {total_leds}",
         "data": {
           "disconnect_delay": "Disconnect delay (seconds)",
-          "led_count": "LED count",
+          "led_count": "LEDs per segment",
+          "segments": "Number of segments",
           "led_type": "LED chip type",
           "color_order": "Color order"
         }

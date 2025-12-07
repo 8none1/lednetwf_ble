@@ -1,0 +1,2 @@
+# Requirements for LEDnetWF BLE tools
+bleak>=0.21.0
