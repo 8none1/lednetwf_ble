@@ -410,6 +410,89 @@ class LEDNetWFDevice:
 
 ---
 
+## State Response Parsing (NOT Data-Driven)
+
+**IMPORTANT**: The JSON configuration files only define **command formats**, NOT response parsing. State response parsing is complex, mode-dependent, and must remain in Python code.
+
+### Why State Parsing Cannot Be Data-Driven
+
+1. **Response format varies by mode** - Same device uses different byte meanings in RGB vs CCT vs Effect modes
+2. **Mode detection is complex** - Must check multiple bytes to determine current mode
+3. **Brightness derivation varies** - HSV extraction for RGB, direct value for white mode, different byte for effects
+4. **Device-specific quirks** - SIMPLE devices report mode_type=effect_id, Symphony uses different format
+
+### State Protocol Types (from `ble_devices.json`)
+
+The `stateProtocol` field indicates which parser to use, but the actual parsing logic is in code:
+
+| Protocol Name | Description | Products |
+|---------------|-------------|----------|
+| `wifibleLightStandardV1` | Standard 14-byte 0x81 format | 0x08, 0x33, most devices |
+| `wifibleLightStandardV2` | Extended standard format | Newer firmware |
+| `wifibleNewRGBSymphony` | Symphony-specific parsing | 0xA2-0xAD |
+| `wifibleRGBSymphony` | Old Symphony format | 0xA1 |
+| `wifibleCCT` | CCT-only devices | CCT bulbs |
+| `wifibleBrightness` | Brightness-only devices | Dimmers |
+
+### Standard 0x81 State Response Format
+
+Source: `protocol_docs/08_state_query_response_parsing.md`
+
+```text
+Byte 0:  Header (0x81)
+Byte 1:  Mode
+Byte 2:  Power State (0x23 = ON)
+Byte 3:  Mode Type (0x61=static, 0x25=effect, 37-56=SIMPLE effect ID)
+Byte 4:  Sub-mode (0xF0=RGB, 0x0F=white, or effect params)
+Byte 5:  Value1 (brightness 0-100 for white mode)
+Byte 6:  R (or brightness in effect mode)
+Byte 7:  G (or speed in effect mode)
+Byte 8:  B
+Byte 9:  WW / Color Temp
+Byte 10: LED Version (NOT brightness!)
+Byte 11: CW
+Byte 12: Reserved
+Byte 13: Checksum
+```
+
+### Mode-Dependent Brightness Derivation
+
+```python
+def get_brightness_from_state(response: dict, device_type: str) -> int:
+    """Brightness extraction varies by mode."""
+
+    if response["is_effect_mode"]:
+        # Effect mode: byte 6 contains brightness 0-100
+        return int(response["r"] * 255 / 100)
+
+    elif response["is_white_mode"]:
+        # White mode: byte 5 (value1) contains brightness 0-100
+        return int(response["value1"] * 255 / 100)
+
+    elif response["is_rgb_mode"]:
+        # RGB mode: derive from RGB via HSV (V component)
+        r, g, b = response["r"], response["g"], response["b"]
+        _, _, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+        return int(v * 255)
+```
+
+### Current Implementation Location
+
+State parsing is currently implemented in:
+
+- `protocol.py:parse_state_response()` - Basic 0x81 parsing
+- `device.py:_parse_state_response()` - Mode-dependent interpretation
+- `device.py:_parse_device_state2_response()` - IOTBT devices (0xEA 0x81 format)
+
+### Recommendation for Data-Driven Architecture
+
+1. **Keep state parsing in Python** - Don't try to make this data-driven
+2. **Use `stateProtocol` to select parser** - Map protocol names to parsing functions
+3. **Capability lookup can inform parsing** - Use JSON data to know which modes device supports
+4. **Document protocol variants** - See `protocol_docs/08_state_query_response_parsing.md`
+
+---
+
 ## Implementation Steps
 
 ### Phase 1: Data Files

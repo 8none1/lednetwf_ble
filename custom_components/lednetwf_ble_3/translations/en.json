@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select Device",
+        "description": "Select your LEDnetWF device from the list below.",
+        "data": {
+          "mac": "Device"
+        }
+      },
+      "confirm": {
+        "title": "Add Device",
+        "description": "Found device **{name}**\n\n- Address: `{address}`\n- Product ID: `{product_id}`\n- Firmware: `{fw_version}`\n\nWould you like to test the connection by flashing the light?",
+        "data": {
+          "test_device": "Test device (flash colors)"
+        }
+      },
+      "options": {
+        "title": "Device Options",
+        "description": "Configure options for '{name}'.",
+        "data": {
+          "disconnect_delay": "Disconnect delay (seconds)",
+          "led_count": "LED count",
+          "led_type": "LED chip type",
+          "color_order": "Color order"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the device. Ensure it is powered on and in range.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "no_devices_found": "No supported LEDnetWF devices found. Make sure your device is powered on.",
+      "not_supported": "This device is not supported.",
+      "no_discovery_info": "No device discovery information available."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Device Options",
+        "data": {
+          "disconnect_delay": "Disconnect delay (seconds)",
+          "led_count": "LED count",
+          "led_type": "LED chip type",
+          "color_order": "Color order"
+        }
+      }
+    }
+  }
+}

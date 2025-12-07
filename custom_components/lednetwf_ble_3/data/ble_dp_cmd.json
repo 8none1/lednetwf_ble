@@ -1,0 +1,15 @@
+{
+  "net_state": {
+    "cmdForm": "2222",
+    "opcode": 7
+  },
+  "reset": {
+    "cmdForm": "2222",
+    "opcode": 8
+  },
+  "bright_value_v2": {
+    "cmdForm": "3b010000{value}00{value}{delay}{delay}{delay}{gradient}{gradient}",
+    "needChecksum": true,
+    "opcode": 11
+  }
+}
