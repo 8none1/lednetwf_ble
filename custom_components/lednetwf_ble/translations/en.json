@@ -2,83 +2,51 @@
   "config": {
     "step": {
       "user": {
-        "title": "Select LEDnetWF light",
+        "title": "Select Device",
+        "description": "Select your LEDnetWF device from the list below.",
         "data": {
-          "mac": "Bluetooth MAC address",
-          "name": "Name"
+          "mac": "Device"
         }
       },
-      "validate": {
-        "title": "Validate connection",
+      "confirm": {
+        "title": "Add Device",
+        "description": "Found device **{name}**\n\n- Address: `{address}`\n- Product ID: `{product_id}`\n- Firmware: `{fw_version}`\n\nWould you like to test the connection by flashing the light?",
         "data": {
-          "retry": "Retry?",
-          "flicker": "Did the light blink?"
+          "test_device": "Test device (flash colors)"
         }
       },
-      "manual": {
-        "title": "Enter bluetooth MAC address",
+      "options": {
+        "title": "Device Options",
+        "description": "Configure options for '{name}'.",
         "data": {
-          "mac": "Bluetooth MAC address",
-          "name": "Name"
+          "disconnect_delay": "Disconnect delay (seconds)",
+          "led_count": "LED count",
+          "led_type": "LED chip type",
+          "color_order": "Color order"
         }
       }
     },
     "error": {
-      "connect": "Unable to connect to LEDnetWF",
-      "toggle_failed": "Failed to blink the light. Check signal strength or power.",
-      "device_disappeared": "The selected device is no longer available.",
-      "not_supported": "This device model is not supported by the integration.",
-      "no_selection": "No device was selected.",
-      "already_configured": "This device has already been configured.",
-      "no_devices_found": "No supported LEDnetWF lights were found nearby.",
-      "cannot_connect": "Could not connect to the device. Make sure it's powered on and nearby.",
-      "device_unreachable": "Device is unreachable or powered off. Ensure the device is on, nearby, and no other devices are connected to it.",
-      "device_not_ready": "Device is not ready. Manufacturer data unavailable. Please ensure the device is properly advertising and try again.",
-      "unknown": "An unexpected error occurred. Please try again."
+      "cannot_connect": "Could not connect to the device. Ensure it is powered on and in range.",
+      "unknown": "An unexpected error occurred."
     },
     "abort": {
-      "cannot_validate": "Unable to validate LEDnetWF light",
-      "cannot_connect": "Unable to connect to LEDnetWF",
-      "already_configured": "This device is already configured",
-      "device_disappeared": "The selected device was not found again",
-      "unsupported_device": "The selected device is not supported",
-      "no_devices_found": "No unconfigured LEDnetWF lights found"
+      "already_configured": "This device is already configured.",
+      "no_devices_found": "No supported LEDnetWF devices found. Make sure your device is powered on.",
+      "not_supported": "This device is not supported.",
+      "no_discovery_info": "No device discovery information available."
     }
   },
   "options": {
     "step": {
-      "user": {
-        "title": "Device Configuration",
-        "description": "It is recommended to make configuration changes via the app. This functionality is included for convenience and is not complete.",
-        "data": {
-          "delay": "Disconnect delay",
-          "ledcount": "Number of LEDs",
-          "name": "Name",
-          "ledtype": "LED type",
-          "colororder": "Color order",
-          "segments": "Number of segments",
-          "ignore_notifications": "Ignore state change notifications"
-        }
-      },
       "init": {
-        "title": "LEDnetWF",
-        "description": "This probably should never be seen.",
+        "title": "Device Options",
         "data": {
-          "delay": "Disconnect delay (0 = never disconnect)",
-          "ledcount": "Number of LEDs",
-          "name": "Name",
-          "ledtype": "LED type",
-          "colororder": "Color order",
-          "segments": "Number of segments",
-          "ignore_notifications": "Ignore state change notifications"
+          "disconnect_delay": "Disconnect delay (seconds)",
+          "led_count": "LED count",
+          "led_type": "LED chip type",
+          "color_order": "Color order"
         }
-      }
-    }
-  },
-  "entity": {
-    "number": {
-      "effect_speed": {
-        "name": "Effect speed"
       }
     }
   }

@@ -1,355 +1,596 @@
-import logging
-import asyncio
-import importlib
-import pkgutil
-import voluptuous as vol
+"""Config flow for LEDnetWF BLE v2 integration."""
+from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
+
+import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_discovered_service_info,
 )
-from homeassistant.const import CONF_MAC
+from homeassistant.const import CONF_MAC, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.device_registry import format_mac
-import homeassistant.helpers.config_validation as cv
-from bluetooth_data_tools import human_readable_name
-from bleak_retry_connector import BleakNotFoundError, BleakOutOfConnectionSlotsError
-from asyncio import TimeoutError
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.selector import NumberSelector, NumberSelectorConfig, NumberSelectorMode
+
+from bleak_retry_connector import BleakNotFoundError
 
 from .const import (
     DOMAIN,
-    CONF_NAME,
-    CONF_DELAY,
-    CONF_LEDCOUNT,
-    CONF_LEDTYPE,
-    CONF_COLORORDER,
-    CONF_MODEL,
+    CONF_PRODUCT_ID,
+    CONF_DISCONNECT_DELAY,
+    CONF_LED_COUNT,
     CONF_SEGMENTS,
-    CONF_IGNORE_NOTIFICATIONS,
-    LedTypes_StripLight,
-    LedTypes_RingLight,
-    ColorOrdering,
+    CONF_LED_TYPE,
+    CONF_COLOR_ORDER,
+    DEFAULT_DISCONNECT_DELAY,
+    DEFAULT_LED_COUNT,
+    DEFAULT_SEGMENTS,
+    LedType,
+    ColorOrder,
+    SimpleColorOrder,
+    is_supported_device,
+    get_device_capabilities,
+    needs_capability_probing,
 )
-from .lednetwf import LEDNETWFInstance
+from .device import LEDNetWFDevice
+from . import protocol
 
 _LOGGER = logging.getLogger(__name__)
 
-# Dynamically load supported models
-SUPPORTED_MODELS = []
-package = __package__
-models_path = __file__.replace(__file__.split("/")[-1], "models")
 
-for _, module_name, _ in pkgutil.iter_modules([models_path]):
-    if module_name.startswith("model_0x"):
-        module = importlib.import_module(f"{package}.models.{module_name}")
-        if hasattr(module, "SUPPORTED_MODELS"):
-            SUPPORTED_MODELS.extend(module.SUPPORTED_MODELS)
+def _is_valid_device_name(name: str) -> bool:
+    """Check if device name matches supported patterns.
 
-
-class DeviceData:
-    def __init__(self, discovery: BluetoothServiceInfoBleak):
-        self._discovery = discovery
-        self.address = discovery.address
-        self.unique_id = format_mac(self.address)
-        self.logical_name = discovery.name
-        self.rssi = discovery.rssi
-        manu_data = next(iter(discovery.manufacturer_data.values()), None)
-        self.fw_major = manu_data[0] if isinstance(manu_data, (bytes, bytearray)) and len(manu_data) > 0 else None
-
-    def is_supported(self) -> bool:
-        return (
-            (self.logical_name.lower().startswith("lednetwf") or self.logical_name.lower().startswith("iotb"))
-            and self.fw_major is not None
-            and self.fw_major in SUPPORTED_MODELS
-        )
-
-    def human_name(self) -> str:
-        return human_readable_name(None, self.logical_name, self.address)
-
-    def display_name(self) -> str:
-        return f"{self.human_name()} ({self.address})"
+    Source: protocol_docs/02_ble_scanning_device_discovery.md
+    Accepts: LEDnetWF*, IOTWF*, IOTB*
+    """
+    if not name:
+        return False
+    name_lower = name.lower()
+    return (
+        name_lower.startswith("lednetwf") or
+        name_lower.startswith("iotwf") or
+        name_lower.startswith("iotb")
+    )
 
 
-@config_entries.HANDLERS.register(DOMAIN)
-class LEDNETWFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
+def _parse_discovery(discovery: BluetoothServiceInfoBleak) -> dict | None:
+    """Parse discovery info and extract product ID."""
+    name = discovery.name or ""
+
+    # Check device name matches supported patterns
+    if not _is_valid_device_name(name):
+        return None
+
+    # Parse manufacturer data
+    manu_data = protocol.parse_manufacturer_data(discovery.manufacturer_data, name)
+    if not manu_data:
+        return None
+
+    product_id = manu_data.get("product_id")
+    if not is_supported_device(product_id):
+        _LOGGER.debug("Device %s (product 0x%02X) not supported", name, product_id or 0)
+        return None
+
+    return {
+        "address": discovery.address,
+        "name": name,
+        "product_id": product_id,
+        "fw_version": manu_data.get("fw_version"),
+        "rssi": discovery.rssi,
+    }
+
+
+class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle config flow for LEDnetWF BLE v2."""
+
     VERSION = 1
 
-    def __init__(self):
-        self._discovered_devices: dict[str, DeviceData] = {}
-        self._selected: DeviceData | None = None
-        self._instance: LEDNETWFInstance | None = None
-        self._initial_discovery: BluetoothServiceInfoBleak | None = None
+    def __init__(self) -> None:
+        """Initialize the config flow."""
+        self._discovery_info: dict | None = None
+        self._discovered_devices: dict[str, dict] = {}
 
-    async def async_step_bluetooth(self, discovery_info: BluetoothServiceInfoBleak) -> FlowResult:
-        _LOGGER.debug("[BT] Received Bluetooth discovery for %s", discovery_info.address)
-        # await self.async_set_unique_id(discovery_info.address.lower())
-        # self._abort_if_unique_id_configured()
-        self._initial_discovery = discovery_info
-        device = DeviceData(discovery_info)
-        await self.async_set_unique_id(device.unique_id)
-        self.context["title_placeholders"] = {"name": device.human_name()}
+    async def async_step_bluetooth(
+        self, discovery_info: BluetoothServiceInfoBleak
+    ) -> FlowResult:
+        """Handle Bluetooth discovery."""
+        _LOGGER.debug("Bluetooth discovery: %s", discovery_info.address)
 
-        if device.is_supported():
-            if device.unique_id not in self._discovered_devices:
-                self._discovered_devices[device.unique_id] = device
-                _LOGGER.debug("[BT] Added to discovered cache: %s", device.unique_id)
+        parsed = _parse_discovery(discovery_info)
+        if not parsed:
+            return self.async_abort(reason="not_supported")
 
-        return await self.async_step_user()
+        address = parsed["address"]
+        await self.async_set_unique_id(format_mac(address))
+        self._abort_if_unique_id_configured()
 
+        self._discovery_info = parsed
+        self.context["title_placeholders"] = {"name": parsed["name"]}
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        _LOGGER.debug("[USER] Entered async_step_user with input: %s", user_input)
+        return await self.async_step_confirm()
 
-        configured_ids = self._get_configured_ids()
-        _LOGGER.debug("[USER] Already configured device IDs: %s", configured_ids)
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle user-initiated setup (manual selection)."""
+        errors: dict[str, str] = {}
 
-        # Refresh discovery cache
+        if user_input is not None:
+            address = user_input[CONF_MAC]
+            if address in self._discovered_devices:
+                self._discovery_info = self._discovered_devices[address]
+                await self.async_set_unique_id(format_mac(address))
+                self._abort_if_unique_id_configured()
+                return await self.async_step_confirm()
+
+        # Scan for devices
+        self._discovered_devices = {}
+        configured_addresses = {
+            entry.unique_id for entry in self._async_current_entries()
+        }
+
         for discovery in async_discovered_service_info(self.hass):
-            mac = format_mac(discovery.address)
+            parsed = _parse_discovery(discovery)
+            if parsed and format_mac(parsed["address"]) not in configured_addresses:
+                self._discovered_devices[parsed["address"]] = parsed
 
-            if mac in configured_ids or mac in self._discovered_devices:
-                continue
-
-            try:
-                device = DeviceData(discovery)
-                if device.is_supported():
-                    self._discovered_devices[mac] = device
-                    _LOGGER.debug("[USER] Added device: %s (%s)", device.display_name(), f"0x{device.fw_major:02X}")
-            except Exception as e:
-                _LOGGER.warning("[USER] Failed to parse discovery %s: %s", mac, e)
-
-        # Limit UI to only the device that triggered the flow
-        if self._initial_discovery:
-            selected_mac = format_mac(self._initial_discovery.address)
-            selected_device = self._discovered_devices.get(selected_mac)
-
-            if not selected_device or selected_mac in configured_ids:
-                _LOGGER.warning("[USER] Initial discovery device missing or already configured: %s", selected_mac)
-                return self.async_abort(reason="device_disappeared")
-
-            mac_dict = {selected_mac: selected_device.display_name()}
-        else:
-            # Fallback: show all devices if not launched via bluetooth
-            mac_dict = {
-                addr: dev.display_name()
-                for addr, dev in sorted(self._discovered_devices.items(), key=lambda item: item[1].rssi or -999, reverse=True)
-                if addr not in configured_ids
-            }
-
-        if not mac_dict:
-            _LOGGER.warning("[USER] No supported unconfigured devices found")
+        if not self._discovered_devices:
             return self.async_abort(reason="no_devices_found")
 
-        if user_input:
-            mac = user_input[CONF_MAC]
-            self._selected = self._discovered_devices.get(mac)
-            if self._selected:
-                _LOGGER.debug("[USER] Selected device: %s", self._selected.display_name())
-                return await self.async_step_validate()
-            else:
-                _LOGGER.warning("[USER] Selected MAC not in device list: %s", mac)
-                return self.async_abort(reason="device_disappeared")
+        # Build device selection
+        device_options = {
+            addr: f"{info['name']} ({addr})"
+            for addr, info in self._discovered_devices.items()
+        }
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({vol.Required(CONF_MAC): vol.In(mac_dict)}),
+            data_schema=vol.Schema(
+                {vol.Required(CONF_MAC): vol.In(device_options)}
+            ),
+            errors=errors,
         )
 
-    def _get_configured_ids(self) -> set[str]:
-        return {entry.unique_id for entry in self.hass.config_entries.async_entries(DOMAIN)}
+    async def async_step_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle confirmation step with device validation."""
+        errors: dict[str, str] = {}
 
-    async def async_step_validate(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        _LOGGER.debug("[VALIDATE] Entered async_step_validate with input: %s", user_input)
+        if self._discovery_info is None:
+            return self.async_abort(reason="no_discovery_info")
 
-        if self._selected is None:
-            _LOGGER.error("[VALIDATE] No device selected at validation step")
-            return self.async_abort(reason="no_selection")
+        # First visit - just show the form, don't connect yet
+        if user_input is None:
+            # Build description placeholders with device info
+            product_id = self._discovery_info.get("product_id")
+            placeholders = {
+                "name": self._discovery_info["name"],
+                "address": self._discovery_info["address"],
+                "product_id": f"0x{product_id:02X}" if product_id is not None else "Unknown",
+            }
+            # Add firmware version if available
+            fw_version = self._discovery_info.get("fw_version")
+            if fw_version:
+                placeholders["fw_version"] = str(fw_version)
+            else:
+                placeholders["fw_version"] = "Unknown"
 
+            return self.async_show_form(
+                step_id="confirm",
+                data_schema=vol.Schema({
+                    vol.Required("test_device", default=True): bool,
+                }),
+                description_placeholders=placeholders,
+            )
+
+        # User wants to skip testing and just add
+        if not user_input.get("test_device"):
+            return self._create_entry({})
+
+        # User wants to test - flash the device and probe if needed
+        # Use setup_mode=True for single connection attempt (no retries)
+        # and wrap in overall timeout so UI doesn't hang
+        device = None
         try:
-            if not self._instance:
-                _LOGGER.debug("[VALIDATE] Instantiating device before prompt")
-                data = {
-                    CONF_MAC:   self._selected.address,
-                    CONF_NAME:  self._selected.human_name(),
-                    CONF_DELAY: 120,
-                    CONF_MODEL: self._selected.fw_major,
-                }
-                self._instance = LEDNETWFInstance(self._selected.address, self.hass, data)
-                await self._instance.update()
-                await self._instance.send_initial_packets()
-                await self._instance._write(self._instance._model_interface.GET_LED_SETTINGS_PACKET)
-                _LOGGER.debug("[VALIDATE] Device instantiated and initial packets sent")
-                _LOGGER.debug("[VALIDATE] Device model interface: %s", self._instance._model_interface)
-                _LOGGER.debug("[VALIDATE] LED Count: %s, Chip Type: %s, Color Order: %s, Segments: %s",
-                              getattr(self._instance._model_interface, 'led_count', 'Unknown'),
-                              getattr(self._instance._model_interface, 'chip_type', 'Unknown'),
-                              getattr(self._instance._model_interface, 'color_order', 'Unknown'),
-                              getattr(self._instance._model_interface, 'segments', 'Unknown'))
-
-            if user_input:
-                if user_input.get("flicker"):
-                    self._abort_if_unique_id_configured()
-                    return self._create_entry()
-
-            for _ in range(3):
-                await self._instance.turn_on()
-                await asyncio.sleep(1)
-                await self._instance.turn_off()
-                await asyncio.sleep(1)
-            
-            _LOGGER.debug("[VALIDATE AFTER FLASH] LED Count: %s, Chip Type: %s, Color Order: %s, Segments: %s",
-                getattr(self._instance._model_interface, 'led_count', 'Unknown'),
-                getattr(self._instance._model_interface, 'chip_type', 'Unknown'),
-                getattr(self._instance._model_interface, 'color_order', 'Unknown'),
-                getattr(self._instance._model_interface, 'segments', 'Unknown'))
-
-        except BleakOutOfConnectionSlotsError as e:
-            _LOGGER.error("[VALIDATE] Device unreachable or out of connection slots: %s", e, exc_info=True)
-            return self.async_show_form(
-                step_id="validate",
-                data_schema=vol.Schema({vol.Required("retry"): bool}),
-                errors={"base": "device_unreachable"},
+            product_id = self._discovery_info.get("product_id")
+            device = LEDNetWFDevice(
+                self.hass,
+                self._discovery_info["address"],
+                self._discovery_info["name"],
+                product_id,
+                setup_mode=True,  # Single connection attempt, fast failure
             )
 
-        except (TimeoutError, BleakNotFoundError) as e:
-            _LOGGER.error("[VALIDATE] Connection failed: %s", e, exc_info=True)
+            # Overall timeout for the entire test operation (15 seconds)
+            async def _test_device():
+                # If device needs capability probing (unknown product ID), probe first
+                if needs_capability_probing(product_id):
+                    _LOGGER.info(
+                        "Unknown product ID 0x%02X - probing capabilities",
+                        product_id or 0
+                    )
+                    probed_caps = await device.probe_capabilities()
+                    # Store probed capabilities for later use
+                    self._discovery_info["probed_capabilities"] = probed_caps
+                    _LOGGER.info("Probed capabilities: %s", probed_caps)
+
+                # Test pattern based on device capabilities
+                await device.turn_on()
+                await asyncio.sleep(0.3)
+
+                if device.has_rgb:
+                    # RGB devices: Show R-G-B test pattern at full brightness
+                    # Easily distinguishable from effects and confirms color control
+                    for color in [(255, 0, 0), (0, 255, 0), (0, 0, 255)]:
+                        await device.set_rgb_color(color, brightness=255)
+                        await asyncio.sleep(0.7)
+                elif device.has_color_temp:
+                    # CCT devices: Sweep from warm to cool
+                    for kelvin in [2700, 4600, 6500]:
+                        await device.set_color_temp(kelvin, brightness=255)
+                        await asyncio.sleep(0.7)
+                else:
+                    # Dimmer-only: Just flash on/off
+                    for _ in range(3):
+                        await asyncio.sleep(0.4)
+                        await device.turn_off()
+                        await asyncio.sleep(0.3)
+                        await device.turn_on()
+
+                await device.turn_off()
+
+                # Query LED settings if device supports it
+                caps = device.capabilities  # Use device's capabilities (may be probed)
+                _LOGGER.debug(
+                    "Device capabilities after flash test: has_ic_config=%s, has_color_order=%s, effect_type=%s",
+                    caps.get("has_ic_config"), caps.get("has_color_order"), caps.get("effect_type")
+                )
+                if caps.get("has_ic_config"):
+                    led_settings = await device.query_led_settings_and_wait(timeout=3.0)
+                    if led_settings:
+                        _LOGGER.info(
+                            "Queried LED settings: count=%s, type=%s, order=%s",
+                            led_settings.get("led_count"),
+                            led_settings.get("ic_type"),
+                            led_settings.get("color_order"),
+                        )
+                        # Store for use in options step
+                        self._discovery_info["queried_led_settings"] = led_settings
+
+                # For SIMPLE devices with color order support, explicitly query state
+                # to get current color order (can't rely on turn_on/off notifications)
+                if caps.get("has_color_order"):
+                    _LOGGER.info("Querying state for color order...")
+                    await device.query_state_and_wait(timeout=3.0)
+                    if device.color_order:
+                        _LOGGER.info("Queried color order: %d", device.color_order)
+                        self._discovery_info["queried_color_order"] = device.color_order
+
+            try:
+                await asyncio.wait_for(_test_device(), timeout=15.0)
+            except asyncio.TimeoutError:
+                _LOGGER.warning("Device test timed out after 15 seconds")
+                raise BleakNotFoundError("Connection timed out")
+
+            await device.stop()
+
+        except BleakNotFoundError:
+            # Clean up the device on failure
+            if device:
+                await device.stop()
+            errors["base"] = "cannot_connect"
+            # Re-use the same placeholders
+            product_id = self._discovery_info.get("product_id")
+            placeholders = {
+                "name": self._discovery_info["name"],
+                "address": self._discovery_info["address"],
+                "product_id": f"0x{product_id:02X}" if product_id is not None else "Unknown",
+                "fw_version": str(self._discovery_info.get("fw_version") or "Unknown"),
+            }
             return self.async_show_form(
-                step_id="validate",
-                data_schema=vol.Schema({vol.Required("retry"): bool}),
-                errors={"base": "cannot_connect"},
+                step_id="confirm",
+                data_schema=vol.Schema({vol.Required("test_device", default=True): bool}),
+                errors=errors,
+                description_placeholders=placeholders,
+            )
+        except Exception as ex:
+            # Clean up the device on failure
+            if device:
+                await device.stop()
+            _LOGGER.exception("Validation error: %s", ex)
+            errors["base"] = "unknown"
+            # Re-use the same placeholders
+            product_id = self._discovery_info.get("product_id")
+            placeholders = {
+                "name": self._discovery_info["name"],
+                "address": self._discovery_info["address"],
+                "product_id": f"0x{product_id:02X}" if product_id is not None else "Unknown",
+                "fw_version": str(self._discovery_info.get("fw_version") or "Unknown"),
+            }
+            return self.async_show_form(
+                step_id="confirm",
+                data_schema=vol.Schema({vol.Required("test_device", default=True): bool}),
+                errors=errors,
+                description_placeholders=placeholders,
             )
 
-        except ConfigEntryNotReady as e:
-            _LOGGER.error("[VALIDATE] Device not ready: %s", e, exc_info=True)
-            return self.async_show_form(
-                step_id="validate",
-                data_schema=vol.Schema({vol.Required("retry"): bool}),
-                errors={"base": "device_not_ready"},
-            )
+        # Device flashed successfully - create entry with defaults
+        return self._create_entry({})
 
-        except Exception as e:
-            _LOGGER.error("[VALIDATE] Unexpected error: %s", e, exc_info=True)
-            return self.async_show_form(
-                step_id="validate",
-                data_schema=vol.Schema({vol.Required("retry"): bool}),
-                errors={"base": "unknown"},
-            )
+    async def async_step_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle LED configuration options."""
+        if user_input is not None:
+            return self._create_entry(user_input)
+
+        caps = get_device_capabilities(self._discovery_info.get("product_id"))
+
+        # Get queried LED settings if available (from device test step)
+        queried = self._discovery_info.get("queried_led_settings", {})
+
+        # Build options schema based on device capabilities
+        schema_dict: dict[vol.Marker, Any] = {
+            vol.Optional(
+                CONF_DISCONNECT_DELAY,
+                default=DEFAULT_DISCONNECT_DELAY,
+            ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+        }
+
+        # Only show LED config for addressable strips
+        if caps.get("has_ic_config"):
+            # Use queried values as defaults if available, otherwise use hardcoded defaults
+            default_led_count = queried.get("led_count") or DEFAULT_LED_COUNT
+            default_segments = queried.get("segments") or DEFAULT_SEGMENTS
+
+            # Map IC type value to enum name
+            queried_ic_type = queried.get("ic_type")
+            default_led_type = LedType.WS2812B.name
+            if queried_ic_type is not None:
+                for lt in LedType:
+                    if lt.value == queried_ic_type:
+                        default_led_type = lt.name
+                        break
+
+            # Map color order value to enum name
+            queried_color_order = queried.get("color_order")
+            default_color_order = ColorOrder.GRB.name
+            if queried_color_order is not None:
+                for co in ColorOrder:
+                    if co.value == queried_color_order:
+                        default_color_order = co.name
+                        break
+
+            schema_dict.update({
+                vol.Optional(CONF_LED_COUNT, default=default_led_count): NumberSelector(
+                    NumberSelectorConfig(min=1, max=1000, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_SEGMENTS, default=default_segments): NumberSelector(
+                    NumberSelectorConfig(min=1, max=100, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_LED_TYPE, default=default_led_type): vol.In(
+                    [t.name for t in LedType]
+                ),
+                vol.Optional(CONF_COLOR_ORDER, default=default_color_order): vol.In(
+                    [o.name for o in ColorOrder]
+                ),
+            })
+
+        # Color order for SIMPLE devices (0x33, etc.) - only RGB, GRB, BRG
+        elif caps.get("has_color_order"):
+            queried_color_order = self._discovery_info.get("queried_color_order")
+            default_color_order = SimpleColorOrder.GRB.name
+            if queried_color_order is not None:
+                for co in SimpleColorOrder:
+                    if co.value == queried_color_order:
+                        default_color_order = co.name
+                        break
+
+            schema_dict.update({
+                vol.Optional(CONF_COLOR_ORDER, default=default_color_order): vol.In(
+                    [o.name for o in SimpleColorOrder]
+                ),
+            })
+
+        # Calculate total LEDs for display in description
+        placeholders = {"name": self._discovery_info["name"]}
+        if caps.get("has_ic_config"):
+            total_leds = default_led_count * default_segments
+            placeholders["total_leds"] = str(total_leds)
 
         return self.async_show_form(
-            step_id="validate",
-            data_schema=vol.Schema({vol.Required("flicker"): bool}),
-            description_placeholders={"device": self._selected.display_name()},
+            step_id="options",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders=placeholders,
         )
 
-
-    def _create_entry(self) -> FlowResult:
-        # Let's see if those stored values are available
-        led_count = getattr(self._instance._model_interface, 'led_count', 64)
-        if getattr(self._instance, "_model", None) in (0x56, 0x80):
-            chip_type = LedTypes_RingLight.WS2812B
-        else:
-            chip_type = LedTypes_StripLight.WS2812B
-        color_order   = getattr(self._instance._model_interface, 'color_order', ColorOrdering.GRB) #"GRB")
-        segments      = getattr(self._instance._model_interface, 'segments', 1)
-
-        _LOGGER.debug("[CREATE] LED Count: %s, Chip Type: %s, Color Order: %s, Segments: %s", led_count, chip_type, color_order, segments)
-
+    def _create_entry(self, options: dict[str, Any]) -> FlowResult:
+        """Create the config entry."""
         data = {
-            CONF_MAC: self._selected.address,
-            CONF_NAME: self._selected.human_name(),
-            CONF_DELAY: 120,
-            CONF_MODEL: self._selected.fw_major,
-        }
-        options = {
-            CONF_LEDCOUNT: led_count,
-            CONF_LEDTYPE: chip_type,
-            CONF_COLORORDER: color_order,
-            CONF_SEGMENTS: segments,
+            CONF_MAC: self._discovery_info["address"],
+            CONF_NAME: self._discovery_info["name"],
+            CONF_PRODUCT_ID: self._discovery_info.get("product_id"),
         }
 
-        _LOGGER.debug("[CREATE] Creating config entry with data: %s and options: %s", data, options)
+        # Store probed capabilities if available
+        if "probed_capabilities" in self._discovery_info:
+            data["probed_capabilities"] = self._discovery_info["probed_capabilities"]
 
-        return self.async_create_entry(title=self._selected.human_name(), data=data, options=options)
+        # Get queried LED settings (from device test step) to use as defaults
+        queried = self._discovery_info.get("queried_led_settings", {})
+        queried_color_order = self._discovery_info.get("queried_color_order")
+        caps = get_device_capabilities(self._discovery_info.get("product_id"))
+
+        # Process options
+        processed_options = {
+            CONF_DISCONNECT_DELAY: options.get(
+                CONF_DISCONNECT_DELAY, DEFAULT_DISCONNECT_DELAY
+            ),
+        }
+
+        # Use user-provided options first, then queried values, then defaults
+        if CONF_LED_COUNT in options:
+            processed_options[CONF_LED_COUNT] = int(options[CONF_LED_COUNT])
+        elif queried.get("led_count"):
+            processed_options[CONF_LED_COUNT] = queried["led_count"]
+
+        if CONF_SEGMENTS in options:
+            processed_options[CONF_SEGMENTS] = int(options[CONF_SEGMENTS])
+        elif queried.get("segments"):
+            processed_options[CONF_SEGMENTS] = queried["segments"]
+
+        if CONF_LED_TYPE in options:
+            processed_options[CONF_LED_TYPE] = LedType[options[CONF_LED_TYPE]].value
+        elif queried.get("ic_type") is not None:
+            processed_options[CONF_LED_TYPE] = queried["ic_type"]
+
+        if CONF_COLOR_ORDER in options:
+            color_order_name = options[CONF_COLOR_ORDER]
+            # Check if it's a SimpleColorOrder (for SIMPLE devices) or ColorOrder (for addressable)
+            if caps.get("has_color_order") and not caps.get("has_ic_config"):
+                # SIMPLE device - use SimpleColorOrder
+                processed_options[CONF_COLOR_ORDER] = SimpleColorOrder[color_order_name].value
+            else:
+                # Addressable/Symphony device - use ColorOrder
+                processed_options[CONF_COLOR_ORDER] = ColorOrder[color_order_name].value
+        elif queried.get("color_order") is not None:
+            processed_options[CONF_COLOR_ORDER] = queried["color_order"]
+        elif queried_color_order is not None:
+            # For SIMPLE devices, color_order comes from state query
+            processed_options[CONF_COLOR_ORDER] = queried_color_order
+
+        return self.async_create_entry(
+            title=self._discovery_info["name"],
+            data=data,
+            options=processed_options,
+        )
 
     @staticmethod
     @callback
-    def async_get_options_flow(entry: config_entries.ConfigEntry):
-        return OptionsFlowHandler(entry)
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> OptionsFlowHandler:
+        """Get the options flow handler."""
+        return OptionsFlowHandler(config_entry)
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
-    def __init__(self, config_entry):
-        self._data = config_entry.data
-        self._options = dict(config_entry.options)
+    """Handle options flow for the integration."""
 
-    async def async_step_init(self, user_input=None):
-        return await self.async_step_user()
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self._config_entry = config_entry
 
-    async def async_step_user(self, user_input=None):
-        model = self._data.get(CONF_MODEL)
-        # TODO: Look up the strip light models more dynamically, not hard coded
-        led_types = LedTypes_StripLight if model in (0x56, 0x80) else LedTypes_RingLight
-        # led_types_list = list(led_types)
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle options."""
+        if user_input is not None:
+            return self._save_options(user_input)
 
-        # if not led_types_list:
-        #     _LOGGER.error("[OPTIONS] No LED types defined for model: %s", model)
-        #     return self.async_abort(reason="unsupported_model")
+        product_id = self._config_entry.data.get(CONF_PRODUCT_ID)
+        caps = get_device_capabilities(product_id)
+        options = self._config_entry.options
 
-        _LOGGER.debug(f"[OPTIONS] Current model: 0x{model:02X}")
-        _LOGGER.debug("[OPTIONS] Options before update: %s", self._options)
+        schema_dict: dict[vol.Marker, Any] = {
+            vol.Optional(
+                CONF_DISCONNECT_DELAY,
+                default=options.get(CONF_DISCONNECT_DELAY, DEFAULT_DISCONNECT_DELAY),
+            ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+        }
 
-        if user_input:
-            _LOGGER.debug("[OPTIONS] Received user input: %s", user_input)
-            chip = led_types[user_input[CONF_LEDTYPE]]
-            order = ColorOrdering[user_input[CONF_COLORORDER]]
-            _LOGGER.debug("[OPTIONS] Resolved chip: %s, order: %s", chip, order)
-            # self._options.update({
-            #     CONF_DELAY: user_input.get(CONF_DELAY, 120),
-            #     CONF_LEDCOUNT: user_input[CONF_LEDCOUNT],
-            #     CONF_LEDTYPE: chip,
-            #     CONF_COLORORDER: order,
-            #     CONF_SEGMENTS: user_input.get(CONF_SEGMENTS, 1),
-            #     CONF_IGNORE_NOTIFICATIONS: user_input.get(CONF_IGNORE_NOTIFICATIONS, False),
-            # })
-            self._options.update({
-                CONF_DELAY: user_input.get(CONF_DELAY, 120),
-                CONF_LEDCOUNT: user_input[CONF_LEDCOUNT],
-                # CONF_LEDTYPE: user_input[CONF_LEDTYPE],
-                CONF_LEDTYPE: chip,
-                # CONF_COLORORDER: user_input[CONF_COLORORDER],
-                CONF_COLORORDER: order,
-                CONF_SEGMENTS: user_input.get(CONF_SEGMENTS, 1),
-                CONF_IGNORE_NOTIFICATIONS: user_input.get(CONF_IGNORE_NOTIFICATIONS, False),
+        if caps.get("has_ic_config"):
+            current_led_count = options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+            current_segments = options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
+            current_led_type = options.get(CONF_LED_TYPE, LedType.WS2812B.value)
+            current_color_order = options.get(CONF_COLOR_ORDER, ColorOrder.GRB.value)
+
+            # Convert values back to names for display
+            led_type_name = next(
+                (t.name for t in LedType if t.value == current_led_type),
+                LedType.WS2812B.name,
+            )
+            color_order_name = next(
+                (o.name for o in ColorOrder if o.value == current_color_order),
+                ColorOrder.GRB.name,
+            )
+
+            schema_dict.update({
+                vol.Optional(CONF_LED_COUNT, default=current_led_count): NumberSelector(
+                    NumberSelectorConfig(min=1, max=1000, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_SEGMENTS, default=current_segments): NumberSelector(
+                    NumberSelectorConfig(min=1, max=100, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_LED_TYPE, default=led_type_name): vol.In(
+                    [t.name for t in LedType]
+                ),
+                vol.Optional(CONF_COLOR_ORDER, default=color_order_name): vol.In(
+                    [o.name for o in ColorOrder]
+                ),
             })
-            _LOGGER.debug("[OPTIONS] Updated options: %s", self._options)
-            return self.async_create_entry(title=self._data[CONF_NAME], data=self._options)
 
-        
-        # chip_default_name = next(
-        #     (t.name for t in led_types if t.value == chip_default),
-        #     led_types_list[0].name
-        # )
-        # chip_default = self._options.get(CONF_LEDTYPE, 1)
-        # order_default = self._options.get(CONF_COLORORDER, ColorOrdering.GRB.value)
-        # order_default = self._options.get(CONF_COLORORDER, 2)
-        # order_default_name = next((o.name for o in ColorOrdering if o.value == order_default), ColorOrdering.GRB.name)
-        current_chip = self._options.get(CONF_LEDTYPE)
-        current_order = self._options.get(CONF_COLORORDER)
-        chip_default_name = current_chip.name if hasattr(current_chip, 'name') else list(led_types)[0].name
-        order_default_name = current_order.name if hasattr(current_order, 'name') else ColorOrdering.GRB.name
-        _LOGGER.debug("[OPTIONS] Resolved chip_default: %s, order_default: %s", chip_default_name, order_default_name)
+        # Color order for SIMPLE devices (0x33, etc.)
+        elif caps.get("has_color_order"):
+            current_color_order = options.get(CONF_COLOR_ORDER, SimpleColorOrder.GRB.value)
 
-        schema = vol.Schema({
-            vol.Optional(CONF_DELAY, default=self._options.get(CONF_DELAY, 120)): int,
-            vol.Optional(CONF_LEDCOUNT, default=self._options.get(CONF_LEDCOUNT, 64)): cv.positive_int,
-            vol.Optional(CONF_LEDTYPE, default=chip_default_name): vol.In([t.name for t in led_types]),
-            vol.Optional(CONF_COLORORDER, default=order_default_name): vol.In([o.name for o in ColorOrdering]),
-            vol.Optional(CONF_SEGMENTS, default=self._options.get(CONF_SEGMENTS, 1)): cv.positive_int,
-            vol.Optional(CONF_IGNORE_NOTIFICATIONS, default=self._options.get(CONF_IGNORE_NOTIFICATIONS, False)): bool,
-        })
-        return self.async_show_form(step_id="user", data_schema=schema)
+            # Convert value back to name for display
+            color_order_name = next(
+                (o.name for o in SimpleColorOrder if o.value == current_color_order),
+                SimpleColorOrder.GRB.name,
+            )
+
+            schema_dict.update({
+                vol.Optional(CONF_COLOR_ORDER, default=color_order_name): vol.In(
+                    [o.name for o in SimpleColorOrder]
+                ),
+            })
+
+        # Calculate total LEDs for display in description
+        placeholders = {}
+        if caps.get("has_ic_config"):
+            total_leds = current_led_count * current_segments
+            placeholders["total_leds"] = str(total_leds)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders=placeholders if placeholders else None,
+        )
+
+    def _save_options(self, user_input: dict[str, Any]) -> FlowResult:
+        """Save options."""
+        product_id = self._config_entry.data.get(CONF_PRODUCT_ID)
+        caps = get_device_capabilities(product_id)
+
+        new_options = {
+            CONF_DISCONNECT_DELAY: user_input.get(
+                CONF_DISCONNECT_DELAY, DEFAULT_DISCONNECT_DELAY
+            ),
+        }
+
+        if CONF_LED_COUNT in user_input:
+            new_options[CONF_LED_COUNT] = int(user_input[CONF_LED_COUNT])
+        if CONF_SEGMENTS in user_input:
+            new_options[CONF_SEGMENTS] = int(user_input[CONF_SEGMENTS])
+        if CONF_LED_TYPE in user_input:
+            new_options[CONF_LED_TYPE] = LedType[user_input[CONF_LED_TYPE]].value
+        if CONF_COLOR_ORDER in user_input:
+            color_order_name = user_input[CONF_COLOR_ORDER]
+            # Check if it's a SimpleColorOrder (for SIMPLE devices) or ColorOrder (for addressable)
+            if caps.get("has_color_order") and not caps.get("has_ic_config"):
+                # SIMPLE device - use SimpleColorOrder
+                new_options[CONF_COLOR_ORDER] = SimpleColorOrder[color_order_name].value
+            else:
+                # Addressable/Symphony device - use ColorOrder
+                new_options[CONF_COLOR_ORDER] = ColorOrder[color_order_name].value
+
+        return self.async_create_entry(title="", data=new_options)
