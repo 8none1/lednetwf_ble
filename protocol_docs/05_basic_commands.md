@@ -69,13 +69,47 @@ def set_cct(temp_pct: int, bright_pct: int, duration_sec: float = 0.3) -> bytes:
 
 ---
 
-## Brightness Command (0x47)
+## Brightness Command (0x47) - Legacy
 
 | Byte | Field | Value |
 |------|-------|-------|
 | 0 | Command | 0x47 |
 | 1 | Brightness | 0-255 |
 | 2 | Checksum | Sum of bytes 0-1 |
+
+---
+
+## Brightness Command (0x3B Mode 0x01) - Firmware v9+
+
+Standalone brightness control for modern devices. Adjusts brightness independent of current mode.
+
+**Source**: `wifi_dp_cmd.json`, `ble_dp_cmd.json` - function `bright_value_v2`
+
+| Byte | Field | Value |
+|------|-------|-------|
+| 0 | Command | 0x3B |
+| 1 | Mode | 0x01 |
+| 2-3 | Reserved | 0x00, 0x00 |
+| 4 | Brightness | 0-100 (percent) |
+| 5 | Reserved | 0x00 |
+| 6 | Brightness | 0-100 (repeated) |
+| 7-9 | Delay | Big-endian 24-bit (ms) |
+| 10-11 | Gradient | Big-endian 16-bit |
+| 12 | Checksum | Sum of bytes 0-11 |
+
+```python
+def build_brightness_v2(brightness: int, delay: int = 0, gradient: int = 0) -> bytes:
+    """Build standalone brightness command for firmware v9+ devices."""
+    brightness = max(0, min(100, brightness))
+    cmd = bytearray([
+        0x3B, 0x01, 0x00, 0x00,
+        brightness & 0xFF, 0x00, brightness & 0xFF,
+        (delay >> 16) & 0xFF, (delay >> 8) & 0xFF, delay & 0xFF,
+        (gradient >> 8) & 0xFF, gradient & 0xFF
+    ])
+    cmd.append(sum(cmd) & 0xFF)
+    return bytes(cmd)
+```
 
 ---
 

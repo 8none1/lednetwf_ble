@@ -1084,7 +1084,7 @@ def build_color_order_command_simple(color_order: int) -> bytearray:
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
-def build_sound_reactive_simple(enable: bool) -> bytearray:
+def build_sound_reactive_simple(enable: bool, sensitivity: int = 50) -> bytearray:
     """
     Build simple 5-byte sound reactive command for 0x08, 0x48 devices.
 
@@ -1092,23 +1092,31 @@ def build_sound_reactive_simple(enable: bool) -> bytearray:
     When enabled, the device listens to ambient sound via its built-in mic
     and adjusts LED colors/patterns autonomously.
 
-    Source: tc/b.java method o(boolean) lines 1670-1681
+    Source: Packet capture analysis (micmode.csv)
     Source: protocol_docs/18_sound_reactive_music_mode.md
 
     Args:
         enable: True to enable sound reactive mode, False to disable
+        sensitivity: Microphone sensitivity 1-100 (default 50)
 
-    Format: [0x73, 0x7A, 0x7B, state, checksum]
+    Format: [0x73, enable, sensitivity, 0x0F, checksum]
         - 0x73: Command ID
-        - 0x7A, 0x7B: Fixed bytes
-        - state: 0xF0 = enable, 0x0F = disable
+        - enable: 0x01 = on, 0x00 = off
+        - sensitivity: 1-100 (mic gain level)
+        - 0x0F: Fixed byte
         - checksum: Sum of bytes 0-3 & 0xFF
+
+    Examples from packet capture:
+        73 01 21 0f a4  - enable with sensitivity 33
+        73 01 64 0f e7  - enable with sensitivity 100 (max)
+        73 01 01 0f 84  - enable with sensitivity 1 (min)
     """
+    sensitivity = max(1, min(100, sensitivity))
     raw_cmd = bytearray([
         0x73,                      # Command ID
-        0x7A,                      # Fixed
-        0x7B,                      # Fixed
-        0xF0 if enable else 0x0F,  # State: 0xF0=on, 0x0F=off
+        0x01 if enable else 0x00,  # Enable/disable
+        sensitivity,               # Sensitivity 1-100
+        0x0F,                      # Fixed byte
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
     return wrap_command(raw_cmd, cmd_family=0x0b)  # 0x0b for commands
@@ -1730,10 +1738,29 @@ def parse_manufacturer_data(
                 # Sound reactive mode (built-in microphone)
                 # 0x5D (93) - SIMPLE devices with mic (e.g., product 0x08 Ctrl_Mini_RGB_Mic)
                 # 0x62 (98) - Symphony devices with mic
-                color_mode = 'effect'
+                color_mode = 'sound_reactive'
                 effect_id = 0x100  # Special ID for Sound Reactive (same as IOTBT_MUSIC_EFFECTS)
-                _LOGGER.debug("%sManu data sound reactive mode: mode_type=0x%02X",
-                              log_prefix, mode_type)
+                # Byte 17: SENSITIVITY - command uses 1-100, adv may use different scale
+                # Brightness is NOT available in sound reactive advertisement data
+                sensitivity_raw = data[17] if len(data) > 17 else 0
+                # Map sensitivity to effect_speed (0-100) for UI
+                # If value is 1-100, use directly; if 1-31 (IR remote scale), map to 0-100
+                if sensitivity_raw <= 0:
+                    effect_speed = 50  # Default if invalid
+                elif sensitivity_raw <= 31:
+                    # IR remote uses 1-31 scale, map to 1-100
+                    effect_speed = max(1, int(sensitivity_raw * 100 / 31))
+                elif sensitivity_raw <= 100:
+                    # App/BLE uses 1-100 scale directly
+                    effect_speed = sensitivity_raw
+                else:
+                    effect_speed = 100  # Cap at 100
+                # Bytes 18-20: real-time RGB color (changes with sound) - often 0,0,0 when idle
+                if len(data) > 20:
+                    rgb = (data[18], data[19], data[20])
+                state_bytes = ' '.join(f'{b:02X}' for b in data[14:min(25, len(data))])
+                _LOGGER.debug("%sManu data sound reactive mode: mode_type=0x%02X, sensitivity_raw=%d, speed=%d%%, rgb=%s, state_bytes[14:24]: %s",
+                              log_prefix, mode_type, sensitivity_raw, effect_speed, rgb, state_bytes)
             else:
                 # Log full state bytes for debugging unknown modes
                 state_bytes = ' '.join(f'{b:02X}' for b in data[14:min(25, len(data))])
@@ -1775,6 +1802,9 @@ def parse_manufacturer_data(
         elif color_mode == "effect":
             _LOGGER.debug("%s  Effect state: id=%s, speed=%s, bright_pct=%s%%",
                           log_prefix, effect_id, effect_speed, brightness_percent)
+        elif color_mode == "sound_reactive":
+            _LOGGER.debug("%s  Sound reactive state: sensitivity/speed=%s%%, rgb=%s",
+                          log_prefix, effect_speed, rgb)
 
         return result
 

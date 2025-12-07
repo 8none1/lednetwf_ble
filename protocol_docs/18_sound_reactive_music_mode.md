@@ -1,6 +1,6 @@
 # Sound Reactive Mode Protocol (Built-in Microphone Devices)
 
-**Updated**: 6 December 2025
+**Updated**: 7 December 2025
 
 This document describes how to enable sound-reactive modes on LEDnetWF/Zengge BLE LED devices **with built-in microphones**.
 
@@ -90,39 +90,85 @@ The app uses a **database-driven approach**:
 
 ---
 
-## Command Format 1: Simple 5-Byte (0x08, 0x48)
+## Command Format 1: Simple 5-Byte with Sensitivity (0x08, 0x48)
 
-For simple mic devices, use the basic enable/disable command.
+For simple mic devices, use the command with sensitivity control.
 
-### Format (Raw Payload)
+### Format (Raw Payload) - From Packet Capture
 
 ```
-[0x73, 0x7A, 0x7B, state, checksum]
+[0x73, enable, sensitivity, 0x0F, checksum]
 ```
 
 | Byte | Value | Description |
 |------|-------|-------------|
 | 0 | 0x73 (115) | Command ID |
-| 1 | 0x7A (122) | Fixed |
-| 2 | 0x7B (123) | Fixed |
-| 3 | 0xF0/0x0F | 0xF0 = On, 0x0F = Off |
+| 1 | 0x01/0x00 | 0x01 = Enable, 0x00 = Disable |
+| 2 | 0x01-0x64 | Sensitivity (1-100) |
+| 3 | 0x0F (15) | Fixed byte |
 | 4 | checksum | Sum of bytes 0-3 & 0xFF |
 
-### Example Packets
+### Example Packets (from BLE packet capture)
 
-**Enable:**
-```
-Raw:     73 7A 7B F0 58
+**Enable with 33% sensitivity:**
+
+```text
+Raw:     73 01 21 0F A4
+         ^^ ^^ ^^ ^^ ^^
+         |  |  |  |  checksum (0x73+0x01+0x21+0x0F = 0xA4)
+         |  |  |  fixed byte
+         |  |  sensitivity 0x21 = 33
+         |  enable (0x01)
+         command ID
 ```
 
-**Disable:**
-```
-Raw:     73 7A 7B 0F 77
+**Enable with 100% sensitivity (maximum):**
+
+```text
+Raw:     73 01 64 0F E7
 ```
 
-### Java Source
+**Enable with 1% sensitivity (minimum):**
 
-`tc/b.java` method `o(boolean z10)` (line 1670)
+```text
+Raw:     73 01 01 0F 84
+```
+
+**Disable (sensitivity value ignored but required):**
+
+```text
+Raw:     73 00 32 0F B4
+```
+
+### Sensitivity Range
+
+- **Minimum**: 1 (0x01) - lowest mic gain
+- **Maximum**: 100 (0x64) - highest mic gain
+- **Default**: 50 (0x32) - recommended starting point
+
+### Advertisement State (Byte 17)
+
+When in sound reactive mode, the device broadcasts sensitivity in manufacturer data byte 17:
+
+| Advertisement Value | Interpretation |
+|--------------------|----------------|
+| 1-31 | IR remote scale (map to 1-100: `value * 100 / 31`) |
+| 32-100 | Direct BLE/app scale (use as-is) |
+
+### Legacy Format (from Java decompile)
+
+The Android app Java code shows an older format that may be legacy:
+
+```
+[0x73, 0x7A, 0x7B, state, checksum]
+state: 0xF0 = On, 0x0F = Off
+```
+
+This format does NOT include sensitivity control. Packet captures from the actual app show the format above with sensitivity is what's actually used.
+
+### Java Source Reference
+
+`tc/b.java` method `o(boolean z10)` (line 1670) - shows legacy format
 
 ---
 
@@ -203,23 +249,49 @@ In `MusicModeFragment.java`, the K2() method builds the command:
 
 ## State Detection
 
-### From Manufacturer Data
+### From Manufacturer Data (Byte 15 = mode_type)
 
-When the device is in sound reactive mode, the mode byte changes to 0x62:
+When the device is in sound reactive mode, the mode_type byte indicates the active mode:
+
+| mode_type | Value | Device Type | Description |
+|-----------|-------|-------------|-------------|
+| 0x5D | 93 | Simple (0x08, 0x48) | Sound reactive mode active |
+| 0x62 | 98 | Symphony | Sound reactive mode active |
 
 ```python
-# For devices with manu_data structure like 0x56
-if manu_data[15] == 0x62:
-    # Device is in music/sound reactive mode
+# Check manufacturer data byte 15 for mode_type
+mode_type = manu_data[15]
+
+if mode_type == 0x5D:
+    # Simple device (0x08, 0x48) in sound reactive mode
+    # Byte 17 contains sensitivity (1-100 or 1-31 scale)
+    sensitivity = manu_data[17]
     is_sound_reactive = True
+
+elif mode_type == 0x62:
+    # Symphony device in sound reactive mode
+    is_sound_reactive = True
+```
+
+### State Bytes Layout (Sound Reactive Mode)
+
+For simple devices in sound reactive mode (mode_type 0x5D):
+
+```text
+Bytes [14:24]: 23 5D 23 XX 00 00 00 00 03 00 0F
+               ^^ ^^ ^^ ^^
+               |  |  |  sensitivity (1-100)
+               |  |  sub_mode (0x23)
+               |  mode_type (0x5D = sound reactive)
+               power (0x23 = ON)
 ```
 
 ### From Notification Responses
 
-Mode byte 0x62 in notification responses indicates sound reactive mode is active:
+Mode byte in notification responses indicates sound reactive mode:
 
 ```python
-if mode_type == 0x62:
+if mode_type in (0x5D, 0x62):
     # Sound reactive mode active
     pass
 ```

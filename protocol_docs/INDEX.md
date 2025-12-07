@@ -1,7 +1,7 @@
 # LEDnetWF BLE Protocol Documentation
 
-**Version**: 3.7
-**Updated**: 6 December 2025
+**Version**: 3.8
+**Updated**: 7 December 2025
 
 ---
 
@@ -123,6 +123,8 @@ Key files in `/home/will/source/jadx/projects/surplife/` (IOTBT protocol):
 
 | Date | Changes |
 |------|---------|
+| 7 Dec 2025 | v3.8 - Merged firmware-version effects into doc 06, brightness v2 into doc 05 |
+| 6 Dec 2025 | v3.7 - Consolidated BLE parsing into doc 02, mic detection into doc 18 |
 | 6 Dec 2025 | v3.6 - Added sound reactive / music mode documentation (doc 18) |
 | 6 Dec 2025 | v3.5 - Added complete IOTBT (0x80) protocol from surplife sources |
 | 6 Dec 2025 | v3.4 - Added query commands by device type to doc 17 |

@@ -460,7 +460,7 @@ PRODUCT_CAPABILITIES: Final = {
     # Special devices
     26:  {"name": "ChristmasLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
     27:  {"name": "SprayLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
-    29:  {"name": "FillLight", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.ADDRESSABLE_0x53, "has_segments": True},
+    29:  {"name": "FillLight", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.ADDRESSABLE_0x53, "has_ic_config": True},
     41:  {"name": "MirrorLight", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SIMPLE},
     209: {"name": "Digital_Light", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SYMPHONY, "has_segments": True},
 

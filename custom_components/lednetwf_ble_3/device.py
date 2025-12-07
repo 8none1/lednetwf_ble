@@ -1421,7 +1421,9 @@ class LEDNetWFDevice:
 
         # Handle sound reactive mode specially (uses different command)
         if effect_id == SOUND_REACTIVE_MARKER:
-            return await self.set_sound_reactive(enable=True)
+            # Speed parameter is used as sensitivity for sound reactive mode
+            sensitivity = speed if speed is not None else self._effect_speed
+            return await self.set_sound_reactive(enable=True, sensitivity=sensitivity)
 
         # Handle candle mode specially (uses 0x39 command)
         if effect_id == CANDLE_MODE_MARKER:
@@ -1832,7 +1834,7 @@ class LEDNetWFDevice:
             return True
         return False
 
-    async def set_sound_reactive(self, enable: bool) -> bool:
+    async def set_sound_reactive(self, enable: bool, sensitivity: int = None) -> bool:
         """Enable or disable sound reactive mode for devices with built-in microphone.
 
         When enabled, the device listens to ambient sound and adjusts LED colors
@@ -1840,6 +1842,7 @@ class LEDNetWFDevice:
 
         Args:
             enable: True to enable sound reactive mode, False to disable
+            sensitivity: Microphone sensitivity 1-100 (None = use current speed or default 50)
 
         Returns:
             True if command was sent successfully
@@ -1847,6 +1850,11 @@ class LEDNetWFDevice:
         if not self.has_builtin_mic:
             _LOGGER.warning("Device %s does not have built-in microphone", self._name)
             return False
+
+        # Use provided sensitivity, or current effect_speed, or default to 50
+        if sensitivity is None:
+            sensitivity = self._effect_speed if self._effect_speed and self._effect_speed > 0 else 50
+        sensitivity = max(1, min(100, sensitivity))
 
         # Build the appropriate command based on device type
         if self.mic_command_format == "symphony":
@@ -1863,25 +1871,26 @@ class LEDNetWFDevice:
                 effect_id=1,  # Default to effect 1
                 fg_rgb=fg_rgb,
                 bg_rgb=bg_rgb,
-                sensitivity=50,  # Default 50% sensitivity
+                sensitivity=sensitivity,
                 brightness=brightness_pct,
             )
             _LOGGER.debug(
-                "%s sound reactive mode (symphony) for %s: fg=%s, bg=%s, brightness=%d%%",
+                "%s sound reactive mode (symphony) for %s: fg=%s, bg=%s, sensitivity=%d%%, brightness=%d%%",
                 "Enabling" if enable else "Disabling", self._name,
-                fg_rgb, bg_rgb, brightness_pct
+                fg_rgb, bg_rgb, sensitivity, brightness_pct
             )
         else:
-            # Simple devices (0x08, 0x48) use 5-byte command
-            packet = protocol.build_sound_reactive_simple(enable)
+            # Simple devices (0x08, 0x48) use 5-byte command with sensitivity
+            packet = protocol.build_sound_reactive_simple(enable, sensitivity)
             _LOGGER.debug(
-                "%s sound reactive mode (simple) for %s",
-                "Enabling" if enable else "Disabling", self._name
+                "%s sound reactive mode (simple) for %s: sensitivity=%d%%",
+                "Enabling" if enable else "Disabling", self._name, sensitivity
             )
 
         if await self._send_command(packet):
             if enable:
                 self._effect = "Sound Reactive"
+                self._effect_speed = sensitivity  # Track sensitivity as speed
             else:
                 self._effect = None
             self._notify_callbacks()
@@ -2104,6 +2113,30 @@ class LEDNetWFDevice:
                     "Advertisement updated Settled effect: %s, rgb=%s, speed=%d, brightness=%d",
                     self._effect, self._rgb, self._effect_speed, self._brightness
                 )
+
+        elif color_mode == "sound_reactive":
+            # Sound reactive mode (built-in microphone)
+            # Byte 17 is SENSITIVITY - mapped to effect_speed for the speed slider
+            # RGB from bytes 18-20 is real-time color (changes with sound)
+            effect_speed = result.get("effect_speed")  # Sensitivity as 0-100%
+            rgb = result.get("rgb")
+
+            # Set effect to Sound Reactive
+            if self._effect != "Sound Reactive":
+                self._effect = "Sound Reactive"
+                changed = True
+
+            # Update speed slider with sensitivity value
+            if effect_speed is not None:
+                # Use product_id-based conversion for proper value scaling
+                new_speed = convert_speed_from_adv(effect_speed, self._product_id)
+                if self._effect_speed != new_speed:
+                    self._effect_speed = new_speed
+                    changed = True
+
+            if changed:
+                _LOGGER.debug("Advertisement updated sound reactive: sensitivity/speed=%d%%",
+                              self._effect_speed)
 
         if changed:
             self._notify_callbacks()

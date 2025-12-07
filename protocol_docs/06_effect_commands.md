@@ -948,6 +948,116 @@ Key files for effect command implementation:
 
 ---
 
+## Firmware Version Effects: scene_data_v2 and v3
+
+The ability to set brightness during effects is **firmware version dependent**. Different firmware versions use different command formats.
+
+### scene_data (0x61) - Legacy, NO Brightness
+
+As documented in Format E above. Speed range 1-31 (inverted), NO brightness parameter.
+
+### scene_data_v2 (0x38) - Firmware v1-10, HAS Brightness
+
+**Command**: `0x38`
+**Function code**: `scene_data_v2`
+**Source**: `wifi_dp_cmd.json`, `ble_dp_cmd.json`
+
+```text
+Format: 38 {model} {speed} {bright} [checksum]
+
+Byte 0: 0x38 - Command opcode
+Byte 1: model (37-56) - Effect ID
+Byte 2: speed (1-31, INVERTED: 1=fast, 31=slow)
+Byte 3: bright (1-100) - Brightness percentage (never 0!)
+Byte 4: checksum
+```
+
+**Minimum firmware varies by product:**
+
+| Product | Hex | v2 minVer | Description |
+|---------|-----|-----------|-------------|
+| 8 | 0x08 | 1 | Ctrl_Mini_RGB_Mic |
+| 60 | 0x3C | 1 | Ctrl_Mini_RGB_Mic |
+| 6 | 0x06 | 2 | Ctrl_Mini_RGBW |
+| 7 | 0x07 | 2 | Ctrl_Mini_RGBCW |
+| 72 | 0x48 | 2 | Ctrl_Mini_RGBW_Mic |
+| 51 | 0x33 | 9 | Ctrl_Mini_RGB |
+| 53 | 0x35 | 8 | Bulb_RGBCW |
+
+### scene_data_v3 (0xE0 02) - Firmware v11+, HAS Brightness + Preview
+
+**Command**: `0xE0 0x02`
+**Function code**: `scene_data_v3`
+
+```text
+Format: E0 02 {preview} {model} {speed} {bright}
+
+Byte 0: 0xE0 - Command opcode
+Byte 1: 0x02 - Sub-command
+Byte 2: preview (0-255) - Preview mode flag
+Byte 3: model (37-56) - Effect ID
+Byte 4: speed (0-100, DIRECT: 0=slow, 100=fast)  ← CHANGED!
+Byte 5: bright (0-100) - Brightness percentage
+NO CHECKSUM
+```
+
+**Important**: Speed encoding changed from INVERTED (1-31) to DIRECT (0-100) in v3!
+
+```python
+def build_effect_v3(effect_id: int, speed: int, brightness: int,
+                    preview: int = 0) -> bytes:
+    """Build effect command for firmware v11+ devices."""
+    return bytes([
+        0xE0, 0x02,
+        preview & 0xFF,
+        max(37, min(56, effect_id)) & 0xFF,
+        max(0, min(100, speed)) & 0xFF,  # Direct 0-100
+        max(0, min(100, brightness)) & 0xFF
+    ])
+```
+
+### Firmware Version Detection
+
+```python
+def get_firmware_version(advertisement_data) -> int:
+    """Extract firmware version from BLE advertisement."""
+    mfr_data = advertisement_data.manufacturer_data
+    for company_id, payload in mfr_data.items():
+        if 23040 <= company_id <= 23295 and len(payload) >= 11:
+            return payload[10]  # Byte 10 is firmware version
+    return 0  # Default to legacy
+```
+
+### Implementation Strategy
+
+```python
+def build_effect_command(effect_id: int, speed_pct: int, brightness: int,
+                        firmware_version: int) -> bytes:
+    """Build effect command appropriate for device firmware."""
+    if firmware_version >= 11:
+        # v11+: Use scene_data_v3 (0xE0 02), direct speed
+        return build_effect_v3(effect_id, speed_pct, brightness)
+    elif firmware_version >= 9:
+        # v9-10: Use scene_data_v2 (0x38), inverted speed
+        protocol_speed = 1 + int(30 * (1.0 - speed_pct/100.0))
+        return build_effect_v2(effect_id, protocol_speed, brightness)
+    else:
+        # v0-8: Use scene_data (0x61) - no brightness!
+        protocol_speed = 1 + int(30 * (1.0 - speed_pct/100.0))
+        return build_effect_legacy(effect_id, protocol_speed)
+```
+
+### Products with Legacy-Only scene_data (No Brightness in Effects)
+
+| Product | Hex | Description |
+|---------|-----|-------------|
+| 68 | 0x44 | Bulb_RGBW |
+| 84 | 0x54 | Downlight_RGBW |
+
+These devices do NOT support brightness in effect commands.
+
+---
+
 ## Related Documentation
 
 - **FG/BG Color Effects (0x41 command)**: See [15_static_effects_with_bg_color.md](15_static_effects_with_bg_color.md)
