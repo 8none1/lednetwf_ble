@@ -1477,14 +1477,27 @@ class LEDNetWFDevice:
                 bg_rgb = (0, 0, 0)
 
         # Note: speed is already 0-100, protocol expects 0-100 for most devices
-        packet = protocol.build_effect_command(
-            eff_type, effect_id, speed, brightness_pct,
-            has_bg_color=self.has_bg_color,
-            has_ic_config=self.has_ic_config,
-            fg_rgb=fg_rgb,
-            bg_rgb=bg_rgb,
-            uses_0x38_effects=self.uses_0x38_effects,
-        )
+        # For SIMPLE effects, try data-driven approach first (supports brightness in v2/v3)
+        packet = None
+        if eff_type == protocol.EffectType.SIMPLE:
+            # Try data-driven command which uses scene_data_v2/v3 when firmware supports it
+            packet = self._build_effect_command_datadriven(effect_id, speed, brightness_pct)
+            if packet:
+                _LOGGER.debug(
+                    "Using data-driven effect command for SIMPLE device (firmware v%d)",
+                    self.device_version
+                )
+
+        # Fall back to protocol-based command if data-driven didn't work
+        if packet is None:
+            packet = protocol.build_effect_command(
+                eff_type, effect_id, speed, brightness_pct,
+                has_bg_color=self.has_bg_color,
+                has_ic_config=self.has_ic_config,
+                fg_rgb=fg_rgb,
+                bg_rgb=bg_rgb,
+                uses_0x38_effects=self.uses_0x38_effects,
+            )
         if packet is None:
             return False
 
@@ -1724,35 +1737,49 @@ class LEDNetWFDevice:
         This uses the JSON configuration from the app to build the correct
         command format based on product ID and firmware version.
 
+        Only returns a command if a newer format (scene_data_v2/v3) with
+        brightness support is available. Returns None for legacy scene_data
+        to allow fallback to protocol-based command.
+
         Args:
             effect_id: Effect ID (37-56 for SIMPLE effects)
             speed: Speed 0-100
             brightness_pct: Brightness 0-100 percent
 
         Returns:
-            Command bytes or None if data-driven building is not available
+            Command bytes wrapped for BLE transport, or None if not available
         """
         if self._product_id is None:
             return None
 
         # Try to build using data-driven command builder
-        cmd = build_effect_command_datadriven(
-            self._product_id,
-            self.device_version,
-            effect_id,
-            speed,
-            brightness_pct,
-        )
+        try:
+            raw_cmd = build_effect_command_datadriven(
+                self._product_id,
+                self.device_version,
+                effect_id,
+                speed,
+                brightness_pct,
+            )
+        except Exception as ex:
+            # Legacy scene_data has no template - fall back to protocol approach
+            _LOGGER.debug(
+                "Data-driven effect command not available for product 0x%02X v%d: %s",
+                self._product_id, self.device_version, ex
+            )
+            return None
 
-        if cmd:
+        if raw_cmd:
             _LOGGER.debug(
                 "Data-driven effect command for product 0x%02X, version %d: %s",
                 self._product_id,
                 self.device_version,
-                cmd.hex() if isinstance(cmd, bytes) else cmd,
+                raw_cmd.hex() if isinstance(raw_cmd, bytes) else raw_cmd,
             )
+            # Wrap for BLE transport
+            return protocol.wrap_command(raw_cmd, cmd_family=0x0b)
 
-        return cmd
+        return None
 
     def _build_color_command_datadriven(
         self, r: int, g: int, b: int
@@ -1763,25 +1790,27 @@ class LEDNetWFDevice:
             r, g, b: RGB values 0-255
 
         Returns:
-            Command bytes or None if data-driven building is not available
+            Command bytes wrapped for BLE transport, or None if not available
         """
         if self._product_id is None:
             return None
 
-        cmd = build_color_command_datadriven(
+        raw_cmd = build_color_command_datadriven(
             self._product_id,
             self.device_version,
             r, g, b,
         )
 
-        if cmd:
+        if raw_cmd:
             _LOGGER.debug(
                 "Data-driven color command for product 0x%02X: %s",
                 self._product_id,
-                cmd.hex() if isinstance(cmd, bytes) else cmd,
+                raw_cmd.hex() if isinstance(raw_cmd, bytes) else raw_cmd,
             )
+            # Wrap for BLE transport
+            return protocol.wrap_command(raw_cmd, cmd_family=0x0b)
 
-        return cmd
+        return None
 
     async def _set_candle_mode(
         self, speed: int | None = None, brightness: int | None = None
@@ -1968,9 +1997,17 @@ class LEDNetWFDevice:
                 self._is_on = result["power_state"]
                 changed = True
 
-        # Firmware version
+        # Firmware version and BLE version from manufacturer data
         if result.get("fw_version"):
             self._fw_version = result["fw_version"]
+        # Also extract BLE version from manufacturer data if not already set from service data
+        # BLE version is byte 1 of manufacturer data and indicates firmware capabilities
+        if result.get("ble_version") is not None and self._ble_version is None:
+            self._ble_version = result["ble_version"]
+            _LOGGER.debug(
+                "[%s] BLE version from manufacturer data: %d",
+                self._name, self._ble_version
+            )
 
         # Color mode and associated values
         color_mode = result.get("color_mode")

@@ -426,7 +426,7 @@ PRODUCT_CAPABILITIES: Final = {
     # Source: Expert research confirmed this is NOT a Symphony device
     8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True, "mic_cmd_format": "simple", "uses_0x38_effects": True, "has_candle_mode": True},  # 0x08
     16:  {"name": "ChristmasLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
-    51:  {"name": "Ctrl_Mini_RGB", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_color_order": True},
+    51:  {"name": "Ctrl_Mini_RGB", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_color_order": True, "uses_0x38_effects": True},
 
     # CCT only - no RGB
     9:   {"name": "Ctrl_Ceiling_CCT", "has_rgb": False, "has_ww": True, "has_cw": True, "effect_type": EffectType.NONE},
