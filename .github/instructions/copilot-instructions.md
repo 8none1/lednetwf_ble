@@ -2,7 +2,7 @@
 
 ## Project Mission
 
-Build a **new** Home Assistant integration (`lednetwf_ble_2`) for LEDnetWF Bluetooth Low Energy devices from scratch, based on reverse-engineered protocol documentation rather than copying from the old integration.
+Build a **new** Home Assistant integration (`lednetwf_ble`) for LEDnetWF Bluetooth Low Energy devices from scratch, based on reverse-engineered protocol documentation rather than copying from the old integration.
 
 ### Goals
 - Clean, maintainable codebase with minimal files
@@ -21,7 +21,7 @@ Build a **new** Home Assistant integration (`lednetwf_ble_2`) for LEDnetWF Bluet
 
 ### File Structure
 ```
-custom_components/lednetwf_ble_2/
+custom_components/lednetwf_ble/
 ├── __init__.py      # Integration setup, Bluetooth callbacks
 ├── config_flow.py   # Device discovery and configuration UI
 ├── const.py         # Constants, enums, capability mappings

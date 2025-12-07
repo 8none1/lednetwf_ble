@@ -2,83 +2,51 @@
   "config": {
     "step": {
       "user": {
-        "title": "Selectee zee LEDnetWF leemp",
+        "title": "Selectee zee Deefice-a",
+        "description": "Selectee yuoor LEDnetWF deefice-a frum zee leest beloo, bork bork!",
         "data": {
-          "mac": "Bluetoot MAC-ee address-a",
-          "name": "Nemee"
+          "mac": "Deefice-a"
         }
       },
-      "validate": {
-        "title": "Velideet cunnecshun",
+      "confirm": {
+        "title": "Edd Deefice-a",
+        "description": "Fuoond deefice-a **{name}**\n\n- Eddress: `{address}`\n- Pruodoct ID: `{product_id}`\n- Firmvere-a: `{fw_version}`\n\nVuoold yuoo leeke-a tu test zee cunnecshun by flesheeng zee leeght?",
         "data": {
-          "retry": "Tryee egein, bork bork?",
-          "flicker": "De leemp-a deed de blinkety blink?"
+          "test_device": "Test deefice-a (flesh culurs)"
         }
       },
-      "manual": {
-        "title": "Enter zee MAC-ee ooff bluetoot",
+      "options": {
+        "title": "Deefice-a Oopshuns",
+        "description": "Cunfeegoore-a oopshuns fur '{name}'.",
         "data": {
-          "mac": "Bluetoot MAC-ee address-a",
-          "name": "Nemee"
+          "disconnect_delay": "Deescunnect deley (secunds)",
+          "led_count": "LED cuoont",
+          "led_type": "LED cheep type-a",
+          "color_order": "Culur oorder"
         }
       }
     },
     "error": {
-      "connect": "Cunnecoon tuu LEDnetWF-a feiled. Bork!",
-      "toggle_failed": "Blinkety blink-a nu verk. Check zee signal or zee power, ya?",
-      "device_disappeared": "De selec-ted-a devicce-a goone poof!",
-      "not_supported": "Zeees model-a nu supportud by zee integrashun. Bork bork.",
-      "no_selection": "Nu devicce-a selactud. Oopsy doopsy.",
-      "already_configured": "Zees devicce-a is alreedy configureed, bork bork.",
-      "no_devices_found": "Nu supportud LEDnetWF leemps-a foond nearby. Try wavin' a drumstick.",
-      "cannot_connect": "Cuoold nu cunnect tu zee devicce-a. Meck sure-a it's pooered oon und nearby!",
-      "device_unreachable": "Devicce-a is nu reecheble-a or toorned ooff. Meke-a sure-a zee devicce-a is pooered oon, nearby, und nu oozeer devicces-a ere-a cunnected tu it!",
-      "device_not_ready": "Devicce-a is nu reedy. Bork bork! Manoofectoorer deta nu efeileble-a. Plees meke-a sure-a zee devicce-a is sendeng pruper-like-a und tryee egein!",
-      "unknown": "Ooooh, un unexpectud error heppuned. Try agin, okee dokee!"
+      "cannot_connect": "Cuoold nut cunnect tu zee deefice-a. Insoore-a it is pooered oon und in runge-a, bork bork!",
+      "unknown": "Un unixpected errur ooccurred. Bork!"
     },
     "abort": {
-      "cannot_validate": "Uneblu tu velideet LEDnetWF leemp-a. Bork!",
-      "cannot_connect": "Uneblu tu cunnect tu LEDnetWF. Very disuppointeng.",
-      "already_configured": "Zees devicce-a is alreedy configureed",
-      "device_disappeared": "Zee selectud devicce-a ves nu foond agin",
-      "unsupported_device": "Zee selectud devicce-a is nu supportud",
-      "no_devices_found": "Nu unconfigureed LEDnetWF leemps-a foond"
+      "already_configured": "Zees deefice-a is elreedy cunfeegoored.",
+      "no_devices_found": "Nu sooppurted LEDnetWF deefices fuoond. Meke-a soore-a yuoor deefice-a is pooered oon.",
+      "not_supported": "Zees deefice-a is nut sooppurted.",
+      "no_discovery_info": "Nu deefice-a deescufery inffurmeshun efeeeleble-a."
     }
   },
   "options": {
     "step": {
-      "user": {
-        "title": "Devicce-a configurashun",
-        "description": "It is recummendud tu meke-a zee chengees zeruogh zee ipp. Zees funcshunelity is inclooded fur cunfeeneence-a und is nu cumpletu.",
-        "data": {
-          "delay": "Discunnect deley (0 = never ever discunnect)",
-          "ledcount": "Hoo meny leetle LEDs?",
-          "name": "Nemee",
-          "ledtype": "Type-a ooff LED",
-          "colororder": "Colors in vhut order?",
-          "segments": "Hoo meny segments?",
-          "ignore_notifications": "Ignore-a zee stetu chengee nutificashuns"
-        }
-      },
       "init": {
-        "title": "LEDnetWF-a",
-        "description": "Zees shuoold prubebly never be-a seen, bork bork.",
+        "title": "Deefice-a Oopshuns",
         "data": {
-          "delay": "Discunnect deley (0 = never ever discunnect)",
-          "ledcount": "Hoo meny leetle LEDs?",
-          "name": "Nemee",
-          "ledtype": "Type-a ooff LED",
-          "colororder": "Colors in vhut order?",
-          "segments": "Hoo meny segments?",
-          "ignore_notifications": "Ignore-a zee stetu chengee nutificashuns"
+          "disconnect_delay": "Deescunnect deley (secunds)",
+          "led_count": "LED cuoont",
+          "led_type": "LED cheep type-a",
+          "color_order": "Culur oorder"
         }
-      }
-    }
-  },
-  "entity": {
-    "number": {
-      "effect_speed": {
-        "name": "Speeed-a ooff sparklies"
       }
     }
   }

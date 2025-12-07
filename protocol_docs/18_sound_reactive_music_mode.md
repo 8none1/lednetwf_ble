@@ -298,11 +298,11 @@ if mode_type in (0x5D, 0x62):
 
 ---
 
-## Implementation Notes for lednetwf_ble_2
+## Implementation Notes for lednetwf_ble
 
 ### 1. Add Capability Flag to DEVICE_CAPABILITIES
 
-In [const.py](../custom_components/lednetwf_ble_2/const.py), add `has_builtin_mic` flag:
+In [const.py](../custom_components/lednetwf_ble/const.py), add `has_builtin_mic` flag:
 
 ```python
 # Simple mic devices (5-byte command)
@@ -323,7 +323,7 @@ In [const.py](../custom_components/lednetwf_ble_2/const.py), add `has_builtin_mi
 
 ### 2. Add Property to LEDNetWFDevice
 
-In [device.py](../custom_components/lednetwf_ble_2/device.py), add properties:
+In [device.py](../custom_components/lednetwf_ble/device.py), add properties:
 
 ```python
 @property
@@ -339,7 +339,7 @@ def mic_command_format(self) -> str:
 
 ### 3. Add Sound Reactive Effect to Effect List
 
-In [const.py](../custom_components/lednetwf_ble_2/const.py):
+In [const.py](../custom_components/lednetwf_ble/const.py):
 
 ```python
 def get_effect_list(..., has_builtin_mic: bool = False) -> list[str]:
@@ -354,7 +354,7 @@ def get_effect_list(..., has_builtin_mic: bool = False) -> list[str]:
 
 ### 4. Add Protocol Command Builders
 
-In [protocol.py](../custom_components/lednetwf_ble_2/protocol.py):
+In [protocol.py](../custom_components/lednetwf_ble/protocol.py):
 
 ```python
 def build_sound_reactive_simple(enable: bool) -> bytearray:
@@ -402,7 +402,7 @@ def build_sound_reactive_symphony(
 
 ### 5. Handle Effect Selection
 
-In [light.py](../custom_components/lednetwf_ble_2/light.py):
+In [light.py](../custom_components/lednetwf_ble/light.py):
 
 ```python
 async def async_set_effect(self, effect: str) -> None:

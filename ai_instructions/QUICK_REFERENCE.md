@@ -130,7 +130,7 @@ NO_MIC = {0xA1}
 /home/will/source/lednetwf_ble/protocol_docs/
 
 # Integration code
-/home/will/source/lednetwf_ble/custom_components/lednetwf_ble_2/
+/home/will/source/lednetwf_ble/custom_components/lednetwf_ble/
 
 # Decompiled app - Java sources
 /home/will/source/jadx/projects/surplife/sources/sources/com/zengge/

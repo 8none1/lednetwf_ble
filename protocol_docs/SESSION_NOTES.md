@@ -13,10 +13,12 @@ Help develop the integration by analyzing and documenting the Android app's BLE 
 
 | Location | Purpose | Action |
 |----------|---------|--------|
-| `/home/will/source/reverse_engineering/zengee/` | Android app (decompiled) | Analyze - **SOURCE OF TRUTH** |
-| `/home/will/source/jadx/projects/zengee/` | Android app (alternative) | Analyze |
+| `/home/will/source/jadx/projects/surplife/` | Android app (decompiled) | Analyze - **SOURCE OF TRUTH** |
+| `surplife/.../ble_devices.json` | Device capabilities JSON | **PRIMARY REFERENCE** |
+| `surplife/.../ble_dp_cmd.json` | Command definitions JSON | **PRIMARY REFERENCE** |
+| `/home/will/source/jadx/projects/zengee/` | Older Android app | Analyze (alternative) |
 | `custom_components/lednetwf_ble/` | Old Python integration | **READ ONLY** - reference |
-| `custom_components/lednetwf_ble_2/` | New Python integration | Analyze and report bugs only |
+| `custom_components/lednetwf_ble/` | New Python integration | Analyze and report bugs only |
 | `protocol_docs/` | Protocol documentation | Check first, update with findings |
 
 ### Workflow
@@ -31,7 +33,7 @@ Help develop the integration by analyzing and documenting the Android app's BLE 
 
 ## Current Investigation Status
 
-**Date**: 6 December 2025
+**Date**: 7 December 2025
 **Branch**: 8none1/version_2
 
 ### Device Under Test

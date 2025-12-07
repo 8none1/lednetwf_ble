@@ -10,7 +10,7 @@ This project involves:
 
 1. **Reverse engineering** the Surplife/MagicHome Android app to understand BLE LED controller protocols
 2. **Documenting** the discovered protocols in `protocol_docs/`
-3. **Implementing** a Home Assistant custom integration in `custom_components/lednetwf_ble_2/`
+3. **Implementing** a Home Assistant custom integration in `custom_components/lednetwf_ble/`
 
 The goal is to control various BLE LED lights (strips, bulbs, controllers) from Home Assistant without relying on cloud services.
 
@@ -26,7 +26,7 @@ The goal is to control various BLE LED lights (strips, bulbs, controllers) from 
 │   ├── 17_device_configuration.md   # Service data, mic detection
 │   └── ...
 ├── custom_components/
-│   └── lednetwf_ble_2/     # Home Assistant integration
+│   └── lednetwf_ble/     # Home Assistant integration
 │       ├── const.py        # Device definitions (DEVICES dict)
 │       ├── protocol.py     # Command building/parsing
 │       ├── device.py       # Device class
@@ -180,7 +180,7 @@ These may be deprecated or handled dynamically.
 
 ## Integration Development
 
-The Home Assistant integration is in `custom_components/lednetwf_ble_2/`.
+The Home Assistant integration is in `custom_components/lednetwf_ble/`.
 
 ### Key Files
 

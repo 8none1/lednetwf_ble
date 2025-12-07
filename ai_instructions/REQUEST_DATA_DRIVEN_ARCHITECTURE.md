@@ -172,7 +172,7 @@ Global command templates (used when not overridden in hexCmdForms):
 ### Directory Structure
 
 ```
-custom_components/lednetwf_ble_2/
+custom_components/lednetwf_ble/
 ├── __init__.py
 ├── manifest.json
 ├── config_flow.py
@@ -552,7 +552,7 @@ State parsing is currently implemented in:
 ## Files to Reference
 
 - **Source JSON files**: `/home/will/source/jadx/projects/surplife/assets/flutter_assets/packages/magichome2_home_data_provide/assets/`
-- **Current integration**: `/home/will/source/lednetwf_ble/custom_components/lednetwf_ble_2/`
+- **Current integration**: `/home/will/source/lednetwf_ble/custom_components/lednetwf_ble/`
 - **Old models**: `/home/will/source/lednetwf_ble/custom_components/lednetwf_ble/models/`
 - **Protocol docs**: `/home/will/source/lednetwf_ble/protocol_docs/`
 
