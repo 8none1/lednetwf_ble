@@ -793,6 +793,27 @@ class LEDNetWFDevice:
                 data[7], data[8], data[9]
             )
 
+        # Store result for probing - DeviceState2 format provides limited info
+        # but we need to populate _last_state_response for probe_capabilities() to work
+        self._last_state_response = {
+            "is_on": is_on,
+            "mode": mode,
+            "mesh_address": address,
+            # IOTBT doesn't provide RGB values in a usable format
+            # Set to 0 so probing doesn't think colors changed
+            "r": 0,
+            "g": 0,
+            "b": 0,
+            "ww": 0,
+            "cw": 0,
+            # Mode flags for compatibility with standard state response parsing
+            "is_rgb_mode": False,
+            "is_white_mode": False,
+            "is_effect_mode": mode not in (0x23, 0x24),  # Anything besides power states
+            "mode_type": mode,
+            "sub_mode": 0,
+        }
+
         # Signal waiting coroutine if any
         if self._pending_state_response:
             self._pending_state_response.set()

@@ -29,6 +29,7 @@ from .const import (
     get_device_capabilities,
 )
 from .device import LEDNetWFDevice
+from .capabilities import CAPABILITIES
 from . import protocol
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +39,9 @@ PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.NUMBER]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up LEDnetWF BLE v2 from a config entry."""
+    # Pre-load capabilities data asynchronously to avoid blocking I/O in event loop
+    await CAPABILITIES.async_load(hass)
+
     address = entry.data[CONF_MAC]
     name = entry.data.get(CONF_NAME, address)
     product_id = entry.data.get(CONF_PRODUCT_ID)

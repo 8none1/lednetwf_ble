@@ -1457,6 +1457,44 @@ def parse_manufacturer_data(
     if not manu_data:
         return None
 
+    # IOTBT name-based detection (highest priority)
+    # Device names starting with "IOTBT" are definitely IOTBT devices regardless of
+    # manufacturer data format. This handles cases where the advertisement data
+    # doesn't match expected IOTBT patterns (e.g., service data UUID 0x5A00 with
+    # non-standard format that causes product_id misdetection).
+    if device_name and device_name.upper().startswith("IOTBT"):
+        _LOGGER.debug(
+            "%sIOTBT device detected by name prefix, forcing product_id=0x00",
+            log_prefix
+        )
+        # Try to extract power state from manufacturer data if available
+        power_state = None
+        for manu_id, data in manu_data.items():
+            if len(data) >= 2:
+                byte1 = data[1] & 0xFF
+                if byte1 == 0x23:
+                    power_state = True
+                    break
+                elif byte1 == 0x24:
+                    power_state = False
+                    break
+
+        return {
+            "product_id": 0x00,  # IOTBT device
+            "power_state": power_state,
+            "format": "iotbt_name",  # Detected by device name prefix
+            "manu_id": list(manu_data.keys())[0] if manu_data else None,
+            "ble_version": None,
+            "fw_version": None,
+            "sta": None,
+            "color_mode": None,
+            "rgb": None,
+            "color_temp_percent": None,
+            "brightness_percent": None,
+            "effect_id": None,
+            "effect_speed": None,
+        }
+
     # Check for Telink BLE Mesh format (Company ID 4354)
     # Source: protocol_docs/17_device_configuration.md
     # Used by IOTBT devices (product_id=0x00/0x80)
@@ -1852,8 +1890,11 @@ def parse_service_data(service_data: bytes) -> dict | None:
         Byte 15: firmware_flag - Feature flags (bits 0-4)
     """
     # Handle IOTBT 14-byte format (Telink BLE Mesh)
-    # Format: [type][ble_ver][MAC 6 bytes][mesh_addr 2 bytes][led_ver][mode][flags][flags2]
-    if len(service_data) == 14 and service_data[0] == 0x80:
+    # Format: [status][ble_ver][MAC 6 bytes][mesh_addr 2 bytes][led_ver][mode][flags][flags2]
+    # Status byte can be 0x80 (standard) or 0x56 (variant seen on some IOTBT devices)
+    # or other values. The 14-byte length with UUID 0x5A00 is the distinctive marker.
+    if len(service_data) == 14:
+        sta = service_data[0] & 0xFF
         ble_version = service_data[1] & 0xFF
         mac_bytes = service_data[2:8]
         mesh_addr = (service_data[8] << 8) | service_data[9]
@@ -1865,13 +1906,13 @@ def parse_service_data(service_data: bytes) -> dict | None:
         mac_address = ":".join(f"{b:02X}" for b in mac_bytes)
 
         _LOGGER.debug(
-            "Parsed IOTBT service data: ble_v=%d, mac=%s, mesh_addr=0x%04X, "
-            "led_ver=%d, mode=0x%02X, flags=0x%02X",
-            ble_version, mac_address, mesh_addr, led_version, mode, flags
+            "Parsed IOTBT service data (14-byte format): sta=0x%02X, ble_v=%d, mac=%s, "
+            "mesh_addr=0x%04X, led_ver=%d, mode=0x%02X, flags=0x%02X",
+            sta, ble_version, mac_address, mesh_addr, led_version, mode, flags
         )
 
         return {
-            "sta": 0,
+            "sta": sta,
             "is_ota_mode": False,
             "is_iotbt": True,
             "ble_version": ble_version,

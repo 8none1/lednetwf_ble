@@ -133,6 +133,12 @@ class CapabilityDatabase:
         self._ble_cmd_overrides: dict[str, dict[str, Any]] = {}
         self._loaded = False
 
+    async def async_load(self, hass) -> None:
+        """Pre-load data files asynchronously to avoid blocking the event loop."""
+        if self._loaded:
+            return
+        await hass.async_add_executor_job(self._ensure_loaded)
+
     def _ensure_loaded(self) -> None:
         """Lazy load data files on first access."""
         if self._loaded:
