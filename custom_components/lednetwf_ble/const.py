@@ -92,6 +92,7 @@ class EffectType(IntEnum):
     SYMPHONY = 2            # 0x38 command WITH checksum (5 bytes)
     ADDRESSABLE_0x53 = 3    # 0x38 command NO checksum (4 bytes), brightness in byte 3
     IOTBT = 4               # 0xE0 0x02 command, effects 1-12 (Telink BLE Mesh based)
+    IOTBT_SEGMENT = 5       # 0xE1 0x01 command, segment-based with palette (newer IOTBT)
 
 
 class ValueScale(IntEnum):
@@ -397,6 +398,14 @@ IOTBT_MUSIC_EFFECTS: Final = {
     0xD00: "Music 13",  # 13 << 8
 }
 
+# IOTBT Segment-based effects (0xE1 0x01 command)
+# Source: User protocol capture (Dec 2025) - IOTBT devices with addressable segments
+# These devices use 0xE1 0x03 for color, 0xE1 0x01 for effects, 0x3B for power
+# Effects are numbered 1-99 (similar to addressable strip effects)
+IOTBT_SEGMENT_EFFECTS: Final = {
+    i: f"Effect {i}" for i in range(1, 100)
+}
+
 # Product IDs with special speed encoding (inverted 0x01-0x1F scale)
 # Source: model_0x54.py, protocol_docs/07a_effect_commands_by_device.md
 # These devices use inverted speed where 0x01=fastest, 0x1F=slowest
@@ -644,6 +653,9 @@ def get_effect_list(
         # Plus 8 music reactive effects via 0xE1 0x05 command
         effects = list(IOTBT_EFFECTS.values())
         effects.extend(list(IOTBT_MUSIC_EFFECTS.values()))
+    elif effect_type == EffectType.IOTBT_SEGMENT:
+        # IOTBT Segment-based devices have 99 effects via 0xE1 0x01 command
+        effects = list(IOTBT_SEGMENT_EFFECTS.values())
 
     # Add sound reactive option for devices with built-in microphone (non-IOTBT)
     # IOTBT devices have specific music effects listed above instead
@@ -744,6 +756,11 @@ def get_effect_id(
         for eid, name in IOTBT_MUSIC_EFFECTS.items():
             if name == effect_name:
                 return eid  # Already encoded (e.g., 0x100 for Music 1)
+    elif effect_type == EffectType.IOTBT_SEGMENT:
+        # Segment-based effects (1-99) via 0xE1 0x01 command
+        for eid, name in IOTBT_SEGMENT_EFFECTS.items():
+            if name == effect_name:
+                return eid
     return None
 
 

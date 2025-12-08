@@ -386,6 +386,122 @@ def build_iotbt_state_query() -> bytearray:
 
 
 # =============================================================================
+# IOTBT SEGMENT-BASED COMMANDS (IOTBT devices with addressable segments)
+# These devices use 0xE1 0x03 for color (not 0xE2) and 0x3B for power (not 0x71)
+# =============================================================================
+
+def build_iotbt_segment_color_command(
+    r: int, g: int, b: int, brightness: int = 100, segment_count: int = 20
+) -> bytearray:
+    """
+    Build IOTBT segment-based color command (0xE1 0x03 format).
+
+    Source: User protocol capture (Dec 2025) - IOTBT devices with addressable segments.
+
+    Format: [0xE1, 0x03, 0x00, segment_count, 0x00, 0x00, segment_count, ...segment_data...]
+
+    Each segment (4 bytes): [0xA1, hue, saturation, brightness]
+    - 0xA1: Segment marker
+    - hue: 0-255 (0=red, 85=green, 170=blue, wrapping)
+    - saturation: 0-100 (0=white, 100=full color)
+    - brightness: 0-100 (0=off, 100=full)
+
+    This sets all segments to the same color. For individual segment control,
+    the segment_data would contain different values per segment.
+
+    Args:
+        r, g, b: RGB color values (0-255)
+        brightness: Overall brightness percentage (0-100)
+        segment_count: Number of segments (default 20)
+
+    Returns:
+        Wrapped command packet
+    """
+    # Convert RGB to HSV
+    h, s, v = rgb_to_hsv(r, g, b)
+
+    # Convert hue from 0-360 to 0-255 scale (device uses 256-step hue)
+    # 0=red, ~85=green, ~170=blue
+    hue_255 = int(h * 255 / 360) & 0xFF
+
+    # Saturation stays 0-100
+    sat = max(0, min(100, s))
+
+    # Combine brightness from both sources
+    # RGB value gives us "color intensity", brightness param is overall
+    combined_bright = max(1, min(100, int(brightness * v / 100)))
+
+    # Build header: E1 03 00 {segment_count} 00 00 {segment_count}
+    raw_cmd = bytearray([
+        0xE1, 0x03,
+        0x00,                       # Unknown/reserved
+        segment_count & 0xFF,       # Segment count (first occurrence)
+        0x00, 0x00,                 # Reserved
+        segment_count & 0xFF,       # Segment count (repeated)
+    ])
+
+    # Add segment data - all segments get same color
+    for _ in range(segment_count):
+        raw_cmd.extend([
+            0xA1,                    # Segment marker
+            hue_255 & 0xFF,          # Hue (0-255)
+            sat & 0xFF,              # Saturation (0-100)
+            combined_bright & 0xFF   # Brightness (0-100)
+        ])
+
+    # No checksum for this command format
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+def build_iotbt_segment_effect_command(
+    effect_id: int, speed: int = 50, brightness: int = 100, segment_count: int = 20
+) -> bytearray:
+    """
+    Build IOTBT segment-based effect command (0xE1 0x01 format).
+
+    Source: User protocol capture (Dec 2025) - IOTBT segment-based effects.
+
+    Format: [0xE1, 0x01, effect_id, speed, brightness, 0x00, ...palette_data...]
+
+    The palette data contains color entries for the effect. For simplicity,
+    we use a rainbow palette (7 colors) which works for most effects.
+
+    Args:
+        effect_id: Effect number (1-99)
+        speed: Effect speed (0-100)
+        brightness: Effect brightness (0-100)
+        segment_count: Number of segments
+
+    Returns:
+        Wrapped command packet
+    """
+    effect_id = max(1, min(99, effect_id))
+    speed = max(0, min(100, speed))
+    brightness = max(1, min(100, brightness))
+
+    # Build header
+    raw_cmd = bytearray([
+        0xE1, 0x01,
+        effect_id & 0xFF,
+        speed & 0xFF,
+        brightness & 0xFF,
+        0x00,  # Reserved
+    ])
+
+    # Add rainbow palette (7 colors, similar to user's capture)
+    # Format: [0xA1, hue, saturation, brightness] per color
+    # Rainbow hues at roughly: 0, 43, 85, 128, 170, 213, 255 (wrapping)
+    rainbow_hues = [0, 43, 85, 128, 170, 213, 240]
+    for hue in rainbow_hues:
+        raw_cmd.extend([0xA1, hue, 100, brightness])
+
+    # Pad remaining palette slots if needed (usually 7 is enough)
+
+    # No checksum for this command format
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+# =============================================================================
 # COLOR COMMANDS
 # =============================================================================
 
@@ -864,8 +980,12 @@ def build_effect_command(
         - Music effects (encoded as effect_num << 8): 0xE1 0x05 command format
           Speed parameter is used as mic sensitivity for music mode
     """
-    if effect_type == EffectType.IOTBT:
-        # IOTBT devices use different commands for regular effects vs music effects
+    if effect_type == EffectType.IOTBT_SEGMENT:
+        # IOTBT segment-based variant uses 0xE1 0x01 command with palette
+        # Source: User protocol capture (Dec 2025) - IOTBT65C device
+        return build_iotbt_segment_effect_command(effect_id, speed, brightness)
+    elif effect_type == EffectType.IOTBT:
+        # Standard IOTBT devices use different commands for regular effects vs music effects
         if effect_id >= 0x100:
             # Music reactive effect (encoded as effect_num << 8)
             # Decode the effect ID and use music command
@@ -2130,3 +2250,40 @@ def get_service_data_from_advertisement(
             return service_data_dict[key]
 
     return None
+
+
+def is_iotbt_segment_variant(service_data_dict: dict[str, bytes]) -> bool:
+    """
+    Check if device is an IOTBT segment-based variant.
+
+    Segment-based IOTBT devices are identified by:
+    - Service UUID 0x5A00 (ZengGe manufacturer-specific)
+    - Status byte (byte 0) is 0x56
+
+    Standard IOTBT devices (status byte 0x80) use Telink mesh protocol.
+    Unknown status bytes default to standard Telink protocol for safety.
+
+    Segment-based variants (status 0x56) use different commands:
+    - Power: 0x3B (standard LEDnetWF, not 0x71 Telink)
+    - Color: 0xE1 0x03 (segment-based HSB, not 0xE2 hue)
+    - Effects: 0xE1 0x01 (palette-based, not 0xE0 0x02)
+
+    Args:
+        service_data_dict: Dict from BluetoothServiceInfoBleak.service_data
+
+    Returns:
+        True if segment-based IOTBT variant (status 0x56), False otherwise
+    """
+    uuid_5a00 = "00005a00-0000-1000-8000-00805f9b34fb"
+    if uuid_5a00 not in service_data_dict:
+        return False
+
+    data = service_data_dict[uuid_5a00]
+    if len(data) < 1:
+        return False
+
+    # Status byte 0x80 = standard IOTBT (Telink mesh protocol) - DEFAULT
+    # Status byte 0x56 = segment-based variant
+    # Unknown values default to standard Telink for safety
+    status_byte = data[0] & 0xFF
+    return status_byte == 0x56

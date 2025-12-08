@@ -109,6 +109,13 @@ class LEDNetWFDevice:
         self._firmware_ver: int | None = None  # Combined firmware version (hi << 8 | lo)
         self._firmware_flag: int | None = None  # Feature flags from service data (bits 0-4)
 
+        # IOTBT segment variant detection
+        # Segment-based IOTBT devices use 0x5A00 service UUID and require different commands:
+        # - Power: 0x3B (standard LEDnetWF, not 0x71 Telink)
+        # - Color: 0xE1 0x03 (segment-based HSB, not 0xE2 hue)
+        # - Effects: 0xE1 0x01 (palette-based, not 0xE0 0x02)
+        self._is_iotbt_segment: bool = False
+
         # Callbacks for state updates
         self._callbacks: list[Callable[[], None]] = []
 
@@ -221,6 +228,10 @@ class LEDNetWFDevice:
     @property
     def effect_type(self) -> EffectType:
         """Return the effect type as proper enum (handles int conversion)."""
+        # IOTBT segment-based variant uses different effect commands
+        if self._is_iotbt_segment:
+            return EffectType.IOTBT_SEGMENT
+
         val = self._capabilities.get("effect_type", EffectType.NONE)
         return EffectType(val) if isinstance(val, int) else val
 
@@ -442,6 +453,21 @@ class LEDNetWFDevice:
         # Check capabilities for is_iotbt flag (product_id=0x00 has is_iotbt=True)
         # Also check product_id directly for backwards compatibility
         return self._capabilities.get("is_iotbt", False) or self._product_id == 0x00
+
+    @property
+    def is_iotbt_segment(self) -> bool:
+        """Return True if device is an IOTBT segment-based variant.
+
+        Segment-based IOTBT devices (detected by 0x5A00 service UUID) use
+        different commands than standard Telink-based IOTBT:
+        - Power: 0x3B command (standard LEDnetWF, NOT 0x71 Telink)
+        - Color: 0xE1 0x03 command with segment-based HSB (NOT 0xE2)
+        - Effect: 0xE1 0x01 command with palette (NOT 0xE0 0x02)
+        - State query: Still uses 0xEA 0x81 format
+
+        Source: User protocol capture (Dec 2025) - IOTBT65C device
+        """
+        return self._is_iotbt_segment
 
     @property
     def color_order(self) -> int | None:
@@ -1190,6 +1216,10 @@ class LEDNetWFDevice:
             elif effect_id in IOTBT_MUSIC_EFFECTS:
                 return IOTBT_MUSIC_EFFECTS[effect_id]
             return None
+        elif eff_type == EffectType.IOTBT_SEGMENT:
+            # IOTBT segment-based variant: 99 effects (1-99)
+            from .const import IOTBT_SEGMENT_EFFECTS
+            return IOTBT_SEGMENT_EFFECTS.get(effect_id)
         return None
 
     async def _send_command(self, packet: bytearray, with_response: bool = False) -> bool:
@@ -1226,8 +1256,11 @@ class LEDNetWFDevice:
 
     async def turn_on(self) -> bool:
         """Turn on the device."""
-        if self.is_iotbt:
-            # IOTBT devices use different power command format
+        if self.is_iotbt_segment:
+            # IOTBT segment-based variant uses standard 0x3B power command
+            packet = protocol.build_power_command_0x3B(turn_on=True)
+        elif self.is_iotbt:
+            # Standard IOTBT devices use 0x71 power command format
             packet = protocol.build_iotbt_power_command(turn_on=True)
         else:
             packet = protocol.build_power_command_0x3B(turn_on=True)
@@ -1239,8 +1272,11 @@ class LEDNetWFDevice:
 
     async def turn_off(self) -> bool:
         """Turn off the device."""
-        if self.is_iotbt:
-            # IOTBT devices use different power command format
+        if self.is_iotbt_segment:
+            # IOTBT segment-based variant uses standard 0x3B power command
+            packet = protocol.build_power_command_0x3B(turn_on=False)
+        elif self.is_iotbt:
+            # Standard IOTBT devices use 0x71 power command format
             packet = protocol.build_iotbt_power_command(turn_on=False)
         else:
             packet = protocol.build_power_command_0x3B(turn_on=False)
@@ -1322,8 +1358,19 @@ class LEDNetWFDevice:
 
         # Standard color command (exits effect mode)
         eff_type = self.effect_type
-        if self.is_iotbt:
-            # IOTBT devices use 0xE2 command with hue-based color (not RGB)
+        if self.is_iotbt_segment:
+            # IOTBT segment-based variant uses 0xE1 0x03 command with segment HSB data
+            # Source: User protocol capture (Dec 2025) - IOTBT65C device
+            brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
+            packet = protocol.build_iotbt_segment_color_command(
+                rgb[0], rgb[1], rgb[2], brightness_pct
+            )
+            _LOGGER.debug(
+                "IOTBT segment device: RGB=(%d,%d,%d), brightness=%d%% -> segment HSB",
+                rgb[0], rgb[1], rgb[2], brightness_pct
+            )
+        elif self.is_iotbt:
+            # Standard IOTBT devices use 0xE2 command with hue-based color (not RGB)
             # Source: protocol_docs/17_device_configuration.md - Color Command (0xE2)
             brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
             packet = protocol.build_iotbt_color_command(
@@ -1977,6 +2024,19 @@ class LEDNetWFDevice:
                 "[%s] Service data UUIDs available: %s",
                 self._name, list(service_data.keys())
             )
+
+            # Detect IOTBT segment-based variant
+            # Standard IOTBT: status byte 0x80 → Telink protocol (default)
+            # Segment variant: status byte 0x56 → segment-based protocol
+            if self.is_iotbt and protocol.is_iotbt_segment_variant(service_data):
+                if not self._is_iotbt_segment:
+                    self._is_iotbt_segment = True
+                    _LOGGER.info(
+                        "[%s] IOTBT segment-based variant detected (status=0x56). "
+                        "Using 0x3B power, 0xE1 0x03 color, 0xE1 0x01 effects.",
+                        self._name
+                    )
+
             sd_bytes = protocol.get_service_data_from_advertisement(service_data)
             if sd_bytes:
                 _LOGGER.debug(
