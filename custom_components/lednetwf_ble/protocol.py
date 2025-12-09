@@ -420,7 +420,7 @@ def build_iotbt_segment_color_command(
     # Convert RGB to HSV
     h, s, v = rgb_to_hsv(r, g, b)
 
-    # This devices accepts angles 0-180 for hue
+    # This device accepts angles 0-180 for hue
     # 0=red, ~60=green, ~120=blue
     # CHANGE THIS TO THE FOLLOWING
     hue_180 = int(h / 2) & 0xFF
