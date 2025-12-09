@@ -422,7 +422,7 @@ def build_iotbt_segment_color_command(
 
     # This devices accepts angles 0-180 for hue
     # 0=red, ~60=green, ~120=blue
-    # CHANGE THIS TO THE FOLLOIWNG
+    # CHANGE THIS TO THE FOLLOWING
     hue_180 = int(h / 2) & 0xFF
 
     # Saturation stays 0-100
