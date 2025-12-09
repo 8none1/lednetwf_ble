@@ -176,40 +176,30 @@ def build_iotbt_power_command(turn_on: bool) -> bytearray:
 
 def rgb_to_iotbt_hue(r: int, g: int, b: int) -> int:
     """
-    Convert RGB (0-255) to IOTBT quantized hue (1-240, 0=white).
-
-    Source: model_iotbt_0x80.py - hue_to_cc_240() function
-
-    IOTBT uses a 240-step hue wheel with 24-bin QUANTIZATION to avoid
-    washed-out colors. Colors are snapped to 24 discrete hue bins.
-
-    - 0 = white (special case for low saturation)
-    - 1-240 = quantized hue values
-
-    The quantization helps produce more vivid, saturated colors on the device.
+    Convert RGB to the IOTBT 24-bin / 240-step hue system.
+    Returns device-facing hue byte (0–239):
+    - 0   = red (special case)
+    - 1–239 = quantized hue wheel
     """
+
+    # Grayscale → white mode
     if r == g == b:
-        # Pure grayscale (white/gray/black) - return white mode
         return 0
 
-    # Convert RGB to HSV
-    h, s, v = rgb_to_hsv(r, g, b)
+    h, s, v = rgb_to_hsv(r/255, g/255, b/255)
 
-    # If saturation is too low (< 5%), treat as white
-    # This threshold matches the old integration: sat < 0.05
-    if s < 5:
+    # Unsaturated → white mode
+    if s < 0.05:
         return 0
 
-    # Quantize to 24 hue bins then map to 240-step ring
-    # Source: model_iotbt_0x80.py hue_to_cc_240()
     N_HUES = 24
     bin_idx = int(round((h % 360) / 360 * N_HUES)) % N_HUES
-    step = 240 / N_HUES  # = 10
-    ring_pos = int(round(bin_idx * step)) % 240
-    cc = ring_pos + 1  # 1..240
 
-    # Ensure we never return 0 for colored values
-    return max(1, min(240, cc))
+    # 24 bins → 240 steps → 10 steps per bin
+    hue_240 = (bin_idx * 10) % 240
+
+    # Firmware quirk: red bin (bin 0) uses 0, not 1
+    return hue_240
 
 
 def iotbt_hue_to_rgb(hue: int, brightness: int = 100) -> Tuple[int, int, int]:
