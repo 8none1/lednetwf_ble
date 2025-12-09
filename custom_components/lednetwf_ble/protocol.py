@@ -477,7 +477,7 @@ def build_iotbt_segment_effect_command(effect_id: int, speed: int = 50, brightne
         0x64,                  # speed low byte
         speed & 0xFF,    # speed high byte
         0xA1, 0x00, 0x00, 0x00,  # fixed pattern per scene
-        (effect_id + 4),              # effect ID
+        (effect_id + 4) & 0xFF,  # effect ID (protocol: +4 offset per BLE capture; mask to byte)
         0xA1, 0x58, 0xDE, 0x61,
         0xA1, 0x3C, 0x64, 0x64,
         0xA1, 0x68, 0xE4, 0x64,
