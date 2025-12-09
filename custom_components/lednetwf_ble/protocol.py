@@ -420,10 +420,10 @@ def build_iotbt_segment_color_command(
     # Convert RGB to HSV
     h, s, v = rgb_to_hsv(r, g, b)
 
-    # Convert hue from 0-360 to 0-255 scale (device uses 256-step hue)
-    # 0=red, ~85=green, ~170=blue
+    # This devices accepts angles 0-180 for hue
+    # 0=red, ~60=green, ~120=blue
     # CHANGE THIS TO THE FOLLOIWNG
-    hue_255 = int(h / 2) & 0xFF
+    hue_180 = int(h / 2) & 0xFF
 
     # Saturation stays 0-100
     sat = max(0, min(100, s))
@@ -445,7 +445,7 @@ def build_iotbt_segment_color_command(
     for _ in range(segment_count):
         raw_cmd.extend([
             0xA1,                    # Segment marker
-            hue_255 & 0xFF,          # Hue (0-255)
+            hue_180 & 0xFF,          # Hue (0-180 deg)
             sat & 0xFF,              # Saturation (0-100)
             combined_bright & 0xFF   # Brightness (0-100)
         ])
@@ -453,53 +453,38 @@ def build_iotbt_segment_color_command(
     # No checksum for this command format
     return wrap_command(raw_cmd, cmd_family=0x0a)
 
-
-def build_iotbt_segment_effect_command(
-    effect_id: int, speed: int = 50, brightness: int = 100, segment_count: int = 20
-) -> bytearray:
+    
+def build_iotbt_segment_effect_command(effect_id: int, speed: int = 50, brightness: int = 100, segment_count: int = 100) -> bytearray:
     """
-    Build IOTBT segment-based effect command (0xE1 0x01 format).
+    Build IOTBT segment effect command (0xE1 0x01 format), based on sniffed BLE data.
 
-    Source: User protocol capture (Dec 2025) - IOTBT segment-based effects.
-
-    Format: [0xE1, 0x01, effect_id, speed, brightness, 0x00, ...palette_data...]
-
-    The palette data contains color entries for the effect. For simplicity,
-    we use a rainbow palette (7 colors) which works for most effects.
-
-    Args:
-        effect_id: Effect number (1-99)
-        speed: Effect speed (0-100)
-        brightness: Effect brightness (0-100)
-        segment_count: Number of segments
-
-    Returns:
-        Wrapped command packet
+    speed: 1-100 (maps directly to bytes in little endian)
+    brightness: 0-255
+    segment_count: number of segments (often 0x64 = 100)
     """
-    effect_id = max(1, min(99, effect_id))
-    speed = max(0, min(100, speed))
-    brightness = max(1, min(100, brightness))
+    effect_id = max(1, min(12, effect_id))
+    speed = max(1, min(100, speed))
+    brightness = max(0, min(255, brightness))
+    segment_count = max(1, min(255, segment_count))
 
-    # Build header
-    raw_cmd = bytearray([
-        0xE1, 0x01,
-        effect_id & 0xFF,
-        speed & 0xFF,
-        brightness & 0xFF,
-        0x00,  # Reserved
+    # Base payload (matches your sniffed data structure)
+    payload = bytearray([
+        0xE1, 0x01, 0x00,
+        0x64,                   # Some brightness or smth
+        effect_id,              # effect ID
+        0x00,                   # unknown/reserved
+        0x01,                   # unknown/fixed
+        0x64,                  # speed low byte
+        speed & 0xFF,    # speed high byte
+        0xA1, 0x00, 0x00, 0x00,  # fixed pattern per scene
+        (effect_id + 4),              # effect ID
+        0xA1, 0x58, 0xDE, 0x61,
+        0xA1, 0x3C, 0x64, 0x64,
+        0xA1, 0x68, 0xE4, 0x64,
+        0xA1, 0x96, 0x64, 0x64
     ])
 
-    # Add rainbow palette (7 colors, similar to user's capture)
-    # Format: [0xA1, hue, saturation, brightness] per color
-    # Rainbow hues at roughly: 0, 43, 85, 128, 170, 213, 255 (wrapping)
-    rainbow_hues = [0, 43, 85, 128, 170, 213, 240]
-    for hue in rainbow_hues:
-        raw_cmd.extend([0xA1, hue, 100, brightness])
-
-    # Pad remaining palette slots if needed (usually 7 is enough)
-
-    # No checksum for this command format
-    return wrap_command(raw_cmd, cmd_family=0x0a)
+    return wrap_command(payload, cmd_family=0x0A)
 
 
 # =============================================================================
@@ -982,9 +967,16 @@ def build_effect_command(
           Speed parameter is used as mic sensitivity for music mode
     """
     if effect_type == EffectType.IOTBT_SEGMENT:
-        # IOTBT segment-based variant uses 0xE1 0x01 command with palette
-        # Source: User protocol capture (Dec 2025) - IOTBT65C device
-        return build_iotbt_segment_effect_command(effect_id, speed, brightness)
+        # Standard IOTBT devices use different commands for regular effects vs music effects
+        if effect_id >= 0x100:
+            # Music reactive effect (encoded as effect_num << 8)
+            # Decode the effect ID and use music command
+            music_effect_id = effect_id >> 8
+            # Speed is used as sensitivity for music mode
+            return build_iotbt_music_command(music_effect_id, brightness, speed)
+        else:
+            # Regular effect (1-100) via 0xE0 0x02 command
+            return build_iotbt_segment_effect_command(effect_id, speed, brightness)
     elif effect_type == EffectType.IOTBT:
         # Standard IOTBT devices use different commands for regular effects vs music effects
         if effect_id >= 0x100:
