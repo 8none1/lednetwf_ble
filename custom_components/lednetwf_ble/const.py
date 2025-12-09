@@ -656,6 +656,7 @@ def get_effect_list(
     elif effect_type == EffectType.IOTBT_SEGMENT:
         # IOTBT Segment-based devices have 99 effects via 0xE1 0x01 command
         effects = list(IOTBT_SEGMENT_EFFECTS.values())
+        effects.extend(list(IOTBT_MUSIC_EFFECTS.values()))
 
     # Add sound reactive option for devices with built-in microphone (non-IOTBT)
     # IOTBT devices have specific music effects listed above instead
@@ -761,6 +762,9 @@ def get_effect_id(
         for eid, name in IOTBT_SEGMENT_EFFECTS.items():
             if name == effect_name:
                 return eid
+        for eid, name in IOTBT_MUSIC_EFFECTS.items():
+            if name == effect_name:
+                return eid  # Already encoded (e.g., 0x100 for Music 1)
     return None
 
 
