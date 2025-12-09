@@ -196,10 +196,10 @@ def rgb_to_iotbt_hue(r: int, g: int, b: int) -> int:
     bin_idx = int(round((h % 360) / 360 * N_HUES)) % N_HUES
 
     # 24 bins → 240 steps → 10 steps per bin
-    hue_240 = (bin_idx * 10) % 240
+    hue_120 = (bin_idx * 5) % 240
 
     # Firmware quirk: red bin (bin 0) uses 0, not 1
-    return hue_240
+    return hue_120
 
 
 def iotbt_hue_to_rgb(hue: int, brightness: int = 100) -> Tuple[int, int, int]:
