@@ -142,6 +142,28 @@ def build_power_command_0x3B(turn_on: bool) -> bytearray:
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
+def build_brightness_command_0x3B(brightness_pct: int) -> bytearray:
+    """
+    Build standalone brightness command using 0x3B format.
+
+    Source: ble_dp_cmd.json - bright_value_v2
+    Format: [0x3B, 0x01, 0, 0, bright, 0, bright, delay(3), gradient(2), checksum]
+    Brightness is 0-100 (percent).
+    """
+    brightness_pct = max(0, min(100, brightness_pct))
+    raw_cmd = bytearray([
+        0x3B, 0x01,
+        0x00, 0x00,
+        brightness_pct & 0xFF,
+        0x00,
+        brightness_pct & 0xFF,
+        0x00, 0x00, 0x00,  # Delay (24-bit big-endian)
+        0x00, 0x00          # Gradient (16-bit big-endian)
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+
+
 def build_power_command_0x71(turn_on: bool) -> bytearray:
     """
     Build power command using 0x71 format (legacy BLE v1-4).

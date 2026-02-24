@@ -272,6 +272,8 @@ class LEDNetWFLight(LightEntity):
                 )
             elif self._device.rgb_color and self._device.has_rgb:
                 await self._device.set_rgb_color(self._device.rgb_color, brightness)
+            elif self._device.has_dim:
+                await self._device.set_brightness(brightness)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
