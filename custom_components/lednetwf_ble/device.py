@@ -254,6 +254,11 @@ class LEDNetWFDevice:
         return bool(self._capabilities.get("has_ww") or self._capabilities.get("has_cw"))
 
     @property
+    def has_dim(self) -> bool:
+        """Return True if device is a dimmer-only device."""
+        return bool(self._capabilities.get("has_dim"))
+
+    @property
     def has_effects(self) -> bool:
         """Return True if device supports effects."""
         return self.effect_type != EffectType.NONE
@@ -928,6 +933,18 @@ class LEDNetWFDevice:
             _LOGGER.debug("White mode: brightness=%d (value1=%d), color_temp=%dK (pct=%d)",
                           self._brightness, result["value1"], self._color_temp_kelvin, temp_pct)
 
+        elif (self._capabilities.get("has_dim") and
+              result["mode_type"] == 0x61):
+            # Dimmer-only device (Ctrl_Dim, Bulb_Dim, Magnetic_Dim):
+            # Brightness is reported in the R channel value (0-255)
+            r = result["r"]
+            self._brightness = max(r, 1) if r > 0 else 0
+            self._rgb = None
+            self._color_temp_kelvin = None
+            self._effect = None
+            _LOGGER.debug("Dimmer mode (0x61): R=%d -> brightness=%d",
+                          r, self._brightness)
+
         elif (self.effect_type == EffectType.SIMPLE and
               result["mode_type"] == 0x61):
             # SIMPLE devices: mode_type=0x61 is RGB mode regardless of sub_mode
@@ -1459,6 +1476,34 @@ class LEDNetWFDevice:
             self._brightness = brightness
             self._effect = None
             self._rgb = None
+            self._notify_callbacks()
+            return True
+        return False
+
+    async def set_brightness(self, brightness: int = 255) -> bool:
+        """Set brightness for dimmer-only devices.
+
+        Uses the 0x3B 0x01 standalone brightness command (bright_value_v2)
+        to control single-channel dimmers (Ctrl_Dim, Bulb_Dim, Magnetic_Dim).
+
+        Source: ble_dp_cmd.json bright_value_v2, protocol_docs/05_basic_commands.md
+
+        Args:
+            brightness: Brightness 0-255 (converted to 0-100 percent for protocol)
+        """
+        if not self.has_dim:
+            _LOGGER.warning("Device %s does not support dimmer mode", self._name)
+            return False
+
+        brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
+        _LOGGER.debug("Dimmer brightness: %d/255 -> %d%%", brightness, brightness_pct)
+        packet = protocol.build_brightness_command_0x3B(brightness_pct)
+
+        if await self._send_command(packet):
+            self._brightness = brightness
+            self._rgb = None
+            self._color_temp_kelvin = None
+            self._effect = None
             self._notify_callbacks()
             return True
         return False
