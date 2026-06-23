@@ -2302,3 +2302,45 @@ def is_iotbt_segment_variant(service_data_dict: dict[str, bytes]) -> bool:
     # Unknown values default to standard Telink for safety
     status_byte = data[0] & 0xFF
     return status_byte == 0x56
+
+
+def is_iotbt_segment_from_manu_data(manu_data: dict[int, bytes]) -> bool:
+    """
+    Check if an IOTBT device is a segment-based variant from its manufacturer data.
+
+    IOTBT-named devices come in two protocol families:
+    - Old Telink BLE Mesh: advertise company ID 0x1102 (4354), use 0x71 power /
+      0xE2 hue color / 0xE0 0x02 effects.
+    - Newer segment variant: advertise a ZengGe company ID (0x5A00-0x5AFF) with the
+      standard wrapped 0x81 protocol, use 0x3B power / 0xE1 0x03 color / 0xE1 0x01
+      effects.
+
+    Some segment devices expose this via service data with status byte 0x56 (see
+    is_iotbt_segment_variant), but others (e.g. issue #83, IOTBT6BA) only advertise
+    manufacturer data under a 0x5A** company ID with status byte 0x80. The reliable
+    discriminator is the company ID: presence of a 0x5A** entry and absence of the
+    Telink 0x1102 entry indicates the segment variant.
+
+    Source: GitHub issue #83 BLE capture (IOTBT6BA, company ID 0x5A00).
+
+    Args:
+        manu_data: Manufacturer data dict from the BLE advertisement.
+
+    Returns:
+        True if the manufacturer data indicates a segment-based IOTBT variant.
+    """
+    if not manu_data:
+        return False
+
+    ZENGGE_COMPANY_ID_MIN = 0x5A00  # 23040
+    ZENGGE_COMPANY_ID_MAX = 0x5AFF  # 23295
+    TELINK_COMPANY_ID = 0x1102      # 4354
+
+    if TELINK_COMPANY_ID in manu_data:
+        # Genuine Telink BLE Mesh IOTBT - not a segment variant.
+        return False
+
+    return any(
+        ZENGGE_COMPANY_ID_MIN <= cid <= ZENGGE_COMPANY_ID_MAX
+        for cid in manu_data
+    )

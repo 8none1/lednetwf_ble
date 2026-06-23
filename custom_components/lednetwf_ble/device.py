@@ -2111,6 +2111,22 @@ class LEDNetWFDevice:
                         self._firmware_flag,
                     )
 
+        # Detect IOTBT segment-based variant from manufacturer data.
+        # Some segment devices advertise only manufacturer data under a ZengGe
+        # company ID (0x5A**) rather than service data with status 0x56 (see the
+        # service_data block above). Old Telink-mesh IOTBT devices use company ID
+        # 0x1102, so a 0x5A** company ID distinguishes the segment variant.
+        # Source: GitHub issue #83 (IOTBT6BA, company ID 0x5A00).
+        if self.is_iotbt and not self._is_iotbt_segment:
+            if protocol.is_iotbt_segment_from_manu_data(manu_data):
+                self._is_iotbt_segment = True
+                _LOGGER.info(
+                    "[%s] IOTBT segment-based variant detected (ZengGe company ID "
+                    "in manufacturer data). Using 0x3B power, 0xE1 0x03 color, "
+                    "0xE1 0x01 effects.",
+                    self._name
+                )
+
         result = protocol.parse_manufacturer_data(manu_data, self._name)
         if not result:
             return False
