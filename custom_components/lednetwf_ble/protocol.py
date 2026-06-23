@@ -476,35 +476,67 @@ def build_iotbt_segment_color_command(
     return wrap_command(raw_cmd, cmd_family=0x0a)
 
     
+# Per-effect palettes for segment IOTBT effects, captured raw from the app.
+# Source: GitHub issue #83 BLE capture (IOTBT6BA). Each scene is a list of
+# (byte1, byte2, byte3) triples sent as `A1 b1 b2 b3` segment entries. The bytes
+# are stored verbatim from the capture (b1 = hue on the device's 0-180 scale,
+# b2/b3 carry saturation/value plus an anchor flag in the high bit), so these
+# effects reproduce the app exactly. Effects without a captured palette fall back
+# to DEFAULT_SEGMENT_PALETTE.
+IOTBT_SEGMENT_EFFECT_PALETTES: dict[int, list[tuple[int, int, int]]] = {
+    1:  [(0x58, 0xDE, 0x61), (0x3C, 0x64, 0x64), (0x68, 0xE4, 0x64), (0x96, 0x64, 0x64)],
+    2:  [(0x00, 0x64, 0x64), (0x0F, 0x64, 0x64), (0x1E, 0x64, 0x64), (0x3C, 0x64, 0x64),
+         (0x5A, 0x64, 0x64), (0x78, 0x64, 0x64), (0x88, 0xE4, 0x64)],
+    3:  [(0x0C, 0x64, 0x64), (0x1E, 0x64, 0x64), (0x5A, 0x64, 0x64), (0x6C, 0xE4, 0x64),
+         (0x96, 0x64, 0x64)],
+    5:  [(0x85, 0x64, 0x64), (0x96, 0xE4, 0x50), (0x6B, 0xD8, 0x64), (0x59, 0xE4, 0x64)],
+    9:  [(0x1C, 0xE4, 0x64), (0x9A, 0x63, 0x64), (0xAA, 0x64, 0x64), (0x64, 0xE4, 0x64)],
+    20: [(0x50, 0x64, 0x64), (0x5D, 0x64, 0x64), (0x87, 0x64, 0x64)],
+}
+
+# Fallback palette (R / G / B) for effects whose app palette we have not captured.
+DEFAULT_SEGMENT_PALETTE: list[tuple[int, int, int]] = [
+    (0x00, 0x64, 0x64), (0x3C, 0x64, 0x64), (0x78, 0x64, 0x64),
+]
+
+
 def build_iotbt_segment_effect_command(effect_id: int, speed: int = 50, brightness: int = 100, segment_count: int = 100) -> bytearray:
     """
-    Build IOTBT segment effect command (0xE1 0x01 format), based on sniffed BLE data.
+    Build IOTBT segment effect command (0xE1 0x01 format).
 
-    speed: 1-100 (maps directly to bytes in little endian)
-    brightness: 0-255
-    segment_count: number of segments (often 0x64 = 100)
+    Source: GitHub issue #83 BLE capture (IOTBT6BA). Payload layout:
+        E1 01 00 64 [effect_id] [variant] 01 64 [speed] 00
+        A1 00 00 00 [palette_len] {A1 b1 b2 b3} * palette_len
+
+    Note vs. the earlier implementation, which was malformed: it omitted the 0x00
+    byte before the A1 palette header (off-by-one) and wrote (effect_id + 4) where
+    the palette length belongs, then always sent effect 1's palette. The device
+    ignored those packets, so effects did nothing.
+
+    speed: 1-100 (sent directly; the device is NOT inverted-speed)
+    brightness: accepted for API compatibility; the app sends a fixed 0x64 here.
+    segment_count: unused (kept for signature compatibility).
     """
-    effect_id = max(1, min(12, effect_id))
+    effect_id = max(1, min(99, effect_id))
     speed = max(1, min(100, speed))
-    brightness = max(0, min(255, brightness))
-    segment_count = max(1, min(255, segment_count))
 
-    # Base payload (matches your sniffed data structure)
+    palette = IOTBT_SEGMENT_EFFECT_PALETTES.get(effect_id, DEFAULT_SEGMENT_PALETTE)
+
     payload = bytearray([
-        0xE1, 0x01, 0x00,
-        0x64,                   # Some brightness or smth
-        effect_id,              # effect ID
-        0x00,                   # unknown/reserved
-        0x01,                   # unknown/fixed
-        0x64,                  # speed low byte
-        speed & 0xFF,    # speed high byte
-        0xA1, 0x00, 0x00, 0x00,  # fixed pattern per scene
-        (effect_id + 4) & 0xFF,  # effect ID (protocol: +4 offset per BLE capture; mask to byte)
-        0xA1, 0x58, 0xDE, 0x61,
-        0xA1, 0x3C, 0x64, 0x64,
-        0xA1, 0x68, 0xE4, 0x64,
-        0xA1, 0x96, 0x64, 0x64
+        0xE1, 0x01,
+        0x00,
+        0x64,                   # brightness (fixed 0x64 in every captured scene)
+        effect_id & 0xFF,       # effect ID
+        0x00,                   # per-scene variant (0x02 seen for one scene; default 0x00)
+        0x01,                   # fixed
+        0x64,                   # fixed
+        speed & 0xFF,           # speed
+        0x00,                   # separator (was missing in the old builder)
+        0xA1, 0x00, 0x00, 0x00,  # palette header
+        len(palette) & 0xFF,     # palette length (was incorrectly effect_id + 4)
     ])
+    for b1, b2, b3 in palette:
+        payload.extend([0xA1, b1 & 0xFF, b2 & 0xFF, b3 & 0xFF])
 
     return wrap_command(payload, cmd_family=0x0A)
 
