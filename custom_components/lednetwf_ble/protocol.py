@@ -1696,6 +1696,44 @@ def parse_led_settings_response_a3(data: bytes) -> dict | None:
     }
 
 
+def product_id_from_name(device_name: str | None) -> int | None:
+    """
+    Best-effort product_id from the advertised device name.
+
+    Used when an advertisement carries no manufacturer data (e.g. passive
+    scanning, or service-data-only IOTBT devices), so the device can still be
+    identified at discovery instead of being silently rejected.
+
+    Two name conventions are handled:
+      - IOTBT* -> product_id 0x00 (IOTBT family; the segment-vs-Telink variant is
+        detected at runtime from service/manufacturer data, not the name).
+      - LEDnetWF long form "LEDnetWF" + 2-char generation + 4-hex product_id +
+        6-hex MAC suffix (20 chars total), e.g. "LEDnetWF02001D0CDA81" -> 0x1D.
+        The 4 hex chars at offset 10:14 match manufacturer-data bytes 8-9.
+
+    Returns the product_id, or None if the name yields nothing recognisable (the
+    caller can then fall back to capability probing).
+    """
+    if not device_name:
+        return None
+
+    upper = device_name.upper()
+
+    # IOTBT family: identified purely by name prefix (same rule as the manufacturer
+    # data path below), product_id is always 0x00.
+    if upper.startswith("IOTBT"):
+        return 0x00
+
+    # LEDnetWF long-name form carries the product_id in the name itself.
+    if upper.startswith("LEDNETWF") and len(device_name) == 20:
+        try:
+            return int(device_name[10:14], 16)
+        except ValueError:
+            return None
+
+    return None
+
+
 def parse_manufacturer_data(
     manu_data: dict[int, bytes],
     device_name: str | None = None
