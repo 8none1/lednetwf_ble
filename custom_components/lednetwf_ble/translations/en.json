@@ -43,7 +43,8 @@
         "title": "Device Options",
         "data": {
           "disconnect_delay": "Disconnect delay (seconds)",
-          "led_count": "LED count",
+          "led_count": "LEDs per segment",
+          "segments": "Number of segments",
           "led_type": "LED chip type",
           "color_order": "Color order"
         }
