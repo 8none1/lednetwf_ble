@@ -616,6 +616,40 @@ def build_iotbt_segment_led_settings_command(
     return wrap_command(raw_cmd, cmd_family=0x0B)
 
 
+def build_ring_led_settings_command(
+    led_count: int, chip_type: int, color_order: int
+) -> bytearray:
+    """
+    Build LED settings command for ADDRESSABLE_0x53 ring / FillLight devices.
+
+    Source: v1 integration (lednetwf.py set_led_settings, RING_LIGHT_MODEL branch),
+    which is what worked on these devices before the v2 rewrite. Payload (6 bytes):
+        62 00 [led_count] [chip_type] [color_order] [checksum]
+
+    Note vs. the strip/Symphony LED-settings commands: this is a short, single-byte
+    led_count payload and supports only one segment. chip_type uses the ring-specific
+    numbering (const.RingLedType), NOT the strip LedType enum.
+
+    The checksum sums the whole payload including color_order (the v1 code summed
+    only up to chip_type; for the common RGB order the two are identical).
+
+    led_count: total LEDs (single byte, 1-255).
+    chip_type: RingLedType value.
+    color_order: ColorOrder value.
+    """
+    led_count = max(1, min(255, led_count))
+
+    raw_cmd = bytearray([
+        0x62, 0x00,
+        led_count & 0xFF,
+        chip_type & 0xFF,
+        color_order & 0xFF,
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    # cmd_family 0x0A (expects response) matches the v1 ring packet.
+    return wrap_command(raw_cmd, cmd_family=0x0A)
+
+
 # =============================================================================
 # COLOR COMMANDS
 # =============================================================================

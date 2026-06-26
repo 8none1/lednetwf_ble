@@ -71,6 +71,22 @@ class ColorOrder(IntEnum):
     BGR = 5
 
 
+class RingLedType(IntEnum):
+    """LED chip types for ADDRESSABLE_0x53 ring / FillLight devices.
+
+    These devices use a DIFFERENT chip-type numbering to the strip/Symphony
+    LedType enum (e.g. WS2811 is 3 here, 5 there), so they need their own map.
+    Values taken from the v1 integration's LedTypes_RingLight, which is what
+    worked on these devices before the v2 rewrite.
+    """
+    WS2812B = 1
+    SM16703 = 2
+    WS2811 = 3
+    UCS1903 = 4
+    SK6812 = 5
+    INK1003 = 6
+
+
 class SimpleColorOrder(IntEnum):
     """RGB color ordering for SIMPLE devices (0x33, etc.).
 

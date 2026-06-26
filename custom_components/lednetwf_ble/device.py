@@ -1811,6 +1811,12 @@ class LEDNetWFDevice:
             packet = protocol.build_iotbt_segment_led_settings_command(
                 led_count, segments
             )
+        elif self.effect_type == EffectType.ADDRESSABLE_0x53:
+            # Ring / FillLight devices: short 0x62 ring command (count + chip + order,
+            # single segment). chip_type uses the ring-specific RingLedType numbering.
+            packet = protocol.build_ring_led_settings_command(
+                led_count, led_type, color_order
+            )
         elif self.has_ic_config:
             # A3+ format with segment support
             packet = protocol.build_led_settings_command_a3(

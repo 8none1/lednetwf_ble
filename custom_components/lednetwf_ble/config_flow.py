@@ -32,8 +32,10 @@ from .const import (
     DEFAULT_LED_COUNT,
     DEFAULT_SEGMENTS,
     LedType,
+    RingLedType,
     ColorOrder,
     SimpleColorOrder,
+    EffectType,
     is_supported_device,
     get_device_capabilities,
     needs_capability_probing,
@@ -384,6 +386,39 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
             })
 
+        # Ring / FillLight (ADDRESSABLE_0x53): LED count + chip type + colour order,
+        # single segment, ring-specific chip-type numbering.
+        elif caps.get("effect_type") == EffectType.ADDRESSABLE_0x53:
+            default_led_count = queried.get("led_count") or DEFAULT_LED_COUNT
+
+            queried_ic_type = queried.get("ic_type")
+            default_led_type = RingLedType.WS2812B.name
+            if queried_ic_type is not None:
+                for lt in RingLedType:
+                    if lt.value == queried_ic_type:
+                        default_led_type = lt.name
+                        break
+
+            queried_color_order = queried.get("color_order")
+            default_color_order = ColorOrder.GRB.name
+            if queried_color_order is not None:
+                for co in ColorOrder:
+                    if co.value == queried_color_order:
+                        default_color_order = co.name
+                        break
+
+            schema_dict.update({
+                vol.Optional(CONF_LED_COUNT, default=default_led_count): NumberSelector(
+                    NumberSelectorConfig(min=1, max=255, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_LED_TYPE, default=default_led_type): vol.In(
+                    [t.name for t in RingLedType]
+                ),
+                vol.Optional(CONF_COLOR_ORDER, default=default_color_order): vol.In(
+                    [o.name for o in ColorOrder]
+                ),
+            })
+
         # Color order for SIMPLE devices (0x33, etc.) - only RGB, GRB, BRG
         elif caps.get("has_color_order"):
             queried_color_order = self._discovery_info.get("queried_color_order")
@@ -405,6 +440,8 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if caps.get("has_ic_config"):
             total_leds = default_led_count * default_segments
             placeholders["total_leds"] = str(total_leds)
+        elif caps.get("effect_type") == EffectType.ADDRESSABLE_0x53:
+            placeholders["total_leds"] = str(default_led_count)
 
         return self.async_show_form(
             step_id="options",
@@ -448,7 +485,13 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             processed_options[CONF_SEGMENTS] = queried["segments"]
 
         if CONF_LED_TYPE in options:
-            processed_options[CONF_LED_TYPE] = LedType[options[CONF_LED_TYPE]].value
+            # Ring / FillLight devices use the ring-specific chip-type numbering.
+            led_type_enum = (
+                RingLedType
+                if caps.get("effect_type") == EffectType.ADDRESSABLE_0x53
+                else LedType
+            )
+            processed_options[CONF_LED_TYPE] = led_type_enum[options[CONF_LED_TYPE]].value
         elif queried.get("ic_type") is not None:
             processed_options[CONF_LED_TYPE] = queried["ic_type"]
 
@@ -504,6 +547,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # so look at the live device to decide whether to offer LED/segment config.
         device = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
         is_iotbt_segment = bool(device and device.is_iotbt_segment)
+        # ADDRESSABLE_0x53 ring / FillLight devices use a ring-specific LED command.
+        # Prefer the live device's resolved effect type (robust if the entry predates
+        # CONF_PRODUCT_ID being stored), falling back to product capabilities.
+        is_ring = (
+            (device is not None and device.effect_type == EffectType.ADDRESSABLE_0x53)
+            or caps.get("effect_type") == EffectType.ADDRESSABLE_0x53
+        )
 
         schema_dict: dict[vol.Marker, Any] = {
             vol.Optional(
@@ -557,6 +607,35 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
             })
 
+        # Ring / FillLight (ADDRESSABLE_0x53): LED count + chip type + colour order.
+        # These devices support a single segment only, so no segments field, and the
+        # chip type uses the ring-specific RingLedType numbering.
+        elif is_ring:
+            current_led_count = options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+            current_led_type = options.get(CONF_LED_TYPE, RingLedType.WS2812B.value)
+            current_color_order = options.get(CONF_COLOR_ORDER, ColorOrder.GRB.value)
+
+            led_type_name = next(
+                (t.name for t in RingLedType if t.value == current_led_type),
+                RingLedType.WS2812B.name,
+            )
+            color_order_name = next(
+                (o.name for o in ColorOrder if o.value == current_color_order),
+                ColorOrder.GRB.name,
+            )
+
+            schema_dict.update({
+                vol.Optional(CONF_LED_COUNT, default=current_led_count): NumberSelector(
+                    NumberSelectorConfig(min=1, max=255, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_LED_TYPE, default=led_type_name): vol.In(
+                    [t.name for t in RingLedType]
+                ),
+                vol.Optional(CONF_COLOR_ORDER, default=color_order_name): vol.In(
+                    [o.name for o in ColorOrder]
+                ),
+            })
+
         # Color order for SIMPLE devices (0x33, etc.)
         elif caps.get("has_color_order"):
             current_color_order = options.get(CONF_COLOR_ORDER, SimpleColorOrder.GRB.value)
@@ -578,6 +657,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if caps.get("has_ic_config") or is_iotbt_segment:
             total_leds = current_led_count * current_segments
             placeholders["total_leds"] = str(total_leds)
+        elif is_ring:
+            placeholders["total_leds"] = str(current_led_count)
 
         return self.async_show_form(
             step_id="init",
@@ -589,6 +670,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Save options."""
         product_id = self._config_entry.data.get(CONF_PRODUCT_ID)
         caps = get_device_capabilities(product_id)
+        device = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+        is_ring = (
+            (device is not None and device.effect_type == EffectType.ADDRESSABLE_0x53)
+            or caps.get("effect_type") == EffectType.ADDRESSABLE_0x53
+        )
 
         new_options = {
             CONF_DISCONNECT_DELAY: user_input.get(
@@ -601,7 +687,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if CONF_SEGMENTS in user_input:
             new_options[CONF_SEGMENTS] = int(user_input[CONF_SEGMENTS])
         if CONF_LED_TYPE in user_input:
-            new_options[CONF_LED_TYPE] = LedType[user_input[CONF_LED_TYPE]].value
+            # Ring / FillLight devices use the ring-specific chip-type numbering.
+            led_type_enum = RingLedType if is_ring else LedType
+            new_options[CONF_LED_TYPE] = led_type_enum[user_input[CONF_LED_TYPE]].value
         if CONF_COLOR_ORDER in user_input:
             color_order_name = user_input[CONF_COLOR_ORDER]
             # Check if it's a SimpleColorOrder (for SIMPLE devices) or ColorOrder (for addressable)

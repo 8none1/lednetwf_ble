@@ -25,7 +25,9 @@ from .const import (
     DEFAULT_LED_COUNT,
     DEFAULT_SEGMENTS,
     LedType,
+    RingLedType,
     ColorOrder,
+    EffectType,
     get_device_capabilities,
 )
 from .device import LEDNetWFDevice
@@ -181,6 +183,32 @@ async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None
                 _LOGGER.warning("Failed to apply IOTBT segment LED settings to device")
         else:
             _LOGGER.debug("IOTBT segment LED settings unchanged, no update needed")
+    elif device.effect_type == EffectType.ADDRESSABLE_0x53:
+        # Ring / FillLight: count + chip type + colour order (single segment),
+        # written via the short 0x62 ring command.
+        new_led_count = entry.options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+        new_led_type = entry.options.get(CONF_LED_TYPE, RingLedType.WS2812B.value)
+        new_color_order = entry.options.get(CONF_COLOR_ORDER, ColorOrder.GRB.value)
+
+        if (device._led_count != new_led_count or
+            device._led_type != new_led_type or
+            device._color_order != new_color_order):
+            _LOGGER.info(
+                "Ring LED settings changed, applying: count=%d, chip=%d, order=%d",
+                new_led_count, new_led_type, new_color_order
+            )
+            success = await device.set_led_settings(
+                new_led_count, new_led_type, new_color_order, 1
+            )
+            if success:
+                device._led_count = new_led_count
+                device._led_type = new_led_type
+                device._color_order = new_color_order
+                _LOGGER.debug("Ring LED settings applied")
+            else:
+                _LOGGER.warning("Failed to apply ring LED settings to device")
+        else:
+            _LOGGER.debug("Ring LED settings unchanged, no update needed")
     elif caps.get("has_ic_config"):
         new_led_count = entry.options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
         new_segments = entry.options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
