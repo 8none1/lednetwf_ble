@@ -402,8 +402,60 @@ IOTBT_MUSIC_EFFECTS: Final = {
 # Source: User protocol capture (Dec 2025) - IOTBT devices with addressable segments
 # These devices use 0xE1 0x03 for color, 0xE1 0x01 for effects, 0x3B for power
 # Effects are numbered 1-99 (similar to addressable strip effects)
+# IOTBT segment-based scene effects (0xE1 0x01 command).
+# Names and ordering come from the Surplife/MagicHome app's built-in scene list,
+# captured from an IOTBT6BA via GitHub issue #83. The integer key is the position
+# in that list (1-46), NOT the device's internal scene byte: the scene byte is not
+# unique (e.g. several scenes share 0x03), so the full per-scene template lives in
+# protocol.IOTBT_SEGMENT_EFFECT_SCENES, keyed by the same position id. Keep the two
+# dicts aligned (same keys, same order).
 IOTBT_SEGMENT_EFFECTS: Final = {
-    i: f"Effect {i}" for i in range(1, 100)
+    1: "Game",
+    2: "Party",
+    3: "Trend",
+    4: "Sports",
+    5: "Holiday",
+    6: "Dating",
+    7: "Meditation",
+    8: "Work",
+    9: "Birthday",
+    10: "Dinner",
+    11: "Iceland Blue",
+    12: "Glacier Express",
+    13: "Firefly Night",
+    14: "Green Grass",
+    15: "Northern Lights",
+    16: "Dream Meteor",
+    17: "Early Spring",
+    18: "Late Autumn",
+    19: "Midnight City",
+    20: "Volcanic Eruption",
+    21: "Starry Night Sky",
+    22: "Lightning And Thunder",
+    23: "Meteor Shower",
+    24: "Dream Fireworks",
+    25: "Christmas 1",
+    26: "Christmas 2",
+    27: "Halloween 1",
+    28: "Halloween 2",
+    29: "Valentines Day",
+    30: "Thanksgiving",
+    31: "Mothers Day",
+    32: "Forest Day",
+    33: "Fathers Day",
+    34: "New Year",
+    35: "Childrens Day",
+    36: "Easter",
+    37: "Summer Idyll",
+    38: "Sea Dream",
+    39: "Love And Dreams",
+    40: "Spring Fishing",
+    41: "Neon World",
+    42: "Dreamland",
+    43: "Summer Wind",
+    44: "Planet Journey",
+    45: "Warning",
+    46: "Color Collision",
 }
 
 # Product IDs with special speed encoding (inverted 0x01-0x1F scale)

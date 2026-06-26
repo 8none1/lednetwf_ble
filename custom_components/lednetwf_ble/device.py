@@ -1802,9 +1802,16 @@ class LEDNetWFDevice:
             segments: Number of segments (for IC config devices)
 
         For devices with has_ic_config (Symphony A3+), uses the A3 format
-        which includes segment support. Other devices use the original format.
+        which includes segment support. IOTBT segment devices use their own
+        0xE1 0x08 length command (led_type/color_order are not configurable on
+        those). Other devices use the original format.
         """
-        if self.has_ic_config:
+        if self.is_iotbt_segment:
+            # IOTBT segment lamps: 0xE1 0x08 length command (count + segments only)
+            packet = protocol.build_iotbt_segment_led_settings_command(
+                led_count, segments
+            )
+        elif self.has_ic_config:
             # A3+ format with segment support
             packet = protocol.build_led_settings_command_a3(
                 led_count, segments, led_type, color_order

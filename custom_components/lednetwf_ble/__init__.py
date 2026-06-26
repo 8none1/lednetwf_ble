@@ -160,7 +160,28 @@ async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None
     product_id = entry.data.get(CONF_PRODUCT_ID)
     caps = get_device_capabilities(product_id)
 
-    if caps.get("has_ic_config"):
+    if device.is_iotbt_segment:
+        # IOTBT segment lamps: only LEDs-per-segment and segment count apply,
+        # written via the 0xE1 0x08 command (no LED type / colour order).
+        new_led_count = entry.options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+        new_segments = entry.options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
+
+        if device._led_count != new_led_count or device._segments != new_segments:
+            _LOGGER.info(
+                "IOTBT segment LED settings changed, applying: leds_per_segment=%d, segments=%d",
+                new_led_count, new_segments
+            )
+            # led_type / color_order are ignored by the IOTBT branch of set_led_settings
+            success = await device.set_led_settings(new_led_count, 0, 0, new_segments)
+            if success:
+                device._led_count = new_led_count
+                device._segments = new_segments
+                _LOGGER.debug("IOTBT segment LED settings applied")
+            else:
+                _LOGGER.warning("Failed to apply IOTBT segment LED settings to device")
+        else:
+            _LOGGER.debug("IOTBT segment LED settings unchanged, no update needed")
+    elif caps.get("has_ic_config"):
         new_led_count = entry.options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
         new_segments = entry.options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
         new_led_type = entry.options.get(CONF_LED_TYPE, LedType.WS2812B.value)

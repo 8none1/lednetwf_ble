@@ -500,6 +500,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         caps = get_device_capabilities(product_id)
         options = self._config_entry.options
 
+        # IOTBT segment devices are detected at runtime (not via product caps),
+        # so look at the live device to decide whether to offer LED/segment config.
+        device = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+        is_iotbt_segment = bool(device and device.is_iotbt_segment)
+
         schema_dict: dict[vol.Marker, Any] = {
             vol.Optional(
                 CONF_DISCONNECT_DELAY,
@@ -507,7 +512,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
         }
 
-        if caps.get("has_ic_config"):
+        if is_iotbt_segment:
+            # IOTBT segment lamps only configure LEDs-per-segment and segment count
+            # (LED type / colour order are not exposed by these devices).
+            current_led_count = options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+            current_segments = options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
+
+            schema_dict.update({
+                vol.Optional(CONF_LED_COUNT, default=current_led_count): NumberSelector(
+                    NumberSelectorConfig(min=1, max=255, mode=NumberSelectorMode.BOX)
+                ),
+                vol.Optional(CONF_SEGMENTS, default=current_segments): NumberSelector(
+                    NumberSelectorConfig(min=1, max=255, mode=NumberSelectorMode.BOX)
+                ),
+            })
+        elif caps.get("has_ic_config"):
             current_led_count = options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
             current_segments = options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
             current_led_type = options.get(CONF_LED_TYPE, LedType.WS2812B.value)
@@ -556,7 +575,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         # Calculate total LEDs for display in description
         placeholders = {}
-        if caps.get("has_ic_config"):
+        if caps.get("has_ic_config") or is_iotbt_segment:
             total_leds = current_led_count * current_segments
             placeholders["total_leds"] = str(total_leds)
 
