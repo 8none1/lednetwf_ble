@@ -72,10 +72,34 @@ def _parse_discovery(discovery: BluetoothServiceInfoBleak) -> dict | None:
 
     # Parse manufacturer data
     manu_data = protocol.parse_manufacturer_data(discovery.manufacturer_data, name)
-    if not manu_data:
-        return None
+    if manu_data:
+        product_id = manu_data.get("product_id")
+        fw_version = manu_data.get("fw_version")
+    else:
+        # No manufacturer data in this advertisement. This happens under passive
+        # scanning (the manu data sits in a scan response we never see) and for
+        # IOTBT devices that advertise via service data only. Fall back to the
+        # device name, which is in the primary advert and carries the product_id.
+        product_id = protocol.product_id_from_name(name)
+        fw_version = None
 
-    product_id = manu_data.get("product_id")
+        # Only trust a *name-derived* LEDnetWF product_id if it maps to a known
+        # device; otherwise leave it as None so the flow probes capabilities
+        # rather than risk acting on a misparsed id. IOTBT (0x00) is always valid.
+        if product_id not in (None, 0x00):
+            caps = get_device_capabilities(product_id)
+            if not caps or str(caps.get("name", "")).startswith("Unknown"):
+                _LOGGER.debug(
+                    "Device %s: name-derived product 0x%02X is unknown, will probe",
+                    name, product_id,
+                )
+                product_id = None
+
+        _LOGGER.debug(
+            "Device %s has no manufacturer data; identified by name as product %s",
+            name, f"0x{product_id:02X}" if product_id is not None else "unknown (probe)",
+        )
+
     if not is_supported_device(product_id):
         _LOGGER.debug("Device %s (product 0x%02X) not supported", name, product_id or 0)
         return None
@@ -84,7 +108,7 @@ def _parse_discovery(discovery: BluetoothServiceInfoBleak) -> dict | None:
         "address": discovery.address,
         "name": name,
         "product_id": product_id,
-        "fw_version": manu_data.get("fw_version"),
+        "fw_version": fw_version,
         "rssi": discovery.rssi,
     }
 
