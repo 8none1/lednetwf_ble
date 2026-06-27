@@ -21,6 +21,8 @@ from .const import (
     CONF_SEGMENTS,
     CONF_LED_TYPE,
     CONF_COLOR_ORDER,
+    CONF_IOTBT_PROTOCOL,
+    IOTBT_PROTOCOL_AUTO,
     DEFAULT_DISCONNECT_DELAY,
     DEFAULT_LED_COUNT,
     DEFAULT_SEGMENTS,
@@ -84,6 +86,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Initialized LED settings: count=%d, segments=%d, type=%d, order=%d",
             device._led_count, device._segments, device._led_type, device._color_order
         )
+
+    # Apply any IOTBT protocol override (Telink vs segment) from options.
+    device.set_iotbt_protocol_override(
+        entry.options.get(CONF_IOTBT_PROTOCOL, IOTBT_PROTOCOL_AUTO)
+    )
 
     # For devices that don't report power state in advertisements (like IOTBT),
     # query state on startup to ensure proper availability
@@ -157,6 +164,11 @@ async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None
     # Update disconnect delay
     new_delay = entry.options.get(CONF_DISCONNECT_DELAY, DEFAULT_DISCONNECT_DELAY)
     device._disconnect_delay = new_delay
+
+    # Apply IOTBT protocol override (Telink vs segment)
+    device.set_iotbt_protocol_override(
+        entry.options.get(CONF_IOTBT_PROTOCOL, IOTBT_PROTOCOL_AUTO)
+    )
 
     # Check if LED settings need to be applied
     product_id = entry.data.get(CONF_PRODUCT_ID)

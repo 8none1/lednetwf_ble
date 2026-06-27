@@ -28,6 +28,9 @@ from .const import (
     CONF_SEGMENTS,
     CONF_LED_TYPE,
     CONF_COLOR_ORDER,
+    CONF_IOTBT_PROTOCOL,
+    IOTBT_PROTOCOL_AUTO,
+    IOTBT_PROTOCOL_CHOICES,
     DEFAULT_DISCONNECT_DELAY,
     DEFAULT_LED_COUNT,
     DEFAULT_SEGMENTS,
@@ -676,6 +679,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
             })
 
+        # IOTBT devices: protocol override (Auto/Telink/Segment). The 0x5A00 family
+        # cannot be auto-detected reliably across firmware, so let the user force it.
+        if device is not None and device.is_iotbt:
+            current_protocol = options.get(CONF_IOTBT_PROTOCOL, IOTBT_PROTOCOL_AUTO)
+            schema_dict[
+                vol.Optional(CONF_IOTBT_PROTOCOL, default=current_protocol)
+            ] = vol.In(list(IOTBT_PROTOCOL_CHOICES))
+
         # Calculate total LEDs for display in description
         placeholders = {}
         if caps.get("has_ic_config") or is_iotbt_segment:
@@ -723,5 +734,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             else:
                 # Addressable/Symphony device - use ColorOrder
                 new_options[CONF_COLOR_ORDER] = ColorOrder[color_order_name].value
+
+        if CONF_IOTBT_PROTOCOL in user_input:
+            new_options[CONF_IOTBT_PROTOCOL] = user_input[CONF_IOTBT_PROTOCOL]
 
         return self.async_create_entry(title="", data=new_options)

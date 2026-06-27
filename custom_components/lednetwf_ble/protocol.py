@@ -2233,6 +2233,8 @@ def parse_service_data(service_data: bytes) -> dict | None:
             "mac_address": mac_address,
             "mesh_address": mesh_addr,
             "led_version": led_version,
+            "mode": mode,
+            "flags2": flags2,
             "firmware_ver": led_version,  # Use led_version as firmware indicator
             "firmware_ver_str": str(led_version),
             "firmware_flag": flags,
@@ -2523,3 +2525,31 @@ def is_iotbt_segment_from_manu_data(manu_data: dict[int, bytes]) -> bool:
         ZENGGE_COMPANY_ID_MIN <= cid <= ZENGGE_COMPANY_ID_MAX
         for cid in manu_data
     )
+
+
+# Bit in service-data flags2 (byte 13) that distinguishes the segment command set
+# from the Telink command set within the 0x5A00 IOTBT family.
+IOTBT_SEGMENT_FLAGS2_BIT = 0x08
+
+
+def is_iotbt_segment_from_flags2(flags2: int | None) -> bool:
+    """
+    Best-effort: decide whether a 0x5A00 IOTBT device uses the segment command set,
+    from the service-data flags2 byte (byte 13).
+
+    Both families advertise company/service ID 0x5A00 with status byte 0x80, and the
+    fields that looked promising (led_version, mode, ble_version) all shift when the
+    device's firmware is updated, so they are unreliable. flags2 is the one field that
+    stayed stable across a firmware update on the one Telink device we have data for:
+
+      - IOTBT6BA (segment, issue #83): flags2 = 0x0D  (bit 0x08 set)
+      - IOTBT812 (Telink): flags2 = 0x05 pre- AND post-firmware  (bit 0x08 clear)
+
+    So bit 0x08 is treated as "segment command set". This is a 2-device heuristic; the
+    manual protocol override is the authoritative mechanism when this guesses wrong.
+
+    Returns False when flags2 is unknown (default to the Telink/standard command set).
+    """
+    if flags2 is None:
+        return False
+    return bool(flags2 & IOTBT_SEGMENT_FLAGS2_BIT)
