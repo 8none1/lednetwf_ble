@@ -16,7 +16,7 @@ This integration supports various models of Zengge LEDnetWF devices, which may a
 - YBCRG-RGBWW
 - Magic Hue
 - Bluetooth full colors selfie ring light
-- Devices advertising as "iotb" prefix (including segment-based variants such as the "IOTBT6BA" USB corner lamp; colour, brightness and the full built-in scene/effect list are supported)
+- Devices advertising as "iotb" prefix. Both IOTBT protocol families are supported: the older "Telink" style (hue colour + classic effects) and the newer "segment" style (per-segment addressable colour + the full built-in scene/effect list, e.g. the "IOTBT6BA" USB corner lamp). The integration auto-detects which family a device uses, and you can override it manually if needed (see [IOTBT Protocol](#iotbt-protocol-telink-vs-segment)).
 
 New devices using the Zengge platform are being released all the time.  We support as many of these as we can.  If you have a device which isn't supported, please log an issue and we will work with you to try and add support.
 
@@ -35,6 +35,10 @@ New devices using the Zengge platform are being released all the time.  We suppo
   - No connection needed for state monitoring
   - Reduced Bluetooth interference with other devices
 - Live status updates from remote control (when connected for commands)
+- **Works with passively-scanning Bluetooth proxies** - devices are discovered and controllable without requiring active scanning. Devices are treated as available as soon as Home Assistant can see them, and connect on demand when you control them. (Active scanning still gives nicer live state, but it is no longer required.)
+- **Manual protocol selection for IOTBT devices** - force Telink or segment mode when auto-detection can't tell them apart (see below)
+- **LED hardware configuration for more device types** - LED count, chip type and colour order for ring / "FillLight" devices, and LEDs-per-segment for IOTBT segment devices
+- **Full built-in scene/effect list for IOTBT segment devices** - the named scenes from the official app (Game, Party, Northern Lights, the seasonal ones, etc.)
 
 ## Installation
 
@@ -84,6 +88,19 @@ Search for "LEDnetWF BLE" and click install.  You will also get notified of futu
 **Number of Segments**
 - **Default**: 1
 - **Description**: How many logical segments your LED strip is divided into. Some devices support multiple segments that can be controlled independently. Most single strips use 1 segment.  Not all devices support segments.
+
+#### IOTBT Protocol (Telink vs Segment)
+
+Devices whose name begins with `IOTBT` come in two protocol families that advertise almost identically but speak different command sets:
+
+- **Telink** - hue-based colour and classic effects.
+- **Segment** - per-segment addressable colour and palette-based scenes.
+
+The integration auto-detects which family a device belongs to. Because the two can be genuinely hard to tell apart (and the distinguishing data can change after a device firmware update), you can override the choice:
+
+- **Setting**: device's **Configure** dialog → **IOTBT protocol**
+- **Options**: `auto` (default), `telink`, `segment`
+- **When to use it**: if an IOTBT device turns on and off correctly but **colours or effects don't work**, the protocol was probably auto-detected wrongly. Switch between `telink` and `segment` (and restart / re-open the light) until colour and effects respond. Leave it on `auto` unless you hit this.
 
 #### Advanced Settings
 
