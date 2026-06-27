@@ -237,3 +237,39 @@ properly.
   `80 07 08 65 F0 17 58 12 00 C2 0E 03 01 05`
 - Capture parsed from `FS/data/log/bt/btsnoop_hci.log` inside the #83 bugreport zip
   (https://github.com/user-attachments/files/29181974/btsnoop_hci.log.zip).
+
+## POST-firmware-update comparison (pcap/surplife_after_upgrade.pcapng, 2026-06-27)
+
+Owner updated IOTBT812's firmware via the Surplife app and re-captured the same actions.
+
+**Protocol opcodes UNCHANGED** — still Telink: `0x71` power, `0xE2` colour, `0xE0 0x02` effects,
+`0xE1 0x0A` IC type (now 5 types; new "Common RGBW" = `E1 0A 01 05 02`). Our command builders
+remain correct for the payloads.
+
+**But two things changed:**
+
+1. **Advert fields shifted (discriminator is now unreliable):**
+
+   | field | 812 PRE | 812 POST | 6BA (segment) |
+   |---|---|---|---|
+   | ble_version | 0x07 | 0x08 | 0x07 |
+   | led_version | 0x0E | **0x1D** | 0x1F |
+   | mode | 0x03 | 0x06 | 0x0A |
+
+   Post-update service data: `80 08 08 65 F0 17 58 12 00 C2 1D 06 01 05`.
+   `led_version` moved 0x0E→0x1D, adjacent to 6BA's 0x1F, so it no longer separates Telink from
+   segment. **Conclusion: auto-detecting Telink vs segment from advert fields is not reliable
+   across firmware. The manual override (Auto/Telink/Segment) must be the primary mechanism.**
+
+2. **Transport framing changed, keyed to `ble_version`:**
+   - ble_version 7 (PRE / 6BA): header `00 seq 80 00 <lenHi> <lenLo> <len+1> <cmdfam>` (8 bytes,
+     1-byte len+1). Notifications start `0x04`.
+   - ble_version 8 (POST): header `01 seq 80 00 <lenHi> <lenLo> <len+1Hi> <len+1Lo> <cmdfam>`
+     (9 bytes, 2-byte len+1), version byte `0x01`. Notifications start `0x05`.
+
+   Example power: PRE `0004800000 02 03 0a 7124` vs POST `0104800000 02 00 03 0a 7124`.
+
+   `wrap_command` only emits the v0 (8-byte) header, so a ble_version-8 device will likely reject
+   ALL writes (incl. power). This is NOT IOTBT-specific — it affects any LEDnetWF device whose
+   firmware reaches ble_version 8. **wrap_command should branch on advertised ble_version
+   (>=8 → v1 framing).** Likely higher priority than the Telink/segment split.
