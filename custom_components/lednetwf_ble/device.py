@@ -196,6 +196,26 @@ class LEDNetWFDevice:
         return self._is_on
 
     @property
+    def available(self) -> bool:
+        """Return True if the entity should be considered available.
+
+        Once we have real state (is_on known) we're clearly available. Otherwise
+        fall back to Bluetooth presence: some devices (e.g. passively-scanned
+        LEDnetWF strips/rings) only advertise their name and never push state, so
+        is_on can stay None until the first connection. Treating a present,
+        connectable device as available lets the user command it, which establishes
+        a connection and populates state.
+        """
+        if self._is_on is not None:
+            return True
+        try:
+            return bool(
+                bluetooth.async_address_present(self._hass, self._address, connectable=True)
+            )
+        except Exception:  # pragma: no cover - defensive, never block availability logic
+            return False
+
+    @property
     def brightness(self) -> int:
         """Return brightness (0-255)."""
         return self._brightness
@@ -1183,7 +1203,11 @@ class LEDNetWFDevice:
 
     def _parse_led_settings_response(self, data: bytes) -> None:
         """Parse 0x63 LED settings response."""
-        result = protocol.parse_led_settings_response(data)
+        # Ring / FillLight (ADDRESSABLE_0x53) devices use a different 0x63 layout.
+        if self.effect_type == EffectType.ADDRESSABLE_0x53:
+            result = protocol.parse_ring_led_settings_response(data)
+        else:
+            result = protocol.parse_led_settings_response(data)
         if not result:
             return
 

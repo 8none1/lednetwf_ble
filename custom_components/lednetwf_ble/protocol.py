@@ -1565,6 +1565,29 @@ def parse_state_response(data: bytes) -> dict | None:
     }
 
 
+def parse_ring_led_settings_response(data: bytes) -> dict | None:
+    """
+    Parse the 0x63 LED settings response for ADDRESSABLE_0x53 ring / FillLight devices.
+
+    Source: v1 integration (RING_LIGHT_MODEL branch). The ring response packs the
+    values differently to the Symphony format below:
+        Byte 0: header (0x63)
+        Byte 2: led_count (single byte; these devices have one segment)
+        Byte 3: chip_type (RingLedType numbering)
+        Byte 4: color_order (ColorOrder numbering)
+
+    Returns dict with led_count / ic_type / color_order / segments, or None if invalid.
+    """
+    if len(data) < 5 or data[0] != 0x63:
+        return None
+    return {
+        "led_count": data[2] & 0xFF,
+        "ic_type": data[3] & 0xFF,
+        "color_order": data[4] & 0xFF,
+        "segments": 1,
+    }
+
+
 def parse_led_settings_response(data: bytes) -> dict | None:
     """
     Parse LED settings response (0x63 format - IC Settings).

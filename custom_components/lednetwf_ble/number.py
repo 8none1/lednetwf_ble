@@ -74,7 +74,7 @@ class LEDNetWFEffectSpeed(NumberEntity):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        return self._device.is_on is not None
+        return self._device.available
 
     @property
     def native_value(self) -> float:
