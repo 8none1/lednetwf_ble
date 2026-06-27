@@ -16,7 +16,14 @@ from homeassistant.const import CONF_MAC, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.device_registry import format_mac
-from homeassistant.helpers.selector import NumberSelector, NumberSelectorConfig, NumberSelectorMode
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from bleak_retry_connector import BleakNotFoundError
 
@@ -282,7 +289,11 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "Device capabilities after flash test: has_ic_config=%s, has_color_order=%s, effect_type=%s",
                     caps.get("has_ic_config"), caps.get("has_color_order"), caps.get("effect_type")
                 )
-                if caps.get("has_ic_config"):
+                if (caps.get("has_ic_config")
+                        or caps.get("effect_type") == EffectType.ADDRESSABLE_0x53):
+                    # Ring / FillLight devices answer the same 0x63 query (parsed in
+                    # the ring-specific branch); if they don't, this times out and we
+                    # fall back to defaults, so it is safe to attempt.
                     led_settings = await device.query_led_settings_and_wait(timeout=3.0)
                     if led_settings:
                         _LOGGER.info(
@@ -685,7 +696,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             current_protocol = options.get(CONF_IOTBT_PROTOCOL, IOTBT_PROTOCOL_AUTO)
             schema_dict[
                 vol.Optional(CONF_IOTBT_PROTOCOL, default=current_protocol)
-            ] = vol.In(list(IOTBT_PROTOCOL_CHOICES))
+            ] = SelectSelector(
+                SelectSelectorConfig(
+                    options=list(IOTBT_PROTOCOL_CHOICES),
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
 
         # Calculate total LEDs for display in description
         placeholders = {}
