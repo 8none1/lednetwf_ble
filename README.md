@@ -114,6 +114,33 @@ The integration auto-detects which family a device belongs to. Because the two c
 - **Device Detection**: Many settings (LED count, type, color order, segments) are automatically detected from supported devices during setup. Manual configuration may be needed for older devices or if auto-detection fails.
 - **Effect Performance**: Incorrect LED count or type settings may cause effects to display incorrectly or perform poorly.
 
+## Bluetooth scanning, connections, and proxies
+
+A common point of confusion (especially with ESPHome Bluetooth proxies) is the difference between **scanning** and **connections**. They are separate things and use separate resources.
+
+### Scanning (passive vs active)
+
+Scanning is how Home Assistant *receives advertisements* from a device. It is **connectionless** - it never uses a connection slot.
+
+- **Passive scanning**: Home Assistant only listens for the device's primary advertisement.
+- **Active scanning**: Home Assistant additionally sends a small scan request and receives the device's *scan response*. For these LEDnetWF / IOTBT devices, the scan response is where the live state (power / colour / brightness) is broadcast.
+
+This integration works under **either** mode:
+- Discovery and control work in passive mode (devices are identified by name and become controllable as soon as they are seen).
+- Active scanning additionally gives **live state mirroring**: the entity reflects changes made from a physical remote or the vendor app without Home Assistant having to connect.
+
+### Connections (and connection slots)
+
+A *connection* is established only when the integration needs to **send a command** (on/off, colour, effect, and so on). This uses one of the Bluetooth adapter/proxy's limited **connection slots**. The integration connects on demand and disconnects again after the **Disconnect Delay**, freeing the slot. Connections are never held permanently (unless you set the disconnect delay to 0, which is not recommended).
+
+If you are short on connection slots, the lever to pull is the **Disconnect Delay** (shorter = the slot frees sooner). **Scanning mode has no effect on connection slots.** If anything, active scanning slightly *reduces* connections, because Home Assistant can read state from advertisements instead of connecting to query it.
+
+### ESP32 / ESPHome proxy notes
+
+- ESPHome has **two** unrelated "active" settings, which are easy to confuse: `esp32_ble_tracker: scan_parameters: active: true` (scanning mode, connectionless) and the `bluetooth_proxy:` connection proxying (which uses connection slots and is required for control).
+- **Active scanning adds negligible load and essentially no extra memory** on an ESP32. It transmits a few small scan-request packets and forwards the resulting scan responses; it does not meaningfully increase RAM use. Active scanning is in fact the default for ESPHome Bluetooth proxies. The resource-heavy part of BLE is *connections*, not scanning.
+- The main reason to keep a proxy in **passive** mode is **battery-powered BLE devices** it also covers (sensors, trackers): active scanning makes them respond to scan requests, which drains their batteries faster. Scanning mode is per-proxy, so a good strategy is active scanning on proxies near mains-powered lights and passive on proxies near battery devices.
+
 ## Credits
 
 This integration is possible thanks to the work of this incredible people!
