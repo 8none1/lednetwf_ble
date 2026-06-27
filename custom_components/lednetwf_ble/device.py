@@ -114,7 +114,12 @@ class LEDNetWFDevice:
         # - Power: 0x3B (standard LEDnetWF, not 0x71 Telink)
         # - Color: 0xE1 0x03 (segment-based HSB, not 0xE2 hue)
         # - Effects: 0xE1 0x01 (palette-based, not 0xE0 0x02)
+        # Auto-detected (from service-data flags2) segment flag. The public
+        # is_iotbt_segment property applies any manual protocol override on top.
         self._is_iotbt_segment: bool = False
+        self._iotbt_flags2: int | None = None
+        # Manual protocol override: None = auto, "telink" or "segment" force it.
+        self._iotbt_protocol_override: str | None = None
 
         # Callbacks for state updates
         self._callbacks: list[Callable[[], None]] = []
@@ -471,8 +476,24 @@ class LEDNetWFDevice:
         - State query: Still uses 0xEA 0x81 format
 
         Source: User protocol capture (Dec 2025) - IOTBT65C device
+
+        The 0x5A00 IOTBT family contains BOTH segment devices (0xE1 0x03 colour)
+        and Telink devices (0xE2 colour) that advertise almost identically, so the
+        auto-detection (service-data flags2) can be wrong. A manual protocol
+        override takes precedence when set.
         """
+        if self._iotbt_protocol_override == "segment":
+            return True
+        if self._iotbt_protocol_override == "telink":
+            return False
         return self._is_iotbt_segment
+
+    def set_iotbt_protocol_override(self, override: str | None) -> None:
+        """Set the manual IOTBT protocol override ('auto'/None, 'telink', 'segment')."""
+        self._iotbt_protocol_override = override if override in ("telink", "segment") else None
+        _LOGGER.info("[%s] IOTBT protocol override set to %s (effective segment=%s)",
+                     self._name, self._iotbt_protocol_override or "auto", self.is_iotbt_segment)
+        self._notify_callbacks()
 
     @property
     def color_order(self) -> int | None:
@@ -2083,18 +2104,6 @@ class LEDNetWFDevice:
                 self._name, list(service_data.keys())
             )
 
-            # Detect IOTBT segment-based variant
-            # Standard IOTBT: status byte 0x80 → Telink protocol (default)
-            # Segment variant: status byte 0x56 → segment-based protocol
-            if self.is_iotbt and protocol.is_iotbt_segment_variant(service_data):
-                if not self._is_iotbt_segment:
-                    self._is_iotbt_segment = True
-                    _LOGGER.info(
-                        "[%s] IOTBT segment-based variant detected (status=0x56). "
-                        "Using 0x3B power, 0xE1 0x03 color, 0xE1 0x01 effects.",
-                        self._name
-                    )
-
             sd_bytes = protocol.get_service_data_from_advertisement(service_data)
             if sd_bytes:
                 _LOGGER.debug(
@@ -2115,6 +2124,23 @@ class LEDNetWFDevice:
                         self._firmware_flag = sd_result["firmware_flag"]
                     if sd_result.get("firmware_ver_str"):
                         self._fw_version = sd_result["firmware_ver_str"]
+                    # Auto-detect Telink vs segment within the 0x5A00 IOTBT family from
+                    # the stable flags2 byte (status 0x56 also indicates segment). The
+                    # manual override, applied in the is_iotbt_segment property, wins.
+                    if sd_result.get("flags2") is not None:
+                        self._iotbt_flags2 = sd_result["flags2"]
+                    if self.is_iotbt:
+                        seg = (
+                            protocol.is_iotbt_segment_from_flags2(sd_result.get("flags2"))
+                            or sd_result.get("sta") == 0x56
+                        )
+                        if seg != self._is_iotbt_segment:
+                            self._is_iotbt_segment = seg
+                            _LOGGER.info(
+                                "[%s] IOTBT auto-detected as %s (flags2=0x%02X, sta=0x%02X)",
+                                self._name, "segment" if seg else "telink",
+                                sd_result.get("flags2") or 0, sd_result.get("sta") or 0,
+                            )
                     _LOGGER.debug(
                         "[%s] Service data: ble_v=%s, led_v=%s, fw_ver=%s, fw_flag=%s",
                         self._name,
@@ -2124,19 +2150,18 @@ class LEDNetWFDevice:
                         self._firmware_flag,
                     )
 
-        # Detect IOTBT segment-based variant from manufacturer data.
-        # Some segment devices advertise only manufacturer data under a ZengGe
-        # company ID (0x5A**) rather than service data with status 0x56 (see the
-        # service_data block above). Old Telink-mesh IOTBT devices use company ID
-        # 0x1102, so a 0x5A** company ID distinguishes the segment variant.
-        # Source: GitHub issue #83 (IOTBT6BA, company ID 0x5A00).
-        if self.is_iotbt and not self._is_iotbt_segment:
+        # Fallback for IOTBT devices that advertise ONLY manufacturer data (no
+        # service data, so no flags2 to decide from). A 0x5A** company ID (and not
+        # the Telink 0x1102) then indicates the segment variant. Only used when
+        # flags2 has never been seen; once service-data flags2 is known it is
+        # authoritative (handled above) and this must not override it - otherwise a
+        # Telink device (flags2 says telink) would be wrongly flipped to segment.
+        if self.is_iotbt and self._iotbt_flags2 is None and not self._is_iotbt_segment:
             if protocol.is_iotbt_segment_from_manu_data(manu_data):
                 self._is_iotbt_segment = True
                 _LOGGER.info(
-                    "[%s] IOTBT segment-based variant detected (ZengGe company ID "
-                    "in manufacturer data). Using 0x3B power, 0xE1 0x03 color, "
-                    "0xE1 0x01 effects.",
+                    "[%s] IOTBT segment variant assumed (ZengGe company ID in "
+                    "manufacturer data, no service-data flags2 seen).",
                     self._name
                 )
 
