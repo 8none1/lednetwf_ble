@@ -187,7 +187,8 @@ On modern Android, the snoop log lives at `/data/misc/bluetooth/logs/btsnoop_hci
 system process. That lets it read the root-only snoop log and bundle it into a zip
 for you, so you don't need root and don't need to know where the log lives. This is
 the most reliable method on stock unrooted devices, and the path is the same
-regardless of manufacturer.
+regardless of manufacturer. (Confirmed working with identical in-zip paths across
+Android 10 through 16 on Nexus, Pixel and Motorola devices.)
 
 > **Important**: `bugreport` only *retrieves* what was already logged - it does not
 > start logging. You must have **Bluetooth HCI snoop log** enabled in Developer
