@@ -173,13 +173,54 @@ This method uses Android's built-in Bluetooth HCI (Host Controller Interface) lo
 
 The log file location varies by Android version and manufacturer:
 
-**Common locations**:
+On modern Android, the snoop log lives at `/data/misc/bluetooth/logs/btsnoop_hci.log`, which is **not readable without root** via a normal `adb pull` or a file manager. The bugreport method below works around this without root, so try it first.
+
+**Common locations** (older Android / some manufacturers, for the manual methods):
 - `/sdcard/btsnoop_hci.log` (some Samsung, older Android)
 - `/sdcard/Android/data/btsnoop_hci.log`
-- `/data/misc/bluetooth/logs/btsnoop_hci.log` (requires root)
+- `/data/misc/bluetooth/logs/btsnoop_hci.log` (root-only via normal tools)
 - `/data/misc/bluedroid/btsnoop_hci.log` (older Android)
 
-**Method A: Using ADB (Recommended)**
+**Method A: ADB Bugreport (Recommended - no root, no path guessing)**
+
+`adb bugreport` invokes Android's `dumpstate` service, which runs as a privileged
+system process. That lets it read the root-only snoop log and bundle it into a zip
+for you, so you don't need root and don't need to know where the log lives. This is
+the most reliable method on stock unrooted devices, and the path is the same
+regardless of manufacturer.
+
+> **Important**: `bugreport` only *retrieves* what was already logged - it does not
+> start logging. You must have **Bluetooth HCI snoop log** enabled in Developer
+> Options *before* you connect the app and perform your actions (see Step 3).
+
+1. **Connect your device** to the computer via USB
+2. **Enable USB Debugging** in Developer Options and **authorize the computer** (popup on phone)
+3. **Do your capture first** (Step 3 above) with HCI snoop logging already enabled
+4. **Generate and pull the bugreport** immediately afterwards (the snoop log is a
+   fixed-size rotating buffer, so don't wait):
+   ```bash
+   adb bugreport capture.zip
+   ```
+   This can take 1-3 minutes and produces a zip of tens of MB - that's normal.
+5. **Extract the snoop log** from the zip. It is found at:
+   ```
+   FS/data/misc/bluetooth/logs/btsnoop_hci.log
+   ```
+   (there may be rotated siblings such as `btsnoop_hci.log.last`). For example:
+   ```bash
+   unzip -o capture.zip "FS/data/misc/bluetooth/logs/btsnoop_hci.log*"
+   ```
+   Open `btsnoop_hci.log` directly in Wireshark (Step 5 below).
+6. **Disable HCI snoop** after capturing (it can fill storage)
+
+> **Note**: The main `.txt` file inside the bugreport also contains a small embedded,
+> compressed "btsnooz" snippet. Ignore that - you want the full `btsnoop_hci.log`
+> file under `FS/data/...`, which is the complete capture.
+
+If `adb bugreport` is restricted on your device (rare, mostly heavily customised
+ROMs), fall back to one of the methods below.
+
+**Method B: Using ADB Pull (older Android, or logs on /sdcard)**
 
 1. **Connect your device** to computer via USB
 2. **Enable USB Debugging** in Developer Options
@@ -189,21 +230,21 @@ The log file location varies by Android version and manufacturer:
    # Try common locations
    adb pull /sdcard/btsnoop_hci.log btsnoop_hci.log
    adb pull /sdcard/Android/data/btsnoop_hci.log btsnoop_hci.log
-   
+
    # If you have root access
    adb shell su -c "cp /data/misc/bluetooth/logs/btsnoop_hci.log /sdcard/"
    adb pull /sdcard/btsnoop_hci.log btsnoop_hci.log
    ```
 5. **Disable HCI snoop** after capturing (it can fill storage)
 
-**Method B: Using File Manager App**
+**Method C: Using File Manager App**
 
 1. Install a file manager app (e.g., [Solid Explorer](https://play.google.com/store/apps/details?id=pl.solidexplorer2))
 2. Navigate to the log location
 3. Copy the file to a location you can access
 4. Transfer to your computer (USB, cloud, email, etc.)
 
-**Method C: Android Studio**
+**Method D: Android Studio**
 
 1. Open **Android Studio**
 2. Go to **View** → **Tool Windows** → **Device File Explorer**
@@ -226,7 +267,8 @@ The log file location varies by Android version and manufacturer:
 
 ### Troubleshooting HCI Snoop
 
-**Problem**: Can't find the log file
+**Problem**: Can't find the log file (or `adb pull` gives "Permission denied")
+- **Solution**: Use the **ADB Bugreport** method (Method A) - it reads the root-only log for you, so you don't need to locate it or have root
 - **Solution**: Try all common locations listed above
 - **Solution**: Check if HCI logging is actually enabled
 - **Solution**: Some devices save to different locations - check XDA forums for your device model

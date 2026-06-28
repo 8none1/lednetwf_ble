@@ -1852,10 +1852,23 @@ class LEDNetWFDevice:
         those). Other devices use the original format.
         """
         if self.is_iotbt_segment:
-            # IOTBT segment lamps: 0xE1 0x08 length command (count + segments only)
-            packet = protocol.build_iotbt_segment_led_settings_command(
-                led_count, segments
-            )
+            # IOTBT segment lamps: the 0xE1 0x08 command is only a live preview; the
+            # device persists the value on a separate 0xE0 0x14 "commit" (the app's
+            # Save). Send preview then commit. The device may restart to apply the
+            # new length, dropping the BLE connection briefly - that's expected and
+            # the integration will reconnect on next use.
+            # NOTE: the 0xE0 0x14 commit is a hypothesis from issue #83 pending a
+            # clean capture; if it proves wrong, revert to sending only the preview.
+            preview = protocol.build_iotbt_segment_led_settings_command(led_count, segments)
+            commit = protocol.build_iotbt_segment_led_commit_command(led_count, segments)
+            ok = await self._send_command(preview)
+            if ok:
+                await asyncio.sleep(0.3)
+                ok = await self._send_command(commit)
+            if ok:
+                self._led_count = led_count
+                self._segments = segments
+            return ok
         elif self.effect_type == EffectType.ADDRESSABLE_0x53:
             # Ring / FillLight devices: short 0x62 ring command (count + chip + order,
             # single segment). chip_type uses the ring-specific RingLedType numbering.

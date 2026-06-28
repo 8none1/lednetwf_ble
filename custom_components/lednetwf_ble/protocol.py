@@ -616,6 +616,32 @@ def build_iotbt_segment_led_settings_command(
     return wrap_command(raw_cmd, cmd_family=0x0B)
 
 
+def build_iotbt_segment_led_commit_command(
+    leds_per_segment: int, segment_count: int
+) -> bytearray:
+    """
+    Build the IOTBT segment LED-length COMMIT command (0xE0 0x14 format).
+
+    HYPOTHESIS (GitHub issue #83, samoswall): in the app's capture the 0xE1 0x08
+    command is sent on every keystroke as a *live preview*, and a single 0xE0 0x14
+    command is sent when the user taps *Save*, carrying the final values:
+        E0 14 01 00 00 [leds_per_segment] [segment_count] 00
+    Sending only the 0xE1 0x08 preview (as we did) did not persist the value, hence
+    "the value doesn't change" and the device freezing. This commit is the missing
+    half. UNCONFIRMED until a clean capture of the Save action verifies it.
+    """
+    leds_per_segment = max(1, min(255, leds_per_segment))
+    segment_count = max(1, min(255, segment_count))
+
+    raw_cmd = bytearray([
+        0xE0, 0x14, 0x01, 0x00, 0x00,
+        leds_per_segment & 0xFF,
+        segment_count & 0xFF,
+        0x00,
+    ])
+    return wrap_command(raw_cmd, cmd_family=0x0B)
+
+
 def build_ring_led_settings_command(
     led_count: int, chip_type: int, color_order: int
 ) -> bytearray:
