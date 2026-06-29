@@ -1856,9 +1856,8 @@ class LEDNetWFDevice:
             # device persists the value on a separate 0xE0 0x14 "commit" (the app's
             # Save). Send preview then commit. The device may restart to apply the
             # new length, dropping the BLE connection briefly - that's expected and
-            # the integration will reconnect on next use.
-            # NOTE: the 0xE0 0x14 commit is a hypothesis from issue #83 pending a
-            # clean capture; if it proves wrong, revert to sending only the preview.
+            # the integration will reconnect on next use. Confirmed against the
+            # issue #83 capture and working on the device.
             preview = protocol.build_iotbt_segment_led_settings_command(led_count, segments)
             commit = protocol.build_iotbt_segment_led_commit_command(led_count, segments)
             ok = await self._send_command(preview)

@@ -622,13 +622,14 @@ def build_iotbt_segment_led_commit_command(
     """
     Build the IOTBT segment LED-length COMMIT command (0xE0 0x14 format).
 
-    HYPOTHESIS (GitHub issue #83, samoswall): in the app's capture the 0xE1 0x08
-    command is sent on every keystroke as a *live preview*, and a single 0xE0 0x14
-    command is sent when the user taps *Save*, carrying the final values:
+    Source: GitHub issue #83 (samoswall) HCI capture. The app sends 0xE1 0x08 on
+    every keystroke as a *live preview*, then a single 0xE0 0x14 command when the
+    user taps *Save*, carrying the final values:
         E0 14 01 00 00 [leds_per_segment] [segment_count] 00
-    Sending only the 0xE1 0x08 preview (as we did) did not persist the value, hence
-    "the value doesn't change" and the device freezing. This commit is the missing
-    half. UNCONFIRMED until a clean capture of the Save action verifies it.
+    Sending only the 0xE1 0x08 preview did not persist the value (the value didn't
+    change and the device froze); this commit is the missing half. Confirmed
+    byte-for-byte against the capture (E0 14 01 00 00 3C 01 00 for 60 LEDs / 1
+    segment) and confirmed working on the device by the reporter.
     """
     leds_per_segment = max(1, min(255, leds_per_segment))
     segment_count = max(1, min(255, segment_count))
