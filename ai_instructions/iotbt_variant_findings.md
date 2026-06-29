@@ -273,3 +273,25 @@ remain correct for the payloads.
    ALL writes (incl. power). This is NOT IOTBT-specific — it affects any LEDnetWF device whose
    firmware reaches ble_version 8. **wrap_command should branch on advertised ble_version
    (>=8 → v1 framing).** Likely higher priority than the Telink/segment split.
+
+## IOTBT segment "LEDs per segment" - confirmed fix + read-back format (issue #83, 2026-06-28)
+
+samoswall confirmed setting LEDs-per-segment works in 2.0.1-beta9, and provided a clean HCI
+capture (lednum2.zip) of the Save action.
+
+**Set sequence (app -> device), confirmed byte-for-byte:**
+```
+E1 08 FF 00 <leds> 00 64 3C 64 78 64 00 00 <segs>   <- live PREVIEW, one per keystroke
+E0 14 01 00 00 <leds> <segs> 00                     <- COMMIT, sent on Save (e.g. ...3C 01 00 = 60/1)
+```
+We now send preview then commit (build_iotbt_segment_led_settings_command +
+build_iotbt_segment_led_commit_command). The device may restart to apply (brief disconnect).
+
+**Read-back format (device -> app, 0xEA 0x81 state response payload):**
+- `payload[16]`   = segment count
+- `payload[17:19]` = LEDs per segment, big-endian
+Verified by the 57 -> 60 change in the capture (`...01 00 39...` -> `...01 00 3C...`).
+
+**Decision (Will, 2026):** NOT implementing read-back or sensors for this. The LED count
+stays a write-only config item, as it is now; the read-back data isn't worth surfacing. The
+format is recorded here only in case that changes.
