@@ -848,6 +848,19 @@ class LEDNetWFDevice:
 
         self._is_on = is_on
 
+        # Segment IOTBT devices report their LED configuration in this response:
+        #   payload[16]    = segment count
+        #   payload[17:19] = LEDs per segment (big-endian)
+        # Source: issue #83 (samoswall) capture, verified by the 57->60 change.
+        # Gated on segment: on Telink IOTBT these bytes mean something else.
+        if self.is_iotbt_segment and len(data) >= 19:
+            self._segments = data[16] & 0xFF
+            self._led_count = (data[17] << 8) | data[18]
+            _LOGGER.debug(
+                "DeviceState2 LED config: segments=%d, leds_per_segment=%d",
+                self._segments, self._led_count,
+            )
+
         # NOTE: DeviceState2 format (IOTBT devices) does NOT use standard RGB encoding
         # in bytes 7-9. IOTBT devices use hue-based color commands (0xE2) not RGB.
         # The values in bytes 7-9 are unreliable for color display.
