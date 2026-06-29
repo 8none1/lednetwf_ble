@@ -603,8 +603,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if is_iotbt_segment:
             # IOTBT segment lamps only configure LEDs-per-segment and segment count
             # (LED type / colour order are not exposed by these devices).
-            current_led_count = options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
-            current_segments = options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
+            # Read the device's actual config from its 0xEA 0x81 state response so the
+            # form shows real values rather than the stored/default; the parser fills
+            # device.led_count / device.segments. Falls back if the device is silent.
+            try:
+                await device.query_state_and_wait(timeout=3.0)
+            except Exception:  # noqa: BLE001 - never block the options form on a BLE read
+                _LOGGER.debug("Could not read live LED config for %s", device.name)
+            current_led_count = (
+                device.led_count or options.get(CONF_LED_COUNT, DEFAULT_LED_COUNT)
+            )
+            current_segments = (
+                device.segments or options.get(CONF_SEGMENTS, DEFAULT_SEGMENTS)
+            )
 
             schema_dict.update({
                 vol.Optional(CONF_LED_COUNT, default=current_led_count): NumberSelector(
