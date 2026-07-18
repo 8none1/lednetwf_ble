@@ -151,6 +151,33 @@ for device in ble_data:
 
 ---
 
+### IOTBT Segment Commands - Wrong Transport cmd_family (0x0A vs 0x0B)
+
+**Date**: 18 July 2026
+
+**Error**: `build_iotbt_segment_effect_command` (0xE1 0x01) and
+`build_iotbt_segment_color_command` (0xE1 0x03) wrapped their payloads with
+`cmd_family=0x0A` ("expects response"). The 0x0A was carried over from earlier
+IOTBT builders, not taken from a capture.
+
+**Reality**: In both app captures (issue #83 IOTBT6BA, issue #97 IOTBT4B0) the
+app sends ALL state-changing commands with cmd_family **0x0B** (power 0x3B,
+time sync 0x10, effects 0xE1 0x01) and reserves **0x0A for queries** (the
+0xEA 0x81 state read). On the IOTBT4B0 (issue #97, Vibe Pixie String Lights),
+effects sent with 0x0A did nothing at all, while colour (also 0x0A at the
+time) happened to work - so tolerance of the wrong family byte varies by
+firmware and opcode. The issue #97 capture confirmed our 0xE1 0x01 payloads
+were already byte-identical to the app's (scenes 2-10 verified); the family
+byte was the only difference on the wire.
+
+**Rule of thumb**: when adding a command builder, take the cmd_family byte
+from the capture too, not just the payload. 0x0A = query, 0x0B = command.
+
+**Files fixed**:
+- `custom_components/lednetwf_ble/protocol.py` (both segment builders now 0x0B)
+
+---
+
 ## Products Not in Current Database
 
 These product IDs appear in documentation but NOT in the current app database:
