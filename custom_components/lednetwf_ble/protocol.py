@@ -472,8 +472,10 @@ def build_iotbt_segment_color_command(
             combined_bright & 0xFF   # Brightness (0-100)
         ])
 
-    # No checksum for this command format
-    return wrap_command(raw_cmd, cmd_family=0x0a)
+    # No checksum for this command format.
+    # cmd_family 0x0B matches the app capture (issue #83 findings: `0B E1 03 ...`);
+    # the app uses 0x0A only for queries.
+    return wrap_command(raw_cmd, cmd_family=0x0B)
 
     
 # Per-scene templates for the IOTBT segment effect list (0xE1 0x01 command).
@@ -583,7 +585,10 @@ def build_iotbt_segment_effect_command(effect_id: int, speed: int = 50, brightne
     for b1, b2, b3 in palette:
         payload.extend([0xA1, b1 & 0xFF, b2 & 0xFF, b3 & 0xFF])
 
-    return wrap_command(payload, cmd_family=0x0A)
+    # cmd_family 0x0B (no response) matches the app captures (issues #83, #97).
+    # The app reserves 0x0A for queries (e.g. the 0xEA 0x81 state read); on at
+    # least the IOTBT4B0 (issue #97) an 0x0A-wrapped 0xE1 0x01 has no effect.
+    return wrap_command(payload, cmd_family=0x0B)
 
 
 def build_iotbt_segment_led_settings_command(
