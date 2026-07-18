@@ -163,12 +163,14 @@ IOTBT builders, not taken from a capture.
 **Reality**: In both app captures (issue #83 IOTBT6BA, issue #97 IOTBT4B0) the
 app sends ALL state-changing commands with cmd_family **0x0B** (power 0x3B,
 time sync 0x10, effects 0xE1 0x01) and reserves **0x0A for queries** (the
-0xEA 0x81 state read). On the IOTBT4B0 (issue #97, Vibe Pixie String Lights),
-effects sent with 0x0A did nothing at all, while colour (also 0x0A at the
-time) happened to work - so tolerance of the wrong family byte varies by
-firmware and opcode. The issue #97 capture confirmed our 0xE1 0x01 payloads
-were already byte-identical to the app's (scenes 2-10 verified); the family
-byte was the only difference on the wire.
+0xEA 0x81 state read). Tolerance of the wrong family byte varies by firmware
+and opcode: the IOTBT6BA (#83) accepted 0x0A for both colour AND effects
+(confirmed working), while the IOTBT4B0 (#97) accepted 0x0A for colour but
+ignored 0x0A effects entirely. The issue #97 capture confirmed our 0xE1 0x01
+payloads were already byte-identical to the app's (scenes 2-10 verified); the
+family byte was the only difference on the wire. Switching to 0x0B is safe for
+devices that worked on 0x0A, because 0x0B is what the official app sends to
+these exact devices (proven by both captures).
 
 **Rule of thumb**: when adding a command builder, take the cmd_family byte
 from the capture too, not just the payload. 0x0A = query, 0x0B = command.
