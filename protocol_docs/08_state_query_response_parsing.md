@@ -50,6 +50,14 @@ Never use this byte for brightness calculations.
 | 37    | 0x25 | Effect mode (Symphony/Addressable - effect ID in sub-mode) |
 | 37-56 | 0x25-0x38 | SIMPLE effect mode - mode_type IS the effect ID |
 
+> **These two rows overlap and cannot be told apart from the response alone.**
+> Effect 37 (the first SIMPLE effect) is 0x25, the same value Symphony and
+> Addressable devices use as the effect-mode marker. The device type must
+> decide which reading applies: parse as a SIMPLE effect ID when the device
+> uses SIMPLE effects, otherwise as the 0x25 marker with the ID in sub-mode.
+> Getting this wrong reports effect 37 as some other effect entirely.
+> See `ai_instructions/DISCOVERIES.md` and issue #99.
+
 **SIMPLE Effect Mode (mode_type 37-56):**
 For SIMPLE devices (e.g., product_id 0x33), when running effects like "Yellow gradual change"
 (effect 41 = 0x29), the mode_type byte directly contains the effect ID rather than a mode

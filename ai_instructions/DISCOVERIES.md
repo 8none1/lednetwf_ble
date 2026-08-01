@@ -4,6 +4,70 @@ This document tracks significant findings and corrections made during the revers
 
 ## Documentation Errors Found and Fixed
 
+### Effect ID 37 collides with the 0x25 "effect mode" marker
+
+**Date**: 1 August 2026 (issue #99)
+
+**Problem**: SIMPLE devices report the running effect ID directly in the
+mode_type byte (37-56). The first effect in the list is ID 37, which is 0x25,
+the same value Symphony/Addressable devices use as the "effect mode" marker
+with the real ID in sub_mode.
+
+Both parsers assumed the Symphony meaning unconditionally:
+
+- `parse_state_response()` set `is_effect_mode = mode_type == 0x25` and then
+  took the effect ID from sub_mode. Effect 37 decoded as "effect id = whatever
+  is in sub_mode", and effects 38-56 were not recognised as effect mode at all.
+- `parse_manufacturer_data()` had an `elif mode_type == 0x25` branch that
+  shadowed the correct `elif 37 <= mode_type <= 56` branch below it, then
+  applied a +20 offset guess to sub_mode.
+
+Observed effect: a device running effect 37 was reported as effect 55 with the
+speed read out of an RGB byte.
+
+**Fix**: both parsers now take a `simple_effects` flag from the caller and
+check the 37-56 range first for those devices.
+
+**Note**: sub_mode is NOT reliably the speed on these devices. It is often an
+echo of the power state (0x23=ON, 0x24=OFF), so it is ignored when it holds
+those values. The full byte layout for SIMPLE effect state is still unconfirmed
+and needs a capture.
+
+---
+
+### Speed encode/decode were not inverses (drift on every round-trip)
+
+**Date**: 1 August 2026 (issue #99)
+
+**Problem**: two independent bugs made the effect speed drift every time state
+was read back and reused by the next effect command:
+
+1. Products 0x08 and 0x3C send effects with the inverted 1-31 speed encoding
+   (`scene_data_v2` declares speed min=1 max=31) but were missing from
+   `INVERTED_SPEED_PRODUCT_IDS`, so the reported value was read as a 0-100
+   percentage.
+2. The encoder `1 + int(30 * (1.0 - pct / 100))` truncates the wrong way for
+   some values because of float representation. At 80%, `30 * 0.19999999999999996`
+   is 5.999... which truncates to 5 instead of 6, so it disagreed with the
+   decoder even once the scale was right.
+
+**Fix**: added `convert_speed_to_inverted_31()` using integer arithmetic, used
+by every inverted-speed encoder, and rewrote the decoder to be its exact
+inverse. `decode(encode(pct))` is now a fixed point for all values 1-100.
+
+---
+
+### Product 0x3C (60) was missing from PRODUCT_CAPABILITIES
+
+**Date**: 1 August 2026 (issue #99)
+
+**Problem**: 0x3C is the same Ctrl_Mini_RGB_Mic as 0x08 (identical function
+list in `ble_devices.json`) but had no entry, so it fell through to the
+unknown-product fallback which assumes `EffectType.SYMPHONY` - an entirely
+different command family.
+
+---
+
 ### Product 0x08 (8) - Ctrl_Mini_RGB_Mic
 
 **Date**: 7 December 2025

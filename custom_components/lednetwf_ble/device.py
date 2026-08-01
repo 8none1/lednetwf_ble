@@ -284,6 +284,19 @@ class LEDNetWFDevice:
         return bool(self._capabilities.get("has_dim"))
 
     @property
+    def has_brightness_cmd(self) -> bool:
+        """Return True if device supports the standalone brightness command.
+
+        These devices declare bright_value_v2 (0x3B 0x01) in ble_devices.json,
+        so brightness can be changed without re-sending the colour or the
+        current effect. Dimmer-only devices always use it.
+        """
+        return bool(
+            self._capabilities.get("has_brightness_cmd")
+            or self._capabilities.get("has_dim")
+        )
+
+    @property
     def has_effects(self) -> bool:
         """Return True if device supports effects."""
         return self.effect_type != EffectType.NONE
@@ -913,7 +926,9 @@ class LEDNetWFDevice:
         - White mode: from value1 (byte 5), scaled 0-100 → 0-255
         - Effect mode: from byte 6 (R position), scaled 0-100 → 0-255
         """
-        result = protocol.parse_state_response(data)
+        result = protocol.parse_state_response(
+            data, simple_effects=self.effect_type == EffectType.SIMPLE
+        )
         if not result:
             return
 
@@ -948,7 +963,22 @@ class LEDNetWFDevice:
                 self._effect = self._effect_id_to_name(result["effect_id"])
             self._color_temp_kelvin = None
 
-            if self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
+            if result.get("is_simple_effect_mode"):
+                # SIMPLE devices report the effect ID in mode_type. The meaning
+                # of the remaining bytes in this mode is not yet confirmed for
+                # this family, so deliberately do NOT overwrite brightness or
+                # speed from guessed offsets - that is what previously fed
+                # corrupted values back into the next effect command.
+                # Log the raw bytes so captures can pin the layout down.
+                _LOGGER.debug(
+                    "SIMPLE effect mode: effect_id=%d (0x%02X) -> %s, "
+                    "sub_mode=0x%02X, value1=%d, r=%d, g=%d, b=%d "
+                    "(brightness/speed left unchanged)",
+                    result["effect_id"], result["mode_type"], self._effect,
+                    result["sub_mode"], result["value1"],
+                    result["r"], result["g"], result["b"]
+                )
+            elif self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
                 # True Symphony devices (0xA1-0xAD) effect mode:
                 # - Brightness in byte 6 (R position), 1-100 scale
                 # - Speed in byte 5 (value1), stored as speed_byte × 3
@@ -1018,7 +1048,11 @@ class LEDNetWFDevice:
             brightness_raw = round(v * 255 / 100)
             if brightness_raw == 0 and (r > 0 or g > 0 or b > 0):
                 brightness_raw = 1
-            self._brightness = brightness_raw
+            # Devices with a separate brightness register are sent pure colour,
+            # so the RGB they report back carries no brightness information.
+            # Deriving brightness from it would snap the slider back to 100%.
+            if not self.has_brightness_cmd:
+                self._brightness = brightness_raw
 
             if v > 0 or (r > 0 or g > 0 or b > 0):
                 max_rgb = max(r, g, b)
@@ -1033,8 +1067,8 @@ class LEDNetWFDevice:
             else:
                 self._rgb = (r, g, b)
 
-            _LOGGER.debug("SIMPLE RGB mode (0x61/0x%02X): device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d, color_order=%s",
-                          result["sub_mode"], r, g, b, self._rgb, self._brightness, self._color_order)
+            _LOGGER.debug("SIMPLE RGB mode (0x61/0x%02X): device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d (derived=%d), color_order=%s",
+                          result["sub_mode"], r, g, b, self._rgb, self._brightness, brightness_raw, self._color_order)
 
         elif (self.effect_type == EffectType.SIMPLE and
               result["mode_type"] == 0x03):
@@ -1455,6 +1489,17 @@ class LEDNetWFDevice:
                 "IOTBT device: RGB=(%d,%d,%d), brightness=%d%% -> hue-based color",
                 rgb[0], rgb[1], rgb[2], brightness_pct
             )
+        elif eff_type == EffectType.SIMPLE and self.has_brightness_cmd:
+            # SIMPLE device with a separate brightness register (bright_value_v2).
+            # Send the pure colour and let the 0x3B command carry brightness,
+            # the way the app does it. Scaling here as well would dim twice.
+            scaled_r, scaled_g, scaled_b = rgb
+
+            _LOGGER.debug(
+                "0x31 color command (separate brightness): RGB=(%d,%d,%d), "
+                "brightness=%d sent via 0x3B",
+                rgb[0], rgb[1], rgb[2], brightness
+            )
         elif eff_type == EffectType.SIMPLE:
             # SIMPLE devices use 0x31 command format (9-byte direct RGB)
             # Brightness is applied directly to RGB values (no separate brightness field)
@@ -1482,6 +1527,16 @@ class LEDNetWFDevice:
             )
 
         if await self._send_command(packet):
+            # Devices with a separate brightness register got a pure colour
+            # above, so follow up with the brightness command
+            if eff_type == EffectType.SIMPLE and self.has_brightness_cmd:
+                brightness_pct = (
+                    max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
+                )
+                await self._send_command(
+                    protocol.build_brightness_command_0x3B(brightness_pct)
+                )
+
             self._rgb = rgb
             self._brightness = brightness
             self._effect = None  # Clear effect when setting color
@@ -1539,29 +1594,39 @@ class LEDNetWFDevice:
         return False
 
     async def set_brightness(self, brightness: int = 255) -> bool:
-        """Set brightness for dimmer-only devices.
+        """Set brightness using the standalone brightness command.
 
-        Uses the 0x3B 0x01 standalone brightness command (bright_value_v2)
-        to control single-channel dimmers (Ctrl_Dim, Bulb_Dim, Magnetic_Dim).
+        Uses the 0x3B 0x01 standalone brightness command (bright_value_v2) to
+        control single-channel dimmers (Ctrl_Dim, Bulb_Dim, Magnetic_Dim) and
+        any other device that declares bright_value_v2 in ble_devices.json.
+
+        On devices that support it this keeps brightness orthogonal to the
+        current mode, so changing brightness does not have to re-send the
+        colour or re-trigger the running effect.
 
         Source: ble_dp_cmd.json bright_value_v2, protocol_docs/05_basic_commands.md
 
         Args:
             brightness: Brightness 0-255 (converted to 0-100 percent for protocol)
         """
-        if not self.has_dim:
-            _LOGGER.warning("Device %s does not support dimmer mode", self._name)
+        if not self.has_brightness_cmd:
+            _LOGGER.warning(
+                "Device %s does not support the standalone brightness command",
+                self._name
+            )
             return False
 
         brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
-        _LOGGER.debug("Dimmer brightness: %d/255 -> %d%%", brightness, brightness_pct)
+        _LOGGER.debug("Standalone brightness: %d/255 -> %d%%", brightness, brightness_pct)
         packet = protocol.build_brightness_command_0x3B(brightness_pct)
 
         if await self._send_command(packet):
             self._brightness = brightness
-            self._rgb = None
-            self._color_temp_kelvin = None
-            self._effect = None
+            if self.has_dim:
+                # Dimmer-only device: there is no colour or effect to preserve
+                self._rgb = None
+                self._color_temp_kelvin = None
+                self._effect = None
             self._notify_callbacks()
             return True
         return False
@@ -2214,7 +2279,11 @@ class LEDNetWFDevice:
                     self._name
                 )
 
-        result = protocol.parse_manufacturer_data(manu_data, self._name)
+        result = protocol.parse_manufacturer_data(
+            manu_data,
+            self._name,
+            simple_effects=self.effect_type == EffectType.SIMPLE,
+        )
         if not result:
             return False
 
@@ -2257,6 +2326,11 @@ class LEDNetWFDevice:
                     pure_rgb = (pure_r, pure_g, pure_b)
                 else:
                     pure_rgb = rgb
+
+                # Devices with a separate brightness register are sent pure
+                # colour, so the reported RGB carries no brightness information
+                if self.has_brightness_cmd:
+                    new_brightness = self._brightness
 
                 if pure_rgb != self._rgb or new_brightness != self._brightness:
                     self._rgb = pure_rgb

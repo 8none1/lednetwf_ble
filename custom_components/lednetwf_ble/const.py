@@ -492,6 +492,11 @@ IOTBT_SEGMENT_EFFECTS: Final = {
 # Note: Symphony devices (0xA1-0xA9) do NOT use inverted speed - they use 1=slow, 31=fast
 INVERTED_SPEED_PRODUCT_IDS: Final = {
     0x54, 0x55, 0x62, 0x5B,  # Strip controllers
+    # Ctrl_Mini_RGB_Mic. ble_devices.json declares scene_data_v2 with
+    # speed min=1 max=31 for both product IDs, and we send effects via the
+    # 0x38 command (38{model}{speed}{bright}) with the inverted 1-31 encoding.
+    # The state the device reports back is therefore also 1-31, not 0-100.
+    0x08, 0x3C,
 }
 
 # Product ID to capabilities mapping
@@ -513,8 +518,13 @@ PRODUCT_CAPABILITIES: Final = {
     # Product 0x08 uses rgb_mini_mic protocol (NOT Symphony)
     # Color: 0x31 format, State: wifibleLightStandardV1 (mode 0x61)
     # Source: Expert research confirmed this is NOT a Symphony device
-    8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True, "mic_cmd_format": "simple", "uses_0x38_effects": True, "has_candle_mode": True},  # 0x08
+    8:   {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True, "mic_cmd_format": "simple", "uses_0x38_effects": True, "has_candle_mode": True, "has_brightness_cmd": True},  # 0x08
     16:  {"name": "ChristmasLight", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE},
+    # 0x3C is the same Ctrl_Mini_RGB_Mic device as 0x08 - identical function
+    # list in ble_devices.json (scene_data_v2, colour_data_v2, bright_value_v2,
+    # candle_data, set_mic_info). Without this entry it fell through to the
+    # unknown-product fallback, which assumes EffectType.SYMPHONY.
+    60:  {"name": "Ctrl_Mini_RGB_Mic", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True, "mic_cmd_format": "simple", "uses_0x38_effects": True, "has_candle_mode": True, "has_brightness_cmd": True},  # 0x3C
     51:  {"name": "Ctrl_Mini_RGB", "has_rgb": True, "has_ww": False, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_color_order": True, "uses_0x38_effects": True},
 
     # CCT only - no RGB
@@ -913,6 +923,22 @@ def convert_brightness_from_adv(raw_value: int, product_id: int | None) -> int:
     return max(0, min(255, raw_value))
 
 
+def convert_speed_to_inverted_31(speed_pct: int) -> int:
+    """Convert a UI speed percentage (0-100) to the inverted 1-31 protocol byte.
+
+    1 = fastest, 31 = slowest. Used by the 0x38/0x61 effect commands
+    (scene_data_v2 / scene_data, both declare speed min=1 max=31).
+
+    Integer arithmetic is deliberate: the float form
+    ``1 + int(30 * (1.0 - pct / 100))`` truncates the wrong way for values
+    such as 80% (30 * 0.19999999999999996 = 5.999... -> 5), which made the
+    encoder disagree with convert_speed_from_adv() and let the speed drift
+    on every state round-trip.
+    """
+    speed_pct = max(0, min(100, speed_pct))
+    return max(1, min(31, 1 + (30 * (100 - speed_pct)) // 100))
+
+
 def convert_speed_from_adv(raw_value: int, product_id: int | None) -> int:
     """Convert advertisement speed value to 0-100 percentage scale.
 
@@ -926,15 +952,25 @@ def convert_speed_from_adv(raw_value: int, product_id: int | None) -> int:
     scale = get_speed_scale(product_id)
 
     if scale == ValueScale.INVERTED_31:
-        # 0x54/0x55/0x62/0x5B: inverted 0x01-0x1F scale
-        # 0x01 = 100% (fastest), 0x1F = ~3% (slowest)
-        # Formula from model_0x54.py: speed% = round((0x1f - speed_raw) * (100 - 1) / (0x1f - 0x01) + 1)
+        # 0x08/0x3C/0x54/0x55/0x62/0x5B: inverted 0x01-0x1F scale
+        # 0x01 = 100% (fastest), 0x1F = slowest
+        # This must be the exact inverse of the encoder used when sending
+        # (protocol.build_effect_command_0x38 / commands.build_effect_command):
+        #     raw = 1 + int(30 * (1 - pct / 100))
+        # Otherwise the value drifts every time state is read back and fed
+        # into the next effect command.
+        #
+        # Inverting that: raw-1 <= 0.3 * (100 - pct) < raw, so any pct in
+        # (100 - 10*raw/3, 100 - 10*(raw-1)/3] encodes back to the same byte.
+        # Take the top of that interval so decode(encode(pct)) is a fixed point.
         if raw_value < 0x01:
             raw_value = 0x01
         elif raw_value > 0x1F:
             raw_value = 0x1F
-        speed_pct = round((0x1F - raw_value) * 99 / 30 + 1)
-        return max(0, min(100, speed_pct))
+        speed_pct = int(100 - 10 * (raw_value - 1) / 3)
+        # Floor at 1: set_effect() treats a stored speed of 0 as "unset" and
+        # substitutes 50, which would undo the slowest setting
+        return max(1, min(100, speed_pct))
     elif scale == ValueScale.PERCENT:
         # Value is 0-100 percentage
         # Handle potential overflow (device reporting 0-255 when we expect 0-100)
