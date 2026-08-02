@@ -28,10 +28,51 @@ speed read out of an RGB byte.
 **Fix**: both parsers now take a `simple_effects` flag from the caller and
 check the 37-56 range first for those devices.
 
-**Note**: sub_mode is NOT reliably the speed on these devices. It is often an
-echo of the power state (0x23=ON, 0x24=OFF), so it is ignored when it holds
-those values. The full byte layout for SIMPLE effect state is still unconfirmed
-and needs a capture.
+---
+
+### SIMPLE state layout confirmed by capture (product 0x08)
+
+**Date**: 2 August 2026 (issue #99)
+
+An nRF Connect capture of the 0x81 notifications, cross-checked against the
+commands the integration sent, pins the layout down. Every checksum verified.
+
+Effect running (`mode_type` = effect ID, 37-56):
+
+| Byte | Meaning |
+|------|---------|
+| 3 | Effect ID (37-56). NOT a 0x25 mode marker |
+| 4 | Sub-mode: echo of the power state (0x23=ON, 0x24=OFF) |
+| 5 | **Effect speed, inverted 1-31** |
+| 6-8 | The colour the effect is showing *right now*, changes constantly |
+
+Solid colour:
+
+| Byte | Meaning |
+|------|---------|
+| 3 | 0x61 |
+| 4 | Echo of the power state (0x23/0x24), NOT a colour-mode marker |
+| 5 | Effect speed, retained from the last effect |
+| 6-8 | The solid RGB colour |
+
+Evidence for byte 5 being the speed: sent `38 25 10 1E` (speed byte 0x10),
+response `value1` = 0x10. Sent `38 25 01 01`, response `value1` = 0x01. Sent
+`38 25 1F 01`, response `value1` = 0x1F. Three for three.
+
+**Brightness is not reported at all while an effect is running.** The old docs
+claimed byte 6 was the brightness in effect mode, which is wrong for this
+family - byte 6 is the red channel of the live effect colour.
+
+The advertisement state block mirrors this from byte 14 onwards, so advert
+byte 17 is the speed, not the brightness as previously assumed:
+
+```
+advert[14] = power     <-> response[2]
+advert[15] = mode_type <-> response[3]
+advert[16] = sub_mode  <-> response[4]
+advert[17] = speed     <-> response[5]
+advert[18:21] = rgb    <-> response[6:9]
+```
 
 ---
 

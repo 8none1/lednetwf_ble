@@ -2092,7 +2092,21 @@ def parse_manufacturer_data(
 
             if mode_type == 0x61:
                 # Color or white mode
-                if sub_mode in (0xF0, 0x01, 0x0B):
+                if simple_effects and sub_mode == 0x23:
+                    # SIMPLE devices echo the power state into sub_mode instead
+                    # of a colour-mode marker, so 0x61 + 0x23 is solid colour
+                    # with the RGB in bytes 18-20, not standby.
+                    # Confirmed against a device capture (issue #99).
+                    # Power state comes from data[14] and is handled separately.
+                    # 0x24 (off) is left to the existing handling below - the
+                    # colour bytes are not meaningful with the light off.
+                    color_mode = 'rgb'
+                    rgb = (data[18], data[19], data[20])
+                    _LOGGER.debug(
+                        "%sManu data SIMPLE solid colour (0x61/0x%02X): rgb=%s",
+                        log_prefix, sub_mode, rgb
+                    )
+                elif sub_mode in (0xF0, 0x01, 0x0B):
                     # RGB mode (0xF0=RGB, 0x01/0x0B may be effects/music mode but show as RGB)
                     color_mode = 'rgb'
                     rgb = (data[18], data[19], data[20])
@@ -2140,26 +2154,27 @@ def parse_manufacturer_data(
                 # Checked before the 0x25 branch below because effect 37 is
                 # 0x25 and would otherwise be decoded as "effect mode" with the
                 # ID taken from sub_mode (which is not an effect ID here).
+                #
+                # Layout confirmed against a device capture (issue #99). The
+                # advertisement state block mirrors the 0x81 response from
+                # byte 2 onwards:
+                #   data[16] = sub_mode, always an echo of the power state
+                #              (0x23=ON, 0x24=OFF), NOT the speed
+                #   data[17] = value1 = effect speed, inverted 1-31
+                #   data[18:21] = the live colour the effect is currently
+                #              showing, NOT brightness/speed parameters
+                # Brightness is not reported at all while an effect runs.
                 color_mode = 'effect'
                 effect_id = mode_type
-                brightness_percent = data[17] if data[17] <= 100 else None
-
-                # sub_mode is not reliably the speed on these devices - it is
-                # often an echo of the power state (0x23=ON, 0x24=OFF). Only
-                # treat it as a speed value when it is not a power-state byte.
-                # Scaling (inverted 1-31 vs percent) is applied by the caller
-                # via convert_speed_from_adv().
-                if sub_mode in (0x23, 0x24):
-                    effect_speed = None
-                else:
-                    effect_speed = sub_mode
+                brightness_percent = None
+                effect_speed = data[17]
 
                 state_bytes = ' '.join(f'{b:02X}' for b in data[14:min(25, len(data))])
                 _LOGGER.debug(
                     "%sManu data SIMPLE effect mode: id=%d (0x%02X), sub_mode=0x%02X, "
-                    "bright_pct=%s, raw_speed=%s, state_bytes[14:24]: %s",
-                    log_prefix, effect_id, mode_type, sub_mode,
-                    brightness_percent, effect_speed, state_bytes
+                    "raw_speed=%d, live_rgb=(%d,%d,%d), state_bytes[14:24]: %s",
+                    log_prefix, effect_id, mode_type, sub_mode, effect_speed,
+                    data[18], data[19], data[20], state_bytes
                 )
             elif mode_type == 0x25:
                 # Effect mode - interpretation depends on device type

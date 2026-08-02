@@ -964,19 +964,24 @@ class LEDNetWFDevice:
             self._color_temp_kelvin = None
 
             if result.get("is_simple_effect_mode"):
-                # SIMPLE devices report the effect ID in mode_type. The meaning
-                # of the remaining bytes in this mode is not yet confirmed for
-                # this family, so deliberately do NOT overwrite brightness or
-                # speed from guessed offsets - that is what previously fed
-                # corrupted values back into the next effect command.
-                # Log the raw bytes so captures can pin the layout down.
+                # SIMPLE devices report the effect ID in mode_type, and the
+                # rest of the response means something different to the
+                # Symphony layout. Confirmed against a device capture (#99):
+                #   value1 (byte 5) = effect speed, inverted 1-31
+                #   r/g/b (bytes 6-8) = the colour the effect is showing right
+                #       now, which changes constantly. NOT brightness or speed.
+                # Brightness is not reported while an effect is running, so it
+                # is deliberately left at whatever we last set.
+                self._effect_speed = convert_speed_from_adv(
+                    result["value1"], self._product_id
+                )
                 _LOGGER.debug(
                     "SIMPLE effect mode: effect_id=%d (0x%02X) -> %s, "
-                    "sub_mode=0x%02X, value1=%d, r=%d, g=%d, b=%d "
-                    "(brightness/speed left unchanged)",
+                    "sub_mode=0x%02X, raw_speed=%d -> %d%%, live_rgb=(%d,%d,%d) "
+                    "(brightness left unchanged at %d)",
                     result["effect_id"], result["mode_type"], self._effect,
-                    result["sub_mode"], result["value1"],
-                    result["r"], result["g"], result["b"]
+                    result["sub_mode"], result["value1"], self._effect_speed,
+                    result["r"], result["g"], result["b"], self._brightness
                 )
             elif self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
                 # True Symphony devices (0xA1-0xAD) effect mode:
@@ -1493,13 +1498,13 @@ class LEDNetWFDevice:
             # SIMPLE device with a separate brightness register (bright_value_v2).
             # Send the pure colour and let the 0x3B command carry brightness,
             # the way the app does it. Scaling here as well would dim twice.
-            scaled_r, scaled_g, scaled_b = rgb
-
             _LOGGER.debug(
                 "0x31 color command (separate brightness): RGB=(%d,%d,%d), "
                 "brightness=%d sent via 0x3B",
                 rgb[0], rgb[1], rgb[2], brightness
             )
+
+            packet = protocol.build_color_command_0x31(rgb[0], rgb[1], rgb[2])
         elif eff_type == EffectType.SIMPLE:
             # SIMPLE devices use 0x31 command format (9-byte direct RGB)
             # Brightness is applied directly to RGB values (no separate brightness field)
@@ -2332,11 +2337,18 @@ class LEDNetWFDevice:
                 if self.has_brightness_cmd:
                     new_brightness = self._brightness
 
+                # The device is showing a solid colour, so any effect we think
+                # is running has ended. Clear it even when the colour itself
+                # has not changed, otherwise a stale effect keeps the colour
+                # picker hidden and makes brightness re-trigger the effect.
+                if self._effect is not None:
+                    self._effect = None
+                    changed = True
+
                 if pure_rgb != self._rgb or new_brightness != self._brightness:
                     self._rgb = pure_rgb
                     self._brightness = new_brightness
                     self._color_temp_kelvin = None  # Clear CCT when in RGB mode
-                    self._effect = None  # Clear effect when in RGB mode
                     changed = True
                     _LOGGER.debug("Advertisement updated RGB: device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d (HSV v=%d)",
                                   r, g, b, self._rgb, self._brightness, v)

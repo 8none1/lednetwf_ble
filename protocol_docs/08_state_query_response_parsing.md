@@ -61,13 +61,29 @@ Never use this byte for brightness calculations.
 **SIMPLE Effect Mode (mode_type 37-56):**
 For SIMPLE devices (e.g., product_id 0x33), when running effects like "Yellow gradual change"
 (effect 41 = 0x29), the mode_type byte directly contains the effect ID rather than a mode
-indicator. The sub-mode byte may contain speed or other parameters.
+indicator.
 
-Example: Device running "Yellow gradual change" reports:
+Confirmed against a product 0x08 capture (issue #99), all checksums verified:
 
-- mode_type = 0x29 (41) = effect ID
-- sub_mode = 0x23 (35) = possibly speed
-- byte 17 = brightness percentage
+| Byte | Meaning |
+|------|---------|
+| 3 | Effect ID (37-56) |
+| 4 | Sub-mode: **echo of the power state** (0x23=ON, 0x24=OFF), not a parameter |
+| 5 | **Effect speed, inverted 1-31** (1 = fastest) |
+| 6-8 | The colour the effect is showing at that instant, changes constantly |
+
+Byte 5 was verified by sending three known speeds and reading the response
+back: `38 25 10 1E` → value1 0x10, `38 25 01 01` → value1 0x01,
+`38 25 1F 01` → value1 0x1F.
+
+> **Brightness is NOT reported while an effect is running.** An earlier version
+> of this document said byte 6 held the brightness in effect mode. That is
+> wrong for this family: byte 6 is the red channel of the live effect colour.
+> Treat brightness as unknown and keep the last commanded value.
+
+The same applies to solid colour on these devices: sub-mode is the power-state
+echo rather than one of the colour-mode markers in the table below, and the
+RGB is in bytes 6-8 as usual.
 
 ### Sub-mode (Byte 4) Values (when Mode Type = 0x61)
 

@@ -215,8 +215,13 @@ class LEDNetWFLight(LightEntity):
             # so user can adjust foreground color while staying in the effect
             if self._device.is_in_settled_effect():
                 return ColorMode.RGB
-            # For other effects, report brightness mode (no color picker)
-            return ColorMode.BRIGHTNESS
+            # For other effects there is no meaningful colour to report.
+            # Only claim BRIGHTNESS if we actually declared it as supported:
+            # HA rejects a color_mode that is not in supported_color_modes,
+            # which leaves the entity with no colour picker at all. RGB-only
+            # devices fall through to the normal handling below.
+            if ColorMode.BRIGHTNESS in self._attr_supported_color_modes:
+                return ColorMode.BRIGHTNESS
         if self._device.color_temp_kelvin and self._device.has_color_temp:
             return ColorMode.COLOR_TEMP
         if self._device.rgb_color and self._device.has_rgb:
