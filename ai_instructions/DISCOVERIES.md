@@ -101,11 +101,26 @@ corrupting the brightness. At a point where the device's brightness was 100
 (set via `3b 01 ... 64`) and its speed was 31 (set via `38 25 1F 01`), advert
 byte 17 read 31. Directly discriminating, not just positional alignment.
 
-**Brightness being absent from the effect-mode response is an argument from
-absence**, so treat it as weaker than the above. It rests on the brightness
-value appearing nowhere in the response in either discriminating case (no
-0x1E in the first, no 0x01 in the third), plus the two `0x3B` brightness
-commands producing no state notification at all.
+**Brightness is confirmed absent from the effect-mode state.** A later
+controlled test settled this: with an effect running and everything else left
+alone, brightness was changed to 15%, and the advertisement state block was
+byte-for-byte identical before and after.
+
+```
+before 15%   23 38 23 10 FF 00 00 00 03 00 F0
+after  15%   23 38 23 10 FF 00 00 00 03 00 F0   <- identical
+later        23 38 23 10 FF 00 FF 00 03 00 F0   <- only the live RGB moved
+```
+
+Consequence: **brightness changed by any other controller (IR remote, the
+app) cannot be detected while an effect is running.** The device does not
+report it. This is a protocol limitation, not something to fix.
+
+Note also that the RGB reported in effect mode is the effect's nominal colour
+at full intensity, NOT scaled by brightness - the (255,0,0) above was
+captured while the light was at 15%. This is the opposite of solid-colour
+mode, where the reported RGB *is* brightness-scaled. Never derive brightness
+from the RGB in effect mode.
 
 **Brightness is not reported at all while an effect is running.** The old docs
 claimed byte 6 was the brightness in effect mode, which is wrong for this
