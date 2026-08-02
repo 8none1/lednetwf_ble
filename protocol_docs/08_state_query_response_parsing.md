@@ -50,16 +50,42 @@ Never use this byte for brightness calculations.
 | 37    | 0x25 | Effect mode (Symphony/Addressable - effect ID in sub-mode) |
 | 37-56 | 0x25-0x38 | SIMPLE effect mode - mode_type IS the effect ID |
 
+> **These two rows overlap and cannot be told apart from the response alone.**
+> Effect 37 (the first SIMPLE effect) is 0x25, the same value Symphony and
+> Addressable devices use as the effect-mode marker. The device type must
+> decide which reading applies: parse as a SIMPLE effect ID when the device
+> uses SIMPLE effects, otherwise as the 0x25 marker with the ID in sub-mode.
+> Getting this wrong reports effect 37 as some other effect entirely.
+> See `ai_instructions/DISCOVERIES.md` and issue #99.
+
 **SIMPLE Effect Mode (mode_type 37-56):**
 For SIMPLE devices (e.g., product_id 0x33), when running effects like "Yellow gradual change"
 (effect 41 = 0x29), the mode_type byte directly contains the effect ID rather than a mode
-indicator. The sub-mode byte may contain speed or other parameters.
+indicator.
 
-Example: Device running "Yellow gradual change" reports:
+Confirmed against a product 0x08 capture (issue #99), all checksums verified:
 
-- mode_type = 0x29 (41) = effect ID
-- sub_mode = 0x23 (35) = possibly speed
-- byte 17 = brightness percentage
+| Byte | Meaning |
+|------|---------|
+| 3 | Effect ID (37-56) |
+| 4 | Sub-mode: **echo of the power state** (0x23=ON, 0x24=OFF), not a parameter |
+| 5 | **Effect speed, inverted 1-31** (1 = fastest) |
+| 6-8 | The colour the effect is showing at that instant, changes constantly |
+
+Byte 5 was verified by pairing outbound `38{model}{speed}{bright}` commands
+with the response they produced. A pair only discriminates when speed and
+bright differ: `38 25 10 1E` (speed 16, bright 30) → value1 16, and
+`38 25 1F 01` (speed 31, bright 1) → value1 31. Both match the speed. A third
+pair, `38 25 01 01`, has both fields set to 1 and so proves nothing.
+
+> **Brightness is NOT reported while an effect is running.** An earlier version
+> of this document said byte 6 held the brightness in effect mode. That is
+> wrong for this family: byte 6 is the red channel of the live effect colour.
+> Treat brightness as unknown and keep the last commanded value.
+
+The same applies to solid colour on these devices: sub-mode is the power-state
+echo rather than one of the colour-mode markers in the table below, and the
+RGB is in bytes 6-8 as usual.
 
 ### Sub-mode (Byte 4) Values (when Mode Type = 0x61)
 

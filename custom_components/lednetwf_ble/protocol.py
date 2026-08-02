@@ -13,7 +13,13 @@ import colorsys
 import logging
 from typing import Tuple
 
-from .const import EffectType, MIN_KELVIN, MAX_KELVIN, SYMPHONY_BG_COLOR_EFFECTS
+from .const import (
+    EffectType,
+    MIN_KELVIN,
+    MAX_KELVIN,
+    SYMPHONY_BG_COLOR_EFFECTS,
+    convert_speed_to_inverted_31,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1037,9 +1043,7 @@ def build_candle_command(
     Note: Speed is inverted like SIMPLE effects: 1=fastest, 31=slowest
     """
     # Convert UI speed (0-100, 100=fast) to protocol speed (1-31, 1=fast)
-    # Formula: 1 + (30 * (1.0 - speed/100))
-    speed_byte = 1 + int(30 * (1.0 - max(0, min(100, speed)) / 100))
-    speed_byte = max(1, min(31, speed_byte))
+    speed_byte = convert_speed_to_inverted_31(speed)
 
     brightness = max(1, min(100, brightness))
 
@@ -1108,8 +1112,7 @@ def build_effect_command_0x38(
     Note: Speed is inverted like 0x61: 1=fastest, 31=slowest
     """
     # Convert UI speed (0-100, 100=fast) to protocol speed (1-31, 1=fast)
-    speed_byte = 1 + int(30 * (1.0 - max(0, min(100, speed)) / 100))
-    speed_byte = max(1, min(31, speed_byte))
+    speed_byte = convert_speed_to_inverted_31(speed)
 
     brightness = max(1, min(100, brightness))
 
@@ -1243,8 +1246,7 @@ def build_effect_command(
             # Formula from ad/e.java: protocol_speed = 1 + (30 * (1.0 - ui_speed/100))
             # 100% UI speed (fast) → 1 (fastest protocol value)
             # 0% UI speed (slow) → 31 (slowest protocol value)
-            speed_byte = 1 + int(30 * (1.0 - speed / 100))
-            speed_byte = max(1, min(31, speed_byte))  # Clamp to valid range
+            speed_byte = convert_speed_to_inverted_31(speed)
             return build_effect_command_0x61(effect_id, speed_byte)
     return None
 
@@ -1493,9 +1495,17 @@ def build_sound_reactive_symphony(
 # RESPONSE PARSING
 # =============================================================================
 
-def parse_state_response(data: bytes) -> dict | None:
+def parse_state_response(data: bytes, simple_effects: bool = False) -> dict | None:
     """
     Parse state query response (0x81 format).
+
+    Args:
+        data: Raw 0x81 response
+        simple_effects: True when the device uses SIMPLE effects (IDs 37-56).
+            Those devices report the running effect ID directly in the mode_type
+            byte instead of using the 0x25 "effect mode" marker with the ID in
+            sub_mode. Effect 37 is 0x25, so the two encodings collide on the
+            first effect in the list and must be disambiguated by device type.
 
     Source: tc/b.java method c() lines 47-62, DeviceState.java
     Source: protocol_docs/08_state_query_response_parsing.md
@@ -1540,9 +1550,17 @@ def parse_state_response(data: bytes) -> dict | None:
 
     # Byte 3: Mode type
     # 0x61 (97) = static color/white mode
-    # 0x25 (37) = effect mode
+    # 0x25 (37) = effect mode (Symphony/Addressable - effect ID is in sub_mode)
+    # 37-56    = SIMPLE effect mode - mode_type IS the effect ID
     mode_type = data[3]
-    is_effect_mode = mode_type == 0x25
+
+    # SIMPLE devices report the effect ID in mode_type. Only trust that reading
+    # when the caller told us this is a SIMPLE device, otherwise 0x25 keeps its
+    # original meaning for Symphony/Addressable devices.
+    is_simple_effect_mode = simple_effects and 37 <= mode_type <= 56
+    is_effect_mode = is_simple_effect_mode or (
+        not simple_effects and mode_type == 0x25
+    )
 
     # Byte 4: Sub-mode
     # In static mode: 0xF0/0x01/0x0B = RGB, 0x0F = white
@@ -1575,13 +1593,20 @@ def parse_state_response(data: bytes) -> dict | None:
     led_version = data[10]  # This is LED/firmware version, NOT brightness
     cw = data[11]
 
-    # Effect ID is sub_mode when in effect mode
-    effect_id = sub_mode if is_effect_mode else None
+    # Effect ID is sub_mode when in effect mode, except for SIMPLE devices
+    # where mode_type itself is the effect ID
+    if is_simple_effect_mode:
+        effect_id = mode_type
+    elif is_effect_mode:
+        effect_id = sub_mode
+    else:
+        effect_id = None
 
     return {
         "is_on": is_on,
         "mode_type": mode_type,
         "sub_mode": sub_mode,
+        "is_simple_effect_mode": is_simple_effect_mode,
         "value1": value1,
         "r": r,
         "g": g,
@@ -1791,7 +1816,8 @@ def product_id_from_name(device_name: str | None) -> int | None:
 
 def parse_manufacturer_data(
     manu_data: dict[int, bytes],
-    device_name: str | None = None
+    device_name: str | None = None,
+    simple_effects: bool = False,
 ) -> dict | None:
     """
     Parse manufacturer data from BLE advertisement (Format B - bleak).
@@ -1813,6 +1839,10 @@ def parse_manufacturer_data(
     Args:
         manu_data: Manufacturer data dict from BLE advertisement
         device_name: Optional device name for log message context
+        simple_effects: True when the device uses SIMPLE effects (IDs 37-56),
+            which report the running effect ID in the mode_type byte rather
+            than via the 0x25 effect-mode marker. Effect 37 is 0x25, so the
+            encodings collide and must be disambiguated by device type.
 
     Returns dict with:
         - product_id: int
@@ -2062,7 +2092,21 @@ def parse_manufacturer_data(
 
             if mode_type == 0x61:
                 # Color or white mode
-                if sub_mode in (0xF0, 0x01, 0x0B):
+                if simple_effects and sub_mode == 0x23:
+                    # SIMPLE devices echo the power state into sub_mode instead
+                    # of a colour-mode marker, so 0x61 + 0x23 is solid colour
+                    # with the RGB in bytes 18-20, not standby.
+                    # Confirmed against a device capture (issue #99).
+                    # Power state comes from data[14] and is handled separately.
+                    # 0x24 (off) is left to the existing handling below - the
+                    # colour bytes are not meaningful with the light off.
+                    color_mode = 'rgb'
+                    rgb = (data[18], data[19], data[20])
+                    _LOGGER.debug(
+                        "%sManu data SIMPLE solid colour (0x61/0x%02X): rgb=%s",
+                        log_prefix, sub_mode, rgb
+                    )
+                elif sub_mode in (0xF0, 0x01, 0x0B):
                     # RGB mode (0xF0=RGB, 0x01/0x0B may be effects/music mode but show as RGB)
                     color_mode = 'rgb'
                     rgb = (data[18], data[19], data[20])
@@ -2105,6 +2149,33 @@ def parse_manufacturer_data(
                         "state_bytes[14:24]: %s",
                         log_prefix, sub_mode, state_bytes
                     )
+            elif simple_effects and 37 <= mode_type <= 56:
+                # SIMPLE effect mode - mode_type IS the effect ID (37-56).
+                # Checked before the 0x25 branch below because effect 37 is
+                # 0x25 and would otherwise be decoded as "effect mode" with the
+                # ID taken from sub_mode (which is not an effect ID here).
+                #
+                # Layout confirmed against a device capture (issue #99). The
+                # advertisement state block mirrors the 0x81 response from
+                # byte 2 onwards:
+                #   data[16] = sub_mode, always an echo of the power state
+                #              (0x23=ON, 0x24=OFF), NOT the speed
+                #   data[17] = value1 = effect speed, inverted 1-31
+                #   data[18:21] = the live colour the effect is currently
+                #              showing, NOT brightness/speed parameters
+                # Brightness is not reported at all while an effect runs.
+                color_mode = 'effect'
+                effect_id = mode_type
+                brightness_percent = None
+                effect_speed = data[17]
+
+                state_bytes = ' '.join(f'{b:02X}' for b in data[14:min(25, len(data))])
+                _LOGGER.debug(
+                    "%sManu data SIMPLE effect mode: id=%d (0x%02X), sub_mode=0x%02X, "
+                    "raw_speed=%d, live_rgb=(%d,%d,%d), state_bytes[14:24]: %s",
+                    log_prefix, effect_id, mode_type, sub_mode, effect_speed,
+                    data[18], data[19], data[20], state_bytes
+                )
             elif mode_type == 0x25:
                 # Effect mode - interpretation depends on device type
                 # For Symphony/Addressable: sub_mode is the effect ID directly

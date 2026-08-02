@@ -4,6 +4,174 @@ This document tracks significant findings and corrections made during the revers
 
 ## Documentation Errors Found and Fixed
 
+### Effect ID 37 collides with the 0x25 "effect mode" marker
+
+**Date**: 1 August 2026 (issue #99)
+
+**Problem**: SIMPLE devices report the running effect ID directly in the
+mode_type byte (37-56). The first effect in the list is ID 37, which is 0x25,
+the same value Symphony/Addressable devices use as the "effect mode" marker
+with the real ID in sub_mode.
+
+Both parsers assumed the Symphony meaning unconditionally:
+
+- `parse_state_response()` set `is_effect_mode = mode_type == 0x25` and then
+  took the effect ID from sub_mode. Effect 37 decoded as "effect id = whatever
+  is in sub_mode", and effects 38-56 were not recognised as effect mode at all.
+- `parse_manufacturer_data()` had an `elif mode_type == 0x25` branch that
+  shadowed the correct `elif 37 <= mode_type <= 56` branch below it, then
+  applied a +20 offset guess to sub_mode.
+
+Observed effect: a device running effect 37 was reported as effect 55 with the
+speed read out of an RGB byte.
+
+**Fix**: both parsers now take a `simple_effects` flag from the caller and
+check the 37-56 range first for those devices.
+
+---
+
+### Never pair 0x3B brightness with a colour command (write-without-response)
+
+**Date**: 2 August 2026 (issue #99)
+
+Commands are sent write-without-response (`_send_command` defaults to
+`with_response=False`), so two writes issued back to back land about 1ms
+apart. If a `0x3B 0x01` brightness command follows a `0x31` colour command
+that closely, the device has not yet committed the colour, and `0x3B`
+rescales the colour it *still holds* - cancelling the change.
+
+Observed on a green light asked repeatedly for pure blue: the blue channel
+crept 0 -> 16 -> 28 over three attempts and never arrived, because each `0x31`
+only had ~1ms to act before the `0x3B` reasserted green.
+
+`bright_value_v2` itself is fine and does exactly what it says. Verified in
+the same log: 1% on a green light gives `(0,3,0)`, 100% restores `(0,255,0)`.
+
+**Rules:**
+
+- Brightness-only change: use `0x3B 0x01`. One command, no colour re-send, and
+  it does not re-trigger a running effect.
+- Colour change: put the brightness in the scaled RGB of the `0x31` and send
+  nothing else. The device stores the scaled RGB anyway, which is why
+  deriving brightness back out of the reported RGB via HSV is correct.
+
+---
+
+### SIMPLE state layout confirmed by capture (product 0x08)
+
+**Date**: 2 August 2026 (issue #99)
+
+An nRF Connect capture of the 0x81 notifications, cross-checked against the
+commands the integration sent, pins the layout down. Every checksum verified.
+
+Effect running (`mode_type` = effect ID, 37-56):
+
+| Byte | Meaning |
+|------|---------|
+| 3 | Effect ID (37-56). NOT a 0x25 mode marker |
+| 4 | Sub-mode: echo of the power state (0x23=ON, 0x24=OFF) |
+| 5 | **Effect speed, inverted 1-31** |
+| 6-8 | The colour the effect is showing *right now*, changes constantly |
+
+Solid colour:
+
+| Byte | Meaning |
+|------|---------|
+| 3 | 0x61 |
+| 4 | Echo of the power state (0x23/0x24), NOT a colour-mode marker |
+| 5 | Effect speed, retained from the last effect |
+| 6-8 | The solid RGB colour |
+
+**Evidence for byte 5 being the speed.** The outbound command is
+`38{model}{speed}{bright}`, so a pair only tells us anything when speed and
+bright differ:
+
+| Sent | speed | bright | Response `value1` | Discriminates? |
+|------|-------|--------|-------------------|----------------|
+| `38 25 10 1E` | 16 | 30 | 16 | Yes - matches speed |
+| `38 25 01 01` | 1 | 1 | 1 | No - both fields are 1 |
+| `38 25 1F 01` | 31 | 1 | 31 | Yes - matches speed |
+
+Two discriminating observations, and they are complementary: the speed is the
+larger of the two fields in one and the smaller in the other, so the match is
+not an artefact of always picking the bigger byte.
+
+The advertisement byte is separately confirmed, and this is the one that was
+corrupting the brightness. At a point where the device's brightness was 100
+(set via `3b 01 ... 64`) and its speed was 31 (set via `38 25 1F 01`), advert
+byte 17 read 31. Directly discriminating, not just positional alignment.
+
+**Brightness is confirmed absent from the effect-mode state.** A later
+controlled test settled this: with an effect running and everything else left
+alone, brightness was changed to 15%, and the advertisement state block was
+byte-for-byte identical before and after.
+
+```
+before 15%   23 38 23 10 FF 00 00 00 03 00 F0
+after  15%   23 38 23 10 FF 00 00 00 03 00 F0   <- identical
+later        23 38 23 10 FF 00 FF 00 03 00 F0   <- only the live RGB moved
+```
+
+Consequence: **brightness changed by any other controller (IR remote, the
+app) cannot be detected while an effect is running.** The device does not
+report it. This is a protocol limitation, not something to fix.
+
+Note also that the RGB reported in effect mode is the effect's nominal colour
+at full intensity, NOT scaled by brightness - the (255,0,0) above was
+captured while the light was at 15%. This is the opposite of solid-colour
+mode, where the reported RGB *is* brightness-scaled. Never derive brightness
+from the RGB in effect mode.
+
+**Brightness is not reported at all while an effect is running.** The old docs
+claimed byte 6 was the brightness in effect mode, which is wrong for this
+family - byte 6 is the red channel of the live effect colour.
+
+The advertisement state block mirrors this from byte 14 onwards, so advert
+byte 17 is the speed, not the brightness as previously assumed:
+
+```
+advert[14] = power     <-> response[2]
+advert[15] = mode_type <-> response[3]
+advert[16] = sub_mode  <-> response[4]
+advert[17] = speed     <-> response[5]
+advert[18:21] = rgb    <-> response[6:9]
+```
+
+---
+
+### Speed encode/decode were not inverses (drift on every round-trip)
+
+**Date**: 1 August 2026 (issue #99)
+
+**Problem**: two independent bugs made the effect speed drift every time state
+was read back and reused by the next effect command:
+
+1. Products 0x08 and 0x3C send effects with the inverted 1-31 speed encoding
+   (`scene_data_v2` declares speed min=1 max=31) but were missing from
+   `INVERTED_SPEED_PRODUCT_IDS`, so the reported value was read as a 0-100
+   percentage.
+2. The encoder `1 + int(30 * (1.0 - pct / 100))` truncates the wrong way for
+   some values because of float representation. At 80%, `30 * 0.19999999999999996`
+   is 5.999... which truncates to 5 instead of 6, so it disagreed with the
+   decoder even once the scale was right.
+
+**Fix**: added `convert_speed_to_inverted_31()` using integer arithmetic, used
+by every inverted-speed encoder, and rewrote the decoder to be its exact
+inverse. `decode(encode(pct))` is now a fixed point for all values 1-100.
+
+---
+
+### Product 0x3C (60) was missing from PRODUCT_CAPABILITIES
+
+**Date**: 1 August 2026 (issue #99)
+
+**Problem**: 0x3C is the same Ctrl_Mini_RGB_Mic as 0x08 (identical function
+list in `ble_devices.json`) but had no entry, so it fell through to the
+unknown-product fallback which assumes `EffectType.SYMPHONY` - an entirely
+different command family.
+
+---
+
 ### Product 0x08 (8) - Ctrl_Mini_RGB_Mic
 
 **Date**: 7 December 2025

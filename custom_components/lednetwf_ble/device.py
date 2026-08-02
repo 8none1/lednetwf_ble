@@ -284,6 +284,25 @@ class LEDNetWFDevice:
         return bool(self._capabilities.get("has_dim"))
 
     @property
+    def has_brightness_cmd(self) -> bool:
+        """Return True if a brightness-only change can use the 0x3B command.
+
+        These devices declare bright_value_v2 (0x3B 0x01) in ble_devices.json.
+        The command rescales whatever colour the device currently holds, so it
+        changes brightness without re-sending the colour or re-triggering the
+        running effect. Dimmer-only devices always use it.
+
+        It is ONLY for brightness-only changes. Do not pair it with a colour
+        command: both are write-without-response and the 0x3B lands before the
+        device has committed the colour, re-applying the old one (issue #99).
+        Colour changes carry their own brightness in the scaled RGB.
+        """
+        return bool(
+            self._capabilities.get("has_brightness_cmd")
+            or self._capabilities.get("has_dim")
+        )
+
+    @property
     def has_effects(self) -> bool:
         """Return True if device supports effects."""
         return self.effect_type != EffectType.NONE
@@ -913,7 +932,9 @@ class LEDNetWFDevice:
         - White mode: from value1 (byte 5), scaled 0-100 → 0-255
         - Effect mode: from byte 6 (R position), scaled 0-100 → 0-255
         """
-        result = protocol.parse_state_response(data)
+        result = protocol.parse_state_response(
+            data, simple_effects=self.effect_type == EffectType.SIMPLE
+        )
         if not result:
             return
 
@@ -948,7 +969,27 @@ class LEDNetWFDevice:
                 self._effect = self._effect_id_to_name(result["effect_id"])
             self._color_temp_kelvin = None
 
-            if self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
+            if result.get("is_simple_effect_mode"):
+                # SIMPLE devices report the effect ID in mode_type, and the
+                # rest of the response means something different to the
+                # Symphony layout. Confirmed against a device capture (#99):
+                #   value1 (byte 5) = effect speed, inverted 1-31
+                #   r/g/b (bytes 6-8) = the colour the effect is showing right
+                #       now, which changes constantly. NOT brightness or speed.
+                # Brightness is not reported while an effect is running, so it
+                # is deliberately left at whatever we last set.
+                self._effect_speed = convert_speed_from_adv(
+                    result["value1"], self._product_id
+                )
+                _LOGGER.debug(
+                    "SIMPLE effect mode: effect_id=%d (0x%02X) -> %s, "
+                    "sub_mode=0x%02X, raw_speed=%d -> %d%%, live_rgb=(%d,%d,%d) "
+                    "(brightness left unchanged at %d)",
+                    result["effect_id"], result["mode_type"], self._effect,
+                    result["sub_mode"], result["value1"], self._effect_speed,
+                    result["r"], result["g"], result["b"], self._brightness
+                )
+            elif self.effect_type == EffectType.SYMPHONY and self.has_ic_config:
                 # True Symphony devices (0xA1-0xAD) effect mode:
                 # - Brightness in byte 6 (R position), 1-100 scale
                 # - Speed in byte 5 (value1), stored as speed_byte × 3
@@ -1018,6 +1059,9 @@ class LEDNetWFDevice:
             brightness_raw = round(v * 255 / 100)
             if brightness_raw == 0 and (r > 0 or g > 0 or b > 0):
                 brightness_raw = 1
+            # The device stores the brightness-scaled RGB (a 1% green reports
+            # back as (0,3,0)), so deriving brightness from it via HSV is
+            # correct even when brightness was set with the 0x3B command.
             self._brightness = brightness_raw
 
             if v > 0 or (r > 0 or g > 0 or b > 0):
@@ -1033,8 +1077,8 @@ class LEDNetWFDevice:
             else:
                 self._rgb = (r, g, b)
 
-            _LOGGER.debug("SIMPLE RGB mode (0x61/0x%02X): device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d, color_order=%s",
-                          result["sub_mode"], r, g, b, self._rgb, self._brightness, self._color_order)
+            _LOGGER.debug("SIMPLE RGB mode (0x61/0x%02X): device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d (derived=%d), color_order=%s",
+                          result["sub_mode"], r, g, b, self._rgb, self._brightness, brightness_raw, self._color_order)
 
         elif (self.effect_type == EffectType.SIMPLE and
               result["mode_type"] == 0x03):
@@ -1481,6 +1525,13 @@ class LEDNetWFDevice:
                 rgb[0], rgb[1], rgb[2], brightness_pct
             )
 
+        # NOTE: do not follow this up with a 0x3B brightness command. These are
+        # write-without-response, so the second write lands ~1ms later, before
+        # the device has committed the colour. 0x3B re-applies the *previously*
+        # stored colour at the new brightness and cancels the colour change.
+        # Observed in issue #99: repeated "set blue" on a green light only
+        # nudged blue 0 -> 16 -> 28 and never arrived. Brightness belongs in
+        # the scaled RGB above, which is what the device stores anyway.
         if await self._send_command(packet):
             self._rgb = rgb
             self._brightness = brightness
@@ -1539,29 +1590,39 @@ class LEDNetWFDevice:
         return False
 
     async def set_brightness(self, brightness: int = 255) -> bool:
-        """Set brightness for dimmer-only devices.
+        """Set brightness using the standalone brightness command.
 
-        Uses the 0x3B 0x01 standalone brightness command (bright_value_v2)
-        to control single-channel dimmers (Ctrl_Dim, Bulb_Dim, Magnetic_Dim).
+        Uses the 0x3B 0x01 standalone brightness command (bright_value_v2) to
+        control single-channel dimmers (Ctrl_Dim, Bulb_Dim, Magnetic_Dim) and
+        any other device that declares bright_value_v2 in ble_devices.json.
+
+        On devices that support it this keeps brightness orthogonal to the
+        current mode, so changing brightness does not have to re-send the
+        colour or re-trigger the running effect.
 
         Source: ble_dp_cmd.json bright_value_v2, protocol_docs/05_basic_commands.md
 
         Args:
             brightness: Brightness 0-255 (converted to 0-100 percent for protocol)
         """
-        if not self.has_dim:
-            _LOGGER.warning("Device %s does not support dimmer mode", self._name)
+        if not self.has_brightness_cmd:
+            _LOGGER.warning(
+                "Device %s does not support the standalone brightness command",
+                self._name
+            )
             return False
 
         brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
-        _LOGGER.debug("Dimmer brightness: %d/255 -> %d%%", brightness, brightness_pct)
+        _LOGGER.debug("Standalone brightness: %d/255 -> %d%%", brightness, brightness_pct)
         packet = protocol.build_brightness_command_0x3B(brightness_pct)
 
         if await self._send_command(packet):
             self._brightness = brightness
-            self._rgb = None
-            self._color_temp_kelvin = None
-            self._effect = None
+            if self.has_dim:
+                # Dimmer-only device: there is no colour or effect to preserve
+                self._rgb = None
+                self._color_temp_kelvin = None
+                self._effect = None
             self._notify_callbacks()
             return True
         return False
@@ -2214,7 +2275,11 @@ class LEDNetWFDevice:
                     self._name
                 )
 
-        result = protocol.parse_manufacturer_data(manu_data, self._name)
+        result = protocol.parse_manufacturer_data(
+            manu_data,
+            self._name,
+            simple_effects=self.effect_type == EffectType.SIMPLE,
+        )
         if not result:
             return False
 
@@ -2258,11 +2323,18 @@ class LEDNetWFDevice:
                 else:
                     pure_rgb = rgb
 
+                # The device is showing a solid colour, so any effect we think
+                # is running has ended. Clear it even when the colour itself
+                # has not changed, otherwise a stale effect keeps the colour
+                # picker hidden and makes brightness re-trigger the effect.
+                if self._effect is not None:
+                    self._effect = None
+                    changed = True
+
                 if pure_rgb != self._rgb or new_brightness != self._brightness:
                     self._rgb = pure_rgb
                     self._brightness = new_brightness
                     self._color_temp_kelvin = None  # Clear CCT when in RGB mode
-                    self._effect = None  # Clear effect when in RGB mode
                     changed = True
                     _LOGGER.debug("Advertisement updated RGB: device_rgb=(%d,%d,%d), pure_rgb=%s, brightness=%d (HSV v=%d)",
                                   r, g, b, self._rgb, self._brightness, v)

@@ -215,8 +215,13 @@ class LEDNetWFLight(LightEntity):
             # so user can adjust foreground color while staying in the effect
             if self._device.is_in_settled_effect():
                 return ColorMode.RGB
-            # For other effects, report brightness mode (no color picker)
-            return ColorMode.BRIGHTNESS
+            # For other effects there is no meaningful colour to report.
+            # Only claim BRIGHTNESS if we actually declared it as supported:
+            # HA rejects a color_mode that is not in supported_color_modes,
+            # which leaves the entity with no colour picker at all. RGB-only
+            # devices fall through to the normal handling below.
+            if ColorMode.BRIGHTNESS in self._attr_supported_color_modes:
+                return ColorMode.BRIGHTNESS
         if self._device.color_temp_kelvin and self._device.has_color_temp:
             return ColorMode.COLOR_TEMP
         if self._device.rgb_color and self._device.has_rgb:
@@ -240,10 +245,13 @@ class LEDNetWFLight(LightEntity):
             brightness = self._device.brightness or 255
 
         # Handle effect
+        # Pass brightness through: HA scenes send effect and brightness in the
+        # same call, and previously the brightness was silently dropped, so
+        # applying a scene did not reproduce the state it captured.
         if ATTR_EFFECT in kwargs:
             effect = kwargs[ATTR_EFFECT]
             if effect:
-                await self._device.set_effect(effect)
+                await self._device.set_effect(effect, brightness=brightness)
                 return
 
         # Handle color temperature
@@ -259,7 +267,13 @@ class LEDNetWFLight(LightEntity):
         # Just brightness change - resend current color/mode
         # IMPORTANT: Check effect FIRST since it takes priority over stored color values
         if ATTR_BRIGHTNESS in kwargs:
-            if self._device.effect:
+            if self._device.has_brightness_cmd:
+                # Device has a standalone brightness command (bright_value_v2),
+                # so brightness can be changed without disturbing the current
+                # colour or effect. Avoids re-sending the effect, which is what
+                # made brightness changes jump into an effect on 0x08/0x3C.
+                await self._device.set_brightness(brightness)
+            elif self._device.effect:
                 # Re-send effect with new brightness
                 await self._device.set_effect(
                     self._device.effect,

@@ -21,6 +21,7 @@ import re
 from typing import Any
 
 from .capabilities import CAPABILITIES, CommandTemplate, FunctionCapability
+from .const import convert_speed_to_inverted_31
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -263,7 +264,7 @@ def build_effect_command(
         }
     elif func == "scene_data_v2":
         # v2: inverted 1-31 + brightness
-        protocol_speed = 1 + int(30 * (1.0 - speed / 100.0))
+        protocol_speed = convert_speed_to_inverted_31(speed)
         params = {
             "model": effect_id,
             "speed": protocol_speed,
@@ -271,7 +272,7 @@ def build_effect_command(
         }
     else:
         # Legacy scene_data: inverted 1-31, no brightness
-        protocol_speed = 1 + int(30 * (1.0 - speed / 100.0))
+        protocol_speed = convert_speed_to_inverted_31(speed)
         params = {
             "model": effect_id,
             "speed": protocol_speed,
