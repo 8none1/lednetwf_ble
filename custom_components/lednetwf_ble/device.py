@@ -285,11 +285,17 @@ class LEDNetWFDevice:
 
     @property
     def has_brightness_cmd(self) -> bool:
-        """Return True if device supports the standalone brightness command.
+        """Return True if a brightness-only change can use the 0x3B command.
 
-        These devices declare bright_value_v2 (0x3B 0x01) in ble_devices.json,
-        so brightness can be changed without re-sending the colour or the
-        current effect. Dimmer-only devices always use it.
+        These devices declare bright_value_v2 (0x3B 0x01) in ble_devices.json.
+        The command rescales whatever colour the device currently holds, so it
+        changes brightness without re-sending the colour or re-triggering the
+        running effect. Dimmer-only devices always use it.
+
+        It is ONLY for brightness-only changes. Do not pair it with a colour
+        command: both are write-without-response and the 0x3B lands before the
+        device has committed the colour, re-applying the old one (issue #99).
+        Colour changes carry their own brightness in the scaled RGB.
         """
         return bool(
             self._capabilities.get("has_brightness_cmd")
@@ -1053,11 +1059,10 @@ class LEDNetWFDevice:
             brightness_raw = round(v * 255 / 100)
             if brightness_raw == 0 and (r > 0 or g > 0 or b > 0):
                 brightness_raw = 1
-            # Devices with a separate brightness register are sent pure colour,
-            # so the RGB they report back carries no brightness information.
-            # Deriving brightness from it would snap the slider back to 100%.
-            if not self.has_brightness_cmd:
-                self._brightness = brightness_raw
+            # The device stores the brightness-scaled RGB (a 1% green reports
+            # back as (0,3,0)), so deriving brightness from it via HSV is
+            # correct even when brightness was set with the 0x3B command.
+            self._brightness = brightness_raw
 
             if v > 0 or (r > 0 or g > 0 or b > 0):
                 max_rgb = max(r, g, b)
@@ -1494,17 +1499,6 @@ class LEDNetWFDevice:
                 "IOTBT device: RGB=(%d,%d,%d), brightness=%d%% -> hue-based color",
                 rgb[0], rgb[1], rgb[2], brightness_pct
             )
-        elif eff_type == EffectType.SIMPLE and self.has_brightness_cmd:
-            # SIMPLE device with a separate brightness register (bright_value_v2).
-            # Send the pure colour and let the 0x3B command carry brightness,
-            # the way the app does it. Scaling here as well would dim twice.
-            _LOGGER.debug(
-                "0x31 color command (separate brightness): RGB=(%d,%d,%d), "
-                "brightness=%d sent via 0x3B",
-                rgb[0], rgb[1], rgb[2], brightness
-            )
-
-            packet = protocol.build_color_command_0x31(rgb[0], rgb[1], rgb[2])
         elif eff_type == EffectType.SIMPLE:
             # SIMPLE devices use 0x31 command format (9-byte direct RGB)
             # Brightness is applied directly to RGB values (no separate brightness field)
@@ -1531,17 +1525,14 @@ class LEDNetWFDevice:
                 rgb[0], rgb[1], rgb[2], brightness_pct
             )
 
+        # NOTE: do not follow this up with a 0x3B brightness command. These are
+        # write-without-response, so the second write lands ~1ms later, before
+        # the device has committed the colour. 0x3B re-applies the *previously*
+        # stored colour at the new brightness and cancels the colour change.
+        # Observed in issue #99: repeated "set blue" on a green light only
+        # nudged blue 0 -> 16 -> 28 and never arrived. Brightness belongs in
+        # the scaled RGB above, which is what the device stores anyway.
         if await self._send_command(packet):
-            # Devices with a separate brightness register got a pure colour
-            # above, so follow up with the brightness command
-            if eff_type == EffectType.SIMPLE and self.has_brightness_cmd:
-                brightness_pct = (
-                    max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
-                )
-                await self._send_command(
-                    protocol.build_brightness_command_0x3B(brightness_pct)
-                )
-
             self._rgb = rgb
             self._brightness = brightness
             self._effect = None  # Clear effect when setting color
@@ -2331,11 +2322,6 @@ class LEDNetWFDevice:
                     pure_rgb = (pure_r, pure_g, pure_b)
                 else:
                     pure_rgb = rgb
-
-                # Devices with a separate brightness register are sent pure
-                # colour, so the reported RGB carries no brightness information
-                if self.has_brightness_cmd:
-                    new_brightness = self._brightness
 
                 # The device is showing a solid colour, so any effect we think
                 # is running has ended. Clear it even when the colour itself

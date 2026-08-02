@@ -30,6 +30,33 @@ check the 37-56 range first for those devices.
 
 ---
 
+### Never pair 0x3B brightness with a colour command (write-without-response)
+
+**Date**: 2 August 2026 (issue #99)
+
+Commands are sent write-without-response (`_send_command` defaults to
+`with_response=False`), so two writes issued back to back land about 1ms
+apart. If a `0x3B 0x01` brightness command follows a `0x31` colour command
+that closely, the device has not yet committed the colour, and `0x3B`
+rescales the colour it *still holds* - cancelling the change.
+
+Observed on a green light asked repeatedly for pure blue: the blue channel
+crept 0 -> 16 -> 28 over three attempts and never arrived, because each `0x31`
+only had ~1ms to act before the `0x3B` reasserted green.
+
+`bright_value_v2` itself is fine and does exactly what it says. Verified in
+the same log: 1% on a green light gives `(0,3,0)`, 100% restores `(0,255,0)`.
+
+**Rules:**
+
+- Brightness-only change: use `0x3B 0x01`. One command, no colour re-send, and
+  it does not re-trigger a running effect.
+- Colour change: put the brightness in the scaled RGB of the `0x31` and send
+  nothing else. The device stores the scaled RGB anyway, which is why
+  deriving brightness back out of the reported RGB via HSV is correct.
+
+---
+
 ### SIMPLE state layout confirmed by capture (product 0x08)
 
 **Date**: 2 August 2026 (issue #99)
