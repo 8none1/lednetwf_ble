@@ -72,9 +72,11 @@ Confirmed against a product 0x08 capture (issue #99), all checksums verified:
 | 5 | **Effect speed, inverted 1-31** (1 = fastest) |
 | 6-8 | The colour the effect is showing at that instant, changes constantly |
 
-Byte 5 was verified by sending three known speeds and reading the response
-back: `38 25 10 1E` → value1 0x10, `38 25 01 01` → value1 0x01,
-`38 25 1F 01` → value1 0x1F.
+Byte 5 was verified by pairing outbound `38{model}{speed}{bright}` commands
+with the response they produced. A pair only discriminates when speed and
+bright differ: `38 25 10 1E` (speed 16, bright 30) → value1 16, and
+`38 25 1F 01` (speed 31, bright 1) → value1 31. Both match the speed. A third
+pair, `38 25 01 01`, has both fields set to 1 and so proves nothing.
 
 > **Brightness is NOT reported while an effect is running.** An earlier version
 > of this document said byte 6 held the brightness in effect mode. That is

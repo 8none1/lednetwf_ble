@@ -55,9 +55,30 @@ Solid colour:
 | 5 | Effect speed, retained from the last effect |
 | 6-8 | The solid RGB colour |
 
-Evidence for byte 5 being the speed: sent `38 25 10 1E` (speed byte 0x10),
-response `value1` = 0x10. Sent `38 25 01 01`, response `value1` = 0x01. Sent
-`38 25 1F 01`, response `value1` = 0x1F. Three for three.
+**Evidence for byte 5 being the speed.** The outbound command is
+`38{model}{speed}{bright}`, so a pair only tells us anything when speed and
+bright differ:
+
+| Sent | speed | bright | Response `value1` | Discriminates? |
+|------|-------|--------|-------------------|----------------|
+| `38 25 10 1E` | 16 | 30 | 16 | Yes - matches speed |
+| `38 25 01 01` | 1 | 1 | 1 | No - both fields are 1 |
+| `38 25 1F 01` | 31 | 1 | 31 | Yes - matches speed |
+
+Two discriminating observations, and they are complementary: the speed is the
+larger of the two fields in one and the smaller in the other, so the match is
+not an artefact of always picking the bigger byte.
+
+The advertisement byte is separately confirmed, and this is the one that was
+corrupting the brightness. At a point where the device's brightness was 100
+(set via `3b 01 ... 64`) and its speed was 31 (set via `38 25 1F 01`), advert
+byte 17 read 31. Directly discriminating, not just positional alignment.
+
+**Brightness being absent from the effect-mode response is an argument from
+absence**, so treat it as weaker than the above. It rests on the brightness
+value appearing nowhere in the response in either discriminating case (no
+0x1E in the first, no 0x01 in the third), plus the two `0x3B` brightness
+commands producing no state notification at all.
 
 **Brightness is not reported at all while an effect is running.** The old docs
 claimed byte 6 was the brightness in effect mode, which is wrong for this
