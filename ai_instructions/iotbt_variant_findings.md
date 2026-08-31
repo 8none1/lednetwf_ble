@@ -258,7 +258,61 @@ remain correct for the payloads.
 
    Post-update service data: `80 08 08 65 F0 17 58 12 00 C2 1D 06 01 05`.
    `led_version` moved 0x0E→0x1D, adjacent to 6BA's 0x1F, so it no longer separates Telink from
-   segment. **Conclusion: auto-detecting Telink vs segment from advert fields is not reliable
+   segment.
+
+   **ADDENDUM 31 August 2026: `led_version` is mislabelled. Byte 10 is the firmware
+   version.** That is why it "shifted": a firmware update is exactly what changes a firmware
+   version byte. 0x0E -> 0x1D is 14 -> 29, and the app's own gates talk in those terms
+   (`deviceMinVer: 10`, "firmware >= 11"). An LED *hardware* version would not move.
+
+   The 14-byte service data appears to be the standard 16-byte ZengGe layout with the 2-byte
+   manufacturer prefix (`mfr_hi`/`mfr_lo`) omitted. Every field then lines up:
+
+   | byte | our name | 16-byte layout, shifted by -2 | evidence |
+   |------|----------|-------------------------------|----------|
+   | 0 | sta | sta | same in both |
+   | 1 | ble_version | ble_version (16-byte byte 3) | same in both, and it did bump 7->8 |
+   | 2-7 | mac | mac (bytes 4-9) | same in both |
+   | 8-9 | mesh_address | **product_id, big-endian** (bytes 10-11) | unchanged across the update |
+   | 10 | led_version | **firmware_ver_lo** (byte 12) | 14 -> 29 across a firmware update |
+   | 11 | mode | **led_version** (byte 13) | 3 -> 6; see caveat |
+   | 12 | flags | check_key + fw_hi (byte 14) | unchanged (fw stayed under 64) |
+   | 13 | flags2 | firmware_flag (byte 15) | unchanged |
+
+   Confidence, honestly:
+
+   - **HIGH that byte 10 is a firmware version, not an LED version.** The 14 -> 29 jump on a
+     firmware update is decisive, and it is the single fact that explains why every
+     advert-based discriminator we tried kept moving.
+   - **MEDIUM on the whole -2 realignment.** All eight fields line up and nothing contradicts
+     it, but it is inferred from the layout, not read out of the app's parser. I did not find
+     the app code that decodes the 14-byte form; `ADVModel` is the non-connect mesh ADV
+     format, which is a different thing.
+   - **LOW on bytes 8-9 being product_id.** They are invariant across the firmware update,
+     but so is a provisioned mesh address, so invariance proves nothing either way. Both
+     observed values are small ints with a zero high byte, which fits both readings.
+     `0x00AD` = 173 is a real product ID in `ble_devices.json` (an `hc3` matrix/curtain
+     device that declares `switch_led_v3` **and** `colour_data_v3`, which is suggestive for a
+     segment lamp), but `0x00C2` = 194 is in neither our `PRODUCT_CAPABILITIES` nor
+     `ble_devices.json`.
+
+   **Why this matters more than the immediate PR**: if bytes 8-9 really are the product ID,
+   then `parse_service_data` is discarding it and hardcoding `product_id: 0` for every
+   14-byte device, and `parse_manufacturer_data` separately forces `product_id = 0x00` for
+   any device whose name starts "IOTBT" (protocol.py:1869, an early return that also throws
+   away ble_version and all state). We would be manufacturing the very ambiguity that the
+   flags2 heuristic then tries to guess its way out of. Worth resolving before adding more
+   heuristics.
+
+   **Cheapest way to settle it**: one advert from a device whose real product ID we can
+   corroborate another way. PR #101's reporter has been asked for their raw service data;
+   their byte 10 is 68, which under this reading means firmware 68, and their bytes 8-9 would
+   be the test case. Failing that, find the 14-byte parse in the app's Dart/Java.
+
+   Byte 11 caveat: under the realignment it is `led_version`, and it moved 3 -> 6 on the
+   update, which an LED hardware version arguably should not. Either the vendor bumped it, or
+   the realignment is off. It is still a better discriminator candidate than byte 10, and it
+   was originally dismissed only on the guess that "mode" meant operating state. **Conclusion: auto-detecting Telink vs segment from advert fields is not reliable
    across firmware. The manual override (Auto/Telink/Segment) must be the primary mechanism.**
 
 2. **Transport framing changed, keyed to `ble_version`:**

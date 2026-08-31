@@ -392,6 +392,39 @@ capture tells you nothing about whether the device is Telink. Only `0xE2`
 
 ---
 
+### `led_version` in the 14-byte IOTBT service data is really the firmware version
+
+**Date**: 31 August 2026
+
+**Error**: `parse_service_data`'s 14-byte branch names byte 10 `led_version` and byte 11
+`mode`. Months of IOTBT variant investigation then tried to use `led_version` to tell the
+Telink and segment command families apart, and kept finding it unstable.
+
+**Reality**: byte 10 is a firmware version. The IOTBT812 was captured before and after a
+real firmware update and byte 10 went `0x0E` -> `0x1D`, i.e. 14 -> 29. That is what a
+firmware version byte does; an LED *hardware* version would not move. This one relabelling
+explains the whole "the discriminator keeps shifting" saga.
+
+The 14-byte format looks like the standard 16-byte ZengGe service data with the 2-byte
+manufacturer prefix omitted, which realigns every field by -2 and would make bytes 8-9
+(currently `mesh_address`) the **product ID**. Confidence is high on byte 10, medium on the
+realignment as a whole, and low on the product-ID reading specifically, since a provisioned
+mesh address is also invariant and also a small integer. Full evidence table and the cheapest
+way to settle it: `ai_instructions/iotbt_variant_findings.md`.
+
+**Why it matters**: we force `product_id = 0x00` for these devices in two independent places
+(`parse_service_data` hardcodes it, and `parse_manufacturer_data` forces it for any
+"IOTBT"-prefixed name at protocol.py:1869 via an early return that also discards ble_version
+and all state). If the real product ID is sitting in bytes 8-9, we are discarding it and then
+guessing the command family from a heuristic on a mislabelled neighbouring byte. Resolve this
+before adding more detection heuristics.
+
+**Not yet fixed in code.** Renaming the fields is easy; deciding whether to trust bytes 8-9
+as a product ID is not, and getting it wrong would misassign capabilities for every IOTBT
+device. Needs one corroborated advert first.
+
+---
+
 ### `hue // 2` and the packed hue+sat high byte are the same byte
 
 **Date**: 31 August 2026 (PR #101)
