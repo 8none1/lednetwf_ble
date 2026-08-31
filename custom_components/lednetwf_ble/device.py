@@ -32,6 +32,7 @@ from .const import (
     convert_speed_from_adv,
     SOUND_REACTIVE_MARKER,
     CANDLE_MODE_MARKER,
+    IOTBT_V3_PRODUCT_IDS,
 )
 from . import protocol
 from .capabilities import CAPABILITIES
@@ -118,6 +119,10 @@ class LEDNetWFDevice:
         # is_iotbt_segment property applies any manual protocol override on top.
         self._is_iotbt_segment: bool = False
         self._iotbt_flags2: int | None = None
+        # The device's real product ID from advertisement bytes 8-9. IOTBT devices
+        # have product_id 0x00 forced for capability lookup, so this is kept
+        # separately and used only to pick the command family.
+        self._advertised_product_id: int | None = None
         # Manual protocol override: None = auto, "telink" or "segment" force it.
         self._iotbt_protocol_override: str | None = None
 
@@ -525,6 +530,12 @@ class LEDNetWFDevice:
             return True
         if self._iotbt_protocol_override in ("telink", "v3"):
             return False
+        # A product ID known to need v3 is not a segment device, whatever the
+        # flags2 heuristic thinks. Without this, a v3 product that happened to
+        # have the flags2 bit set would be routed to segment commands, because
+        # the segment branch is checked first in the colour dispatch.
+        if self._advertised_product_id in IOTBT_V3_PRODUCT_IDS:
+            return False
         return self._is_iotbt_segment
 
     @property
@@ -539,12 +550,24 @@ class LEDNetWFDevice:
 
         Source: User protocol capture - JM Zengge ZJ-BBLA-RGBWW device.
 
-        No reliable auto-detection is known for this variant yet (it
-        currently falls through to the Telink 0xE2 path by default,
-        which silently fails on the hardware). Manual override via
-        'v3' is required until a detection signal is found.
+        Detection: the device's real product ID, read from advertisement
+        bytes 8-9 (see protocol.parse_service_data). Products listed in
+        IOTBT_V3_PRODUCT_IDS declare colour_data_v3 in the vendor app's
+        own device database, so this is the vendor's classification
+        rather than a heuristic on a neighbouring byte. The manual 'v3'
+        override still works for devices not yet in that set.
+
+        Note this is checked before is_iotbt_segment in the colour
+        dispatch, and is_iotbt_segment returns False for a 'v3'
+        override, so the two cannot both win.
         """
-        return self._iotbt_protocol_override == "v3"
+        if self._iotbt_protocol_override == "v3":
+            return True
+        # An explicit telink/segment override wins over auto-detection, same as
+        # for is_iotbt_segment.
+        if self._iotbt_protocol_override in ("telink", "segment"):
+            return False
+        return self._advertised_product_id in IOTBT_V3_PRODUCT_IDS
 
     def set_iotbt_protocol_override(self, override: str | None) -> None:
         """Set the manual IOTBT protocol override ('auto'/None, 'telink', 'segment', 'v3')."""
@@ -2271,6 +2294,17 @@ class LEDNetWFDevice:
                     # manual override, applied in the is_iotbt_segment property, wins.
                     if sd_result.get("flags2") is not None:
                         self._iotbt_flags2 = sd_result["flags2"]
+                    adv_pid = sd_result.get("advertised_product_id")
+                    if adv_pid is not None and adv_pid != self._advertised_product_id:
+                        self._advertised_product_id = adv_pid
+                        # Logged at info because it is the single most useful field
+                        # to have in a bug report for these devices, and it is the
+                        # one we spent months guessing at from neighbouring bytes.
+                        _LOGGER.info(
+                            "[%s] Advertised product ID: 0x%02X (%d). Capabilities "
+                            "still resolved as product 0x00 for IOTBT devices.",
+                            self._name, adv_pid, adv_pid,
+                        )
                     if self.is_iotbt:
                         seg = (
                             protocol.is_iotbt_segment_from_flags2(sd_result.get("flags2"))
