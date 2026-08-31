@@ -279,29 +279,31 @@ def iotbt_brightness_to_level(brightness_0_255: int, gamma: float = 2.2, max_lev
 
 def build_iotbt_color_command(r: int, g: int, b: int, brightness: int = 100) -> bytearray:
     """
-    Build IOTBT color command (0xE2 format).
+    Build IOTBT color command (0xE0 0x01 format) - VERIFIED via real BLE capture
+    against a product_id=0x00 IOTBT device (Briturn app / JM Zengge ZJ-BBLA-RGBWW).
 
-    Source: protocol_docs/17_device_configuration.md - Color Command (0xE2)
-    Source: model_iotbt_0x80.py - set_color() method
+    The previously-used 0xE2 format (see git history / protocol_docs/17_device_configuration.md)
+    was sourced from a product_id=0x80 device and does not apply to product_id=0x00
+    hardware - commands are accepted over BLE with no error but silently ignored by
+    the device firmware.
 
-    Format: [0xE2, 0x0B, hue, brightness_byte]
-    - hue: Quantized hue (1-240, 0=white) using 24-bin quantization
-    - brightness_byte: 0xE0 | level (level = 0-31, gamma corrected)
+    Format: [0xE0, 0x01, 0x00, 0xA1, hue_byte, sat, val, 0x00,0x00,0x00,0x00, 0x14,0x00,0x00]
+    - hue_byte: degrees / 2 (0-180)
+    - sat: 0-100
+    - val/brightness: 0-100
 
-    Uses cmd_family=0x0a (expects response)
+    Confirmed working against real hardware across the full hue range:
+    red (hue=0 deg -> byte 0x00), yellow (hue=60 deg -> byte 0x1E),
+    blue (hue=240 deg -> byte 0x78). Brightness verified 5-100%.
+
+    Uses cmd_family=0x0a.
     """
-    # Convert RGB to IOTBT quantized hue
-    hue = rgb_to_iotbt_hue(r, g, b)
-
-    # Convert brightness from 0-100 to 0-255 for gamma calculation
-    brightness_255 = int(brightness * 255 / 100)
-
-    # Apply gamma correction (2.2) for proper brightness perception
-    level = iotbt_brightness_to_level(brightness_255)
-    level = max(0, min(31, level))
-    brightness_byte = 0xE0 | level
-
-    raw_cmd = bytearray([0xE2, 0x0B, hue & 0xFF, brightness_byte])
+    h, s, v = rgb_to_hsv(r, g, b)
+    hue_byte = (h // 2) & 0xFF
+    sat_byte = max(0, min(100, s)) & 0xFF
+    val_byte = max(0, min(100, brightness)) & 0xFF
+    raw_cmd = bytearray([0xE0, 0x01, 0x00, 0xA1, hue_byte, sat_byte, val_byte,
+                          0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00])
     return wrap_command(raw_cmd, cmd_family=0x0a)
 
 
