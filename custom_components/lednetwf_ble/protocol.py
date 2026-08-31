@@ -279,30 +279,69 @@ def iotbt_brightness_to_level(brightness_0_255: int, gamma: float = 2.2, max_lev
 
 def build_iotbt_color_command(r: int, g: int, b: int, brightness: int = 100) -> bytearray:
     """
-    Build IOTBT color command (0xE0 0x01 format) - VERIFIED via real BLE capture
-    against a product_id=0x00 IOTBT device (Briturn app / JM Zengge ZJ-BBLA-RGBWW).
+    Build IOTBT color command (0xE2 format).
 
-    The previously-used 0xE2 format (see git history / protocol_docs/17_device_configuration.md)
-    was sourced from a product_id=0x80 device and does not apply to product_id=0x00
-    hardware - commands are accepted over BLE with no error but silently ignored by
-    the device firmware.
+    Source: protocol_docs/17_device_configuration.md - Color Command (0xE2)
+    Source: model_iotbt_0x80.py - set_color() method
 
-    Format: [0xE0, 0x01, 0x00, 0xA1, hue_byte, sat, val, 0x00,0x00,0x00,0x00, 0x14,0x00,0x00]
-    - hue_byte: degrees / 2 (0-180)
-    - sat: 0-100
-    - val/brightness: 0-100
+    Format: [0xE2, 0x0B, hue, brightness_byte]
+    - hue: Quantized hue (1-240, 0=white) using 24-bin quantization
+    - brightness_byte: 0xE0 | level (level = 0-31, gamma corrected)
 
-    Confirmed working against real hardware across the full hue range:
-    red (hue=0 deg -> byte 0x00), yellow (hue=60 deg -> byte 0x1E),
-    blue (hue=240 deg -> byte 0x78). Brightness verified 5-100%.
+    Uses cmd_family=0x0a (expects response)
+    """
+    # Convert RGB to IOTBT quantized hue
+    hue = rgb_to_iotbt_hue(r, g, b)
 
-    Uses cmd_family=0x0a.
+    # Convert brightness from 0-100 to 0-255 for gamma calculation
+    brightness_255 = int(brightness * 255 / 100)
+
+    # Apply gamma correction (2.2) for proper brightness perception
+    level = iotbt_brightness_to_level(brightness_255)
+    level = max(0, min(31, level))
+    brightness_byte = 0xE0 | level
+
+    raw_cmd = bytearray([0xE2, 0x0B, hue & 0xFF, brightness_byte])
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+def build_iotbt_v3_color_command(r: int, g: int, b: int, brightness: int = 100) -> bytearray:
+    """
+    Build IOTBT "v3" color command (0xE0 0x01 format).
+
+    A third IOTBT variant, distinct from both the Telink 0xE2 command
+    and the segment 0xE1 0x03 command. Confirmed via a real BLE traffic
+    capture from the vendor app (Briturn) against a product_id=0x00
+    device that does not respond to 0xE2, 0x3B, or 0x31.
+
+    Despite looking different at first, this uses the SAME packed
+    hue+saturation encoding as build_color_command_0x3B (see
+    pack_hue_saturation) - just wrapped in what the vendor app's own
+    command templates (wifi_dp_cmd.json) call the "v3" envelope:
+
+        switch_led_v3: e001{preview}3b{open}0000000000{gradient}{gradient}{gradient}{delay}{delay}
+
+    Format: [0xE0, 0x01, 0x00, 0xA1, hs_hi, hs_lo, val, 0,0,0,0, time, 0,0]
+    - hs_hi/hs_lo: packed hue+saturation, see pack_hue_saturation()
+    - val: brightness/value 0-100
+    - time: transition/gradient time; 0x14 observed in the capture,
+      matches the position of temp_value_v2's gradient field
+
+    cmd_family=0x0a confirmed directly from the captured packet header
+    (byte 7), not assumed - the vendor app's needChecksum:false for the
+    e0 family does not imply cmd_family=0x0b here.
+
+    Verified against real hardware across the full hue range (red 0deg,
+    yellow 60deg, blue 240deg) and brightness 5-100%.
     """
     h, s, v = rgb_to_hsv(r, g, b)
-    hue_byte = (h // 2) & 0xFF
-    sat_byte = max(0, min(100, s)) & 0xFF
-    val_byte = max(0, min(100, brightness)) & 0xFF
-    raw_cmd = bytearray([0xE0, 0x01, 0x00, 0xA1, hue_byte, sat_byte, val_byte,
+    hs_hi, hs_lo = pack_hue_saturation(h, s)
+    # Match the segment builder's brightness*v/100 scaling (protocol.py,
+    # build_iotbt_segment_color_command) rather than dropping the HSV
+    # value component, since the caller passes unscaled RGB plus a
+    # separate brightness percentage.
+    val = max(0, min(100, round(brightness * v / 100)))
+    raw_cmd = bytearray([0xE0, 0x01, 0x00, 0xA1, hs_hi, hs_lo, val,
                           0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00])
     return wrap_command(raw_cmd, cmd_family=0x0a)
 
@@ -694,6 +733,25 @@ def build_ring_led_settings_command(
 # COLOR COMMANDS
 # =============================================================================
 
+def pack_hue_saturation(h: int, s: int) -> Tuple[int, int]:
+    """
+    Pack hue (0-360) and saturation (0-100) into two bytes as used by
+    both the standard 0x3B command and the IOTBT v3 (0xE0 0x01) command.
+
+    packed = (hue << 7) | saturation, split into hi/lo bytes.
+    Since saturation is always < 128, the hi byte is always exactly
+    hue // 2 (floor), and the lo byte carries saturation plus, for odd
+    hue values, a +128 offset. Shared here so the two callers can't
+    drift apart - see PR discussion for how build_iotbt_v3_color_command
+    was originally (and incorrectly) reimplemented as a standalone
+    "hue/2" encoding before this was recognised as the same packing.
+    """
+    packed = (h << 7) | s
+    hs_hi = (packed >> 8) & 0xFF
+    hs_lo = packed & 0xFF
+    return hs_hi, hs_lo
+
+
 def build_color_command_0x3B(r: int, g: int, b: int, brightness: int = 100) -> bytearray:
     """
     Build color command using 0x3B format (BLE v5+, Symphony).
@@ -705,10 +763,7 @@ def build_color_command_0x3B(r: int, g: int, b: int, brightness: int = 100) -> b
     # Use provided brightness, capped to 100
     brightness = min(brightness, 100)
 
-    # Pack hue (0-360) and saturation (0-100) into two bytes
-    packed = (h << 7) | s
-    hs_hi = (packed >> 8) & 0xFF
-    hs_lo = packed & 0xFF
+    hs_hi, hs_lo = pack_hue_saturation(h, s)
 
     raw_cmd = bytearray([
         0x3B,                  # Command opcode

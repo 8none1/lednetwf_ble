@@ -415,3 +415,87 @@ Before confirming any device capability claim:
 - [ ] Check `functions` array for feature support
 - [ ] Check `wifi_device_panel.json` for UI tabs
 - [ ] Note if product is marked (†) not in database
+
+---
+
+## IOTBT "v3" variant (0xE0 0x01 colour command)
+
+**Date**: 31 August 2026 (PR #101)
+
+**Device**: Briturn app / JM Zengge "ZJ-BBLA-RGBWW" battery mood light.
+`product_id=0x00`, `effect_type=IOTBT`, `ble_version=7`, `led_version=68`,
+`flags2=0x01` (14-byte 0x5A00 service data, MAC-derived bytes redacted:
+`5b 07 08 [XX XX XX XX XX] 00 3e 44 0a 01 01`).
+
+**Problem**: A third 0x5A00-family variant exists alongside Telink (0xE2
+colour) and segment (0xE1 0x03 colour). It does not respond to 0xE2
+(quantized or unquantized hue), the standard 0x3B HSV command, or the
+legacy 0x31 RGB command - all three are silently accepted over BLE (no
+error, write completes) but produce no change on the device. Only power
+(0x71) worked, which is what made this look like a Telink device at first.
+
+**Finding**: Captured real traffic from the vendor app via Android's
+Bluetooth HCI snoop log while setting the device to known colours (red,
+yellow). The app sends:
+
+```
+red    (hue=0 deg):  e0 01 00 a1 00 64 64 00 00 00 00 14 00 00
+yellow (hue=60 deg): e0 01 00 a1 1e 64 64 00 00 00 00 14 00 00
+```
+
+Initially read as a standalone "hue/2 in one byte, then plain saturation"
+encoding, since both bytes happened to match that reading for these two
+(fully-saturated, even-degree) test colours. Turned out to be the same
+packed `(hue << 7) | saturation` encoding already used by
+`build_color_command_0x3B`, just wrapped in the vendor app's "v3" envelope
+(`e0 01 00 a1 ...`, matching `switch_led_v3` in `wifi_dp_cmd.json`) rather
+than the plain `3b a1 ...` form. Confirmed by testing the plain 0x3B
+command directly (byte-for-byte what the existing builder produces) - it
+does **not** work on this device, so the v3 envelope itself is load-bearing,
+not just a detection question.
+
+`cmd_family` confirmed as `0x0a` directly from the captured packet header
+(byte 7), not assumed from the app's `needChecksum` field.
+
+See `build_iotbt_v3_color_command()` / `pack_hue_saturation()` in
+`protocol.py`, `is_iotbt_v3` in `device.py`, and `IOTBT_PROTOCOL_V3` in
+`const.py`. No auto-detection signal found yet - manual override required.
+
+---
+
+## IOTBT 0xEA 0x81 status/notification frame
+
+**Date**: 31 August 2026 (PR #101)
+
+While capturing the v3 colour traffic above, also captured the device's
+notification response to its own `0xEA 0x81` state query (sent by the app
+right after connecting). Wrapped in a JSON envelope over the notify
+characteristic:
+
+```
+{"code":0,"payload":"<hex>"}
+```
+
+Decoded inner payload:
+
+```
+ea 81 00 00 [X] 0a [4 bytes, MAC-independent, device-specific] f0 [hue] 64 64 00 00 00 00 00 00 00 00 00 00
+```
+
+The `[hue]` byte correctly mirrors live state (matched the active colour
+in every sample), confirming this is a genuine, readable status frame -
+useful for anyone adding state polling/sync for this device family.
+
+**Open question**: byte `[X]` (`0x3E` / 62 decimal on this unit) is
+constant across every sample taken in a short window, including in the
+device's raw advertisement manufacturer data (company ID 0x5A00) as well
+as the GATT notification - i.e. it appears in a passive broadcast, not
+just in response to a query. Tried to identify it as battery percentage,
+but the vendor app doesn't expose battery at all, so there's no reference
+to confirm against. The fact that it shows up unchanged in a passively
+broadcast advertisement is a point *against* it being battery (battery
+tracking doesn't usually get repeated into an always-on broadcast payload)
+and a point *for* it being a static device/firmware sub-identifier. Not
+resolved - flagging for whoever has a device they're willing to run down
+to a known low charge level and re-check.
+
