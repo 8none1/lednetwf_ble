@@ -455,9 +455,13 @@ Note the two conflicting `E0 14` entries. Both payloads come from real captures,
 so at most one of the *labels* is generally right. See
 `ai_instructions/iotbt_variant_findings.md`.
 
-There is **no** `colour_data_v2` or `colour_data_v3` template in any of the
-`*_dp_cmd.json` files, so the solid-colour command is built in code, not from a
-template. That is why the `E0 01` colour form above had to come from a capture.
+`colour_data_v3` **is** a declared function in `ble_devices.json` (`type: Hex`,
+`deviceMinVer: 10`, alongside `colour_data_v2`), but no product defines a
+`cmdForm` for it and there is no template for it in any `*_dp_cmd.json`. So the
+solid-colour command is built in code, not from a template, which is why the
+`E0 01` colour form above had to come from a capture. If you want the
+authoritative bytes, `colour_data_v3` is the function name to grep the app's
+Dart/Java for.
 
 ### The E0 01 colour payload (PR #101)
 
