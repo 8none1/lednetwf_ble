@@ -523,15 +523,35 @@ class LEDNetWFDevice:
         """
         if self._iotbt_protocol_override == "segment":
             return True
-        if self._iotbt_protocol_override == "telink":
+        if self._iotbt_protocol_override in ("telink", "v3"):
             return False
         return self._is_iotbt_segment
 
+    @property
+    def is_iotbt_v3(self) -> bool:
+        """Return True if device is an IOTBT "v3" variant.
+
+        A third 0x5A00-family variant, distinct from both Telink (0xE2
+        colour) and segment (0xE1 0x03 colour). Does not respond to
+        0xE2, 0x3B, or legacy 0x31 colour commands - only power (0x71)
+        works on those. Confirmed via a real BLE traffic capture from
+        the vendor app (Briturn) against a product_id=0x00 device.
+
+        Source: User protocol capture - JM Zengge ZJ-BBLA-RGBWW device.
+
+        No reliable auto-detection is known for this variant yet (it
+        currently falls through to the Telink 0xE2 path by default,
+        which silently fails on the hardware). Manual override via
+        'v3' is required until a detection signal is found.
+        """
+        return self._iotbt_protocol_override == "v3"
+
     def set_iotbt_protocol_override(self, override: str | None) -> None:
-        """Set the manual IOTBT protocol override ('auto'/None, 'telink', 'segment')."""
-        self._iotbt_protocol_override = override if override in ("telink", "segment") else None
-        _LOGGER.info("[%s] IOTBT protocol override set to %s (effective segment=%s)",
-                     self._name, self._iotbt_protocol_override or "auto", self.is_iotbt_segment)
+        """Set the manual IOTBT protocol override ('auto'/None, 'telink', 'segment', 'v3')."""
+        self._iotbt_protocol_override = override if override in ("telink", "segment", "v3") else None
+        _LOGGER.info("[%s] IOTBT protocol override set to %s (effective segment=%s, v3=%s)",
+                     self._name, self._iotbt_protocol_override or "auto",
+                     self.is_iotbt_segment, self.is_iotbt_v3)
         self._notify_callbacks()
 
     @property
@@ -1486,6 +1506,18 @@ class LEDNetWFDevice:
             )
             _LOGGER.debug(
                 "IOTBT segment device: RGB=(%d,%d,%d), brightness=%d%% -> segment HSB",
+                rgb[0], rgb[1], rgb[2], brightness_pct
+            )
+        elif self.is_iotbt_v3:
+            # IOTBT "v3" variant uses 0xE0 0x01 command with packed hue+sat
+            # (same encoding as build_color_command_0x3B, different envelope).
+            # Source: User protocol capture - JM Zengge ZJ-BBLA-RGBWW device.
+            brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
+            packet = protocol.build_iotbt_v3_color_command(
+                rgb[0], rgb[1], rgb[2], brightness_pct
+            )
+            _LOGGER.debug(
+                "IOTBT v3 device: RGB=(%d,%d,%d), brightness=%d%% -> packed hue+sat (0xE0 0x01)",
                 rgb[0], rgb[1], rgb[2], brightness_pct
             )
         elif self.is_iotbt:

@@ -415,3 +415,111 @@ Before confirming any device capability claim:
 - [ ] Check `functions` array for feature support
 - [ ] Check `wifi_device_panel.json` for UI tabs
 - [ ] Note if product is marked (†) not in database
+
+---
+
+## IOTBT "v3" variant (0xE0 0x01 colour command)
+
+**Date**: 31 August 2026 (PR #101)
+
+**Device**: Briturn app / JM Zengge "ZJ-BBLA-RGBWW" battery mood light.
+Reported by the integration as `product_id=0x00`, `effect_type=IOTBT`,
+`ble_version=7`, `firmware_version=68` (byte 10 of the service data below -
+this field is commonly labelled `led_version` in this codebase, but it is
+the firmware version: confirmed by a before/after firmware-update capture
+on another device where this exact byte moved. An LED hardware version
+would not change on a firmware update).
+`flags2=0x01` (14-byte 0x5A00 service data, MAC-derived bytes redacted:
+`5b 07 08 [XX XX XX XX XX] 00 3e 44 0a 01 01`).
+
+**The real product ID was being discarded.** Bytes 8-9 of that service
+data (`00 3e` above) are the device's actual product ID: **62**, not
+`0x00`. `parse_service_data` hardcodes `product_id: 0` for every 14-byte
+device, and `parse_manufacturer_data` separately forces `0x00` for any
+device whose name starts with `IOTBT`, so the real ID sitting right there
+in the advertisement is thrown away. Product 62 in the vendor app's
+`ble_devices.json` declares `colour_data_v3` (the `0xE0 0x01` command
+found below), `switch_led_v3`, `state_upload_v2` (matches the `0xEA 0x81`
+query captured below), `temp_value_v2`, and protocol family `common2_0`
+(the v3 family) - so this device speaks v3 *because of its product ID*,
+by the vendor's own classification, not as an edge case. It also means
+this device should have colour-temperature (CCT) support - the model name
+is literally "...RGBWW" and `temp_value_v2` is declared - but forced to
+`product_id=0x00` it inherits `has_ww: False, has_cw: False` and gets no
+CCT entity. Wiring up the real product ID is a separate, larger change
+(tracked as a follow-up issue) since several products declare functions
+that don't fully determine their actual command family on their own.
+
+**Problem**: A third 0x5A00-family variant exists alongside Telink (0xE2
+colour) and segment (0xE1 0x03 colour). It does not respond to 0xE2
+(quantized or unquantized hue), the standard 0x3B HSV command, or the
+legacy 0x31 RGB command - all three are silently accepted over BLE (no
+error, write completes) but produce no change on the device. Only power
+(0x71) worked, which is what made this look like a Telink device at first.
+
+**Finding**: Captured real traffic from the vendor app via Android's
+Bluetooth HCI snoop log while setting the device to known colours (red,
+yellow). The app sends:
+
+```
+red    (hue=0 deg):  e0 01 00 a1 00 64 64 00 00 00 00 14 00 00
+yellow (hue=60 deg): e0 01 00 a1 1e 64 64 00 00 00 00 14 00 00
+```
+
+Initially read as a standalone "hue/2 in one byte, then plain saturation"
+encoding, since both bytes happened to match that reading for these two
+(fully-saturated, even-degree) test colours. Turned out to be the same
+packed `(hue << 7) | saturation` encoding already used by
+`build_color_command_0x3B`, just wrapped in the vendor app's "v3" envelope
+(`e0 01 00 a1 ...`, matching `switch_led_v3` in `wifi_dp_cmd.json`) rather
+than the plain `3b a1 ...` form. Confirmed by testing the plain 0x3B
+command directly (byte-for-byte what the existing builder produces) - it
+does **not** work on this device, so the v3 envelope itself is load-bearing,
+not just a detection question.
+
+`cmd_family` confirmed as `0x0a` directly from the captured packet header
+(byte 7), not assumed from the app's `needChecksum` field.
+
+See `build_iotbt_v3_color_command()` / `pack_hue_saturation()` in
+`protocol.py`, `is_iotbt_v3` in `device.py`, and `IOTBT_PROTOCOL_V3` in
+`const.py`. No auto-detection signal found yet - manual override required.
+
+---
+
+## IOTBT 0xEA 0x81 status/notification frame
+
+**Date**: 31 August 2026 (PR #101)
+
+While capturing the v3 colour traffic above, also captured the device's
+notification response to its own `0xEA 0x81` state query (sent by the app
+right after connecting). Wrapped in a JSON envelope over the notify
+characteristic:
+
+```
+{"code":0,"payload":"<hex>"}
+```
+
+Decoded inner payload:
+
+```
+ea 81 00 00 [X] 0a [4 bytes, MAC-independent, device-specific] f0 [hue] 64 64 00 00 00 00 00 00 00 00 00 00
+```
+
+The `[hue]` byte correctly mirrors live state (matched the active colour
+in every sample), confirming this is a genuine, readable status frame -
+useful for anyone adding state polling/sync for this device family.
+
+**Resolved**: byte `[X]` (`0x3E` / 62 decimal on this unit) is the
+device's **product ID**, not battery. Confirmed by matching it against the
+same field in the service data (see above): both frames agree on this
+byte *and* the adjacent one (service-data byte 11 / state-frame byte 5,
+both `0x0a`), which rules out coincidence. Originally suspected as
+battery percentage since it was constant across samples and the vendor
+app doesn't expose battery at all - the fact that it also shows up
+unchanged in the passively broadcast advertisement (not just in response
+to a query) turned out to be exactly the right instinct that pointed away
+from battery and toward a static identifier.
+
+Full annotated capture, including this frame and the colour commands
+below: https://gist.github.com/HelloPackets89/f7836b577a714576b206af4ca3574a1f
+
