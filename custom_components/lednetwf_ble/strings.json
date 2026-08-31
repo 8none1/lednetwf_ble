@@ -49,7 +49,7 @@
           "segments": "Number of segments",
           "led_type": "LED chip type",
           "color_order": "Color order",
-          "iotbt_protocol": "IOTBT protocol (auto / telink / segment)"
+          "iotbt_protocol": "IOTBT protocol (auto / telink / segment / v3)"
         }
       }
     }
