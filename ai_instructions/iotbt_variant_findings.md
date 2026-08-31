@@ -295,3 +295,142 @@ Verified by the 57 -> 60 change in the capture (`...01 00 39...` -> `...01 00 3C
 **Decision (Will, 2026):** NOT implementing read-back or sensors for this. The LED count
 stays a write-only config item, as it is now; the read-back data isn't worth surfacing. The
 format is recorded here only in case that changes.
+
+---
+
+# A third variant: the 0xE0 0x01 colour family (PR #101)
+
+**Date**: 31 August 2026. Source: PR #101, reporter's own HCI snoop capture of the vendor
+app. Not independently verified by us; the byte-level decode below is ours.
+
+## The device
+
+Briturn app / JM Zengge "ZJ-BBLA-RGBWW" battery-powered mood light.
+
+| Field | Value |
+|-------|-------|
+| product_id | 0x00 |
+| effect_type | IOTBT |
+| ble_version | 7 |
+| led_version | 68 (0x44) |
+| flags2 (service data byte 13) | **not yet supplied** |
+
+`led_version = 68` matches neither device we had data for (IOTBT6BA `0x1F`/31, IOTBT812
+`0x0E`/14), which is consistent with this being a third class rather than either of the two
+we already know.
+
+## What does and does not work on it
+
+| Command | Result |
+|---------|--------|
+| Power `0x71 0x23`/`0x24` | works |
+| Colour `E2 0B <hue> <0xE0\|level>` (our Telink builder) | **accepted over BLE, silently ignored** |
+| Colour `E2 0B` with unquantised hue | ignored |
+| Colour `0x3B` HSV | ignored (per reporter) |
+| Colour `0x31` legacy RGB | ignored (per reporter) |
+| Colour `E0 01 00 A1 ...` (below) | **works** |
+
+Note the awkward combination: Telink power works, Telink colour does not. So power success is
+not evidence of command family, which is the same trap flagged for IOTBT812 further up this
+document.
+
+## The working colour command
+
+| Colour | Payload (after the standard 8-byte envelope) |
+|--------|---------------------------------------------|
+| red (0 deg) | `e0 01 00 a1 00 64 64 00 00 00 00 14 00 00` |
+| yellow (60 deg) | `e0 01 00 a1 1e 64 64 00 00 00 00 14 00 00` |
+| blue (240 deg) | `e0 01 00 a1 78 64 64 00 00 00 00 14 00 00` |
+
+Reporter verified the full hue range and a 5-100% brightness sweep, both from a standalone
+bleak script and through the HA entity.
+
+**This is not a new encoding.** The PR describes it as "hue = degrees / 2, then saturation",
+but `a1 <b1> <b2> <bright>` is the `0x3B` solid-colour command's mode byte plus the standard
+packed hue+sat pair plus brightness. The two readings are numerically identical for every
+even hue at saturation <= 100, and the three test colours are all even-hue saturated
+primaries, so the capture cannot distinguish them. See `DISCOVERIES.md`. The same four bytes
+turn up as each palette entry in `IOTBT_SEGMENT_EFFECT_SCENES`, so all three IOTBT families
+we know of use this one colour encoding.
+
+Byte 9 of the inner body is `0x14` while setting red, yellow and blue, so it is not the
+blue channel. It sits where the app's `temp_value_v2` template hardcodes `0x1e`, i.e. it
+looks like a transition/gradient parameter.
+
+## Open questions
+
+1. **Does the plain `0x3B` colour command work?** The reporter says no, but if the
+   `E0 01`-wrapped version of essentially the same body works, that deserves a retest with
+   exact bytes. Our builder emits, for red and blue:
+   ```
+   00 00 80 00 00 0d 0e 0b 3b a1 00 64 64 00 00 ff 00 00 00 00 a3
+   00 00 80 00 00 0d 0e 0b 3b a1 78 64 64 00 00 00 00 ff 00 00 1b
+   ```
+   If either drives the lamp, this needs no new builder, only detection routing the device
+   to the standard `else` branch, exactly the conclusion reached for IOTBT812 above.
+   Requested in the PR.
+2. **Where did the inner `3b` go?** `switch_led_v3` = `e001{preview}` + the whole
+   `switch_led_v2` form, keeping its `3b` opcode. This capture has no `3b`. Either the
+   colour v3 form drops it the way `scene_data_v3` drops `38`, or it is missing from the
+   transcription. Needs the raw capture.
+3. **cmd_family.** PR #101 keeps `0x0a` ("expects response"), and that is probably fine.
+   The family byte is **not** consistent across IOTBT families, so do not assume `0x0b`:
+
+   | Capture | Family byte used for state-changing commands |
+   |---------|----------------------------------------------|
+   | IOTBT812 (Telink), 125 writes incl. `E0 02` effects | `0x0a` |
+   | IOTBT6BA / IOTBT4B0 (segment) | `0x0b`, with `0x0a` reserved for queries |
+
+   So `0x0a` has direct capture support for `E0` commands on the Telink family. Envelope
+   byte 7 of this device's raw capture would confirm it either way, but this is not a
+   likely source of breakage.
+4. **flags2** for this device, to key auto-detection.
+
+## Recommended fix shape
+
+Not a swap of `build_iotbt_color_command`. That function is reached only from the
+`elif self.is_iotbt` branch (`device.py:1491`), which is the Telink family, and the `0xE2`
+form there is byte-exact against the IOTBT812 capture. Replacing it trades one working
+family for another.
+
+Instead:
+
+1. New builder (e.g. `build_iotbt_v3_color_command`), leaving the Telink one alone. It
+   should reuse the existing packed hue+sat helper rather than reimplementing `hue // 2`.
+2. A third value on the `CONF_IOTBT_PROTOCOL` override (currently `auto`/`telink`/`segment`,
+   `const.py:22`, `device.py:521`) so affected users have a manual escape hatch.
+3. Auto-detection keyed on the advert once we have this device's `flags2` and ideally a
+   second device of the same class.
+
+## Bonus: 0xEA 0x81 state frame from this device
+
+Reporter's capture of the response to an `EA 81` state query:
+
+```
+EA 81 00 00 3E 0A 23 61 2B 40 F0 <hue> 64 64 00 ...
+```
+
+The `<hue>` byte tracks live state, so this is a genuinely readable status frame for this
+class. Byte 4 (`0x3E`) is unidentified; the reporter guessed battery percent but the vendor
+app exposes no battery reading, so there is nothing to check it against. Given `64 64`
+follows the hue byte, the `<hue> 64 64` run is very likely the same packed-hue-high-byte /
+low-byte / brightness triple as the colour command, which would make byte 11 the hue high
+byte rather than a whole hue. Untested.
+
+---
+
+# Caveat surfaced while writing the above: 0xE0 0x14 has two conflicting meanings
+
+Our notes now attribute `E0 14` to two different things:
+
+- **Effect brightness** on IOTBT812: `E0 14 00 <lvl> 01 90 00 01`, lvl 1-4 (table further up
+  this document).
+- **LED count commit** on IOTBT6BA segment: `E0 14 01 00 00 <leds> <segs> 00`
+  (`build_iotbt_segment_led_commit_command`, confirmed byte-for-byte from the samoswall
+  capture).
+
+Both are from real captures, so both payloads are real, but at most one of the *labels* can
+be generally right. Note the third byte differs (`00` vs `01`), which is the position the
+app's v3 templates call `{preview}`. That may be the discriminator, or `{preview}` may simply
+not apply to this sub-command. Unresolved; do not rely on either label as the meaning of
+`E0 14` in general.

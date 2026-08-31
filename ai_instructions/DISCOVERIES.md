@@ -343,8 +343,106 @@ these exact devices (proven by both captures).
 **Rule of thumb**: when adding a command builder, take the cmd_family byte
 from the capture too, not just the payload. 0x0A = query, 0x0B = command.
 
+**Amendment, 31 August 2026**: that rule holds for the *segment* family, but is
+not universal. The IOTBT812 (Telink family) capture shows the app using `0x0A`
+for all 125 writes, including `E0 02` effect selects and `E2 0B` colour. So the
+family byte is itself family-dependent: take it from a capture of the device in
+front of you, and do not "correct" a Telink-family builder to `0x0B` on the
+strength of the segment captures alone.
+
 **Files fixed**:
 - `custom_components/lednetwf_ble/protocol.py` (both segment builders now 0x0B)
+
+---
+
+### 0xE0 and 0xEA are ZengGe commands, not Telink opcodes
+
+**Date**: 31 August 2026 (PR #101)
+
+**Error**: `protocol_docs/17_device_configuration.md` listed our IOTBT effect
+command (`0xE0 0x02`) and state query (`0xEA 0x81`) directly under a "Telink BLE
+Mesh Opcode Reference" taken from `com/telink/bluetooth/light/Opcode.java`,
+where `0xE0` is "set device address" and `0xEA` is "user all". That framing made
+these look like mesh opcodes that only Telink-family hardware would understand.
+
+**Reality**: both are ordinary ZengGe app commands, present verbatim in
+`assets/flutter_assets/packages/magichome2_home_data_provide/assets/wifi_dp_cmd.json`:
+
+| Our builder | App template | Template form |
+|-------------|--------------|---------------|
+| `build_iotbt_effect_command` (`E0 02 00 <id> <speed> <bright>`) | `scene_data_v3` | `e002{preview}{model}{speed}{bright}` |
+| `build_iotbt_state_query` (`EA 81 8A 8B`) | `state_upload_v2` | `ea818a8b` |
+
+The `0x00` we send as a constant third byte in the effect command is the
+template's `{preview}` flag, not part of the effect payload.
+
+`0xE0` is a general "v3 command wrapper" in the app: `E0 <sub> <preview>`
+followed by the v2 payload, with the checksum dropped (`needChecksum: false` on
+every `e0` template). `switch_led_v3` = `e001{preview}` + the entire
+`switch_led_v2` form proves the pattern.
+
+**Why it matters**: it explains why the `0xE0 0x02` effect command works on
+devices that share no other command family, and it means an `0xE0` prefix in a
+capture tells you nothing about whether the device is Telink. Only `0xE2`
+(colour) and `0x71` (power) in our IOTBT builders are genuinely Telink.
+
+**Files fixed**:
+- `protocol_docs/17_device_configuration.md` (new "0xE0 v3 Command Wrapper"
+  section, caution added to the Telink opcode table)
+
+---
+
+### `hue // 2` and the packed hue+sat high byte are the same byte
+
+**Date**: 31 August 2026 (PR #101)
+
+**The trap**: our standard `0x3B` colour command packs hue and saturation as
+`(hue << 7) | sat` across two bytes. Because `sat` only goes up to 100, it can
+never carry into the high byte, so:
+
+```
+byte_hi == hue // 2                             for any sat <= 100
+byte_lo == sat + (128 if hue is odd else 0)
+```
+
+A capture of fully saturated colours is therefore **indistinguishable** from
+"hue in half-degree units, followed by a saturation byte". Red, yellow and blue
+all give identical bytes under both readings (`00 64`, `1e 64`, `78 64`). The two
+only diverge on odd hues, and then only by a half-degree of hue.
+
+**How it bit us**: PR #101 captured a working colour command on a
+`product_id=0x00` device and documented it as a new "hue = degrees / 2"
+encoding. It is actually the existing packed hue+sat encoding, wrapped in the
+`0xE0 0x01` v3 wrapper. The proposed patch worked, but under a description that
+would have sent the next person looking for a protocol that does not exist.
+
+**The same misreading is in our segment code.** The `IOTBT_SEGMENT_EFFECT_SCENES`
+palette entries in `protocol.py` are documented as
+"`b2`/`b3` carry saturation/value plus an anchor flag in the high bit". There is
+no anchor flag: `b1`/`b2` are the packed hue+sat pair and `b3` is brightness, so
+each palette entry is `A1 <hs_hi> <hs_lo> <bright>`, byte-for-byte the same
+four bytes as the `0x3B` colour command's mode + hue/sat + brightness.
+
+Checked against all 166 palette entries from the issue #83 capture:
+
+- Under the packed reading, every entry gives a valid hue (0-340) and
+  saturation (0-100). Zero exceptions.
+- 76 of the 166 have `b2 > 100`, which is impossible if `b2` were a plain
+  saturation byte. Those are exactly the odd-hue entries, where the low byte
+  carries `sat + 128`.
+- Spot checks decode to obviously-intended colours: `0x96 0x64` = hue 300
+  (magenta), `0x00 0x00` = white, `0x63 0xAC` = hue 199 at 44% saturation in
+  the "Iceland Blue" scene.
+
+`build_iotbt_segment_color_command` computes `hue_180 = int(h / 2)` and a
+separate `sat` byte, which happens to produce the correct packed bytes for even
+hues and is a half-degree out on odd ones. Harmless in practice, but it means
+the builder silently quantises hue to even degrees when the wire format has full
+0-360 resolution. Worth tidying when someone next touches that function.
+
+**Rule**: when decoding a colour command from a capture, test a **desaturated**
+colour on an **odd** hue before writing down the encoding. Saturated primaries
+cannot distinguish these two formats.
 
 ---
 

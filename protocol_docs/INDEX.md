@@ -1,7 +1,7 @@
 # LEDnetWF BLE Protocol Documentation
 
-**Version**: 3.8
-**Updated**: 7 December 2025
+**Version**: 3.9
+**Updated**: 31 August 2026
 
 ---
 
@@ -69,6 +69,7 @@ All commands must be wrapped in transport layer. See [04_connection_transport.md
 | Query device settings | [17_device_configuration.md](17_device_configuration.md) |
 | Set color order / LED count | [17_device_configuration.md](17_device_configuration.md) |
 | IOTBT (0x80) protocol | [17_device_configuration.md](17_device_configuration.md) |
+| 0xE0 "v3" command wrapper | [17_device_configuration.md](17_device_configuration.md) |
 | Sound reactive / music mode | [18_sound_reactive_music_mode.md](18_sound_reactive_music_mode.md) |
 
 ---

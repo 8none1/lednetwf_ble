@@ -65,6 +65,19 @@
 | ID | Hex | Company ID | Notes |
 |----|-----|------------|-------|
 | 0 | 0x00 | 0x1102 | Telink BLE Mesh |
+| 0 | 0x00 | 0x5A00-0x5AFF | Same product_id, **three** different command families |
+
+`product_id = 0x00` is not one device type. Known families, all advertising the
+same product ID:
+
+| Family | Power | Colour | Effects |
+|--------|-------|--------|---------|
+| Telink (e.g. IOTBT812) | `0x71` | `E2 0B <hue> <0xE0\|lvl>` | `E0 02` |
+| Segment (e.g. IOTBT6BA) | `0x3B` | `E1 03` + `A1` blocks | `E1 01` |
+| v3 wrapper (ZJ-BBLA-RGBWW, PR #101) | `0x71` | `E0 01 00 A1 ...` | unknown |
+
+Detection is a heuristic on service-data `flags2` bit `0x08`, with a manual
+`CONF_IOTBT_PROTOCOL` override. See `iotbt_variant_findings.md`.
 
 ## Command Formats
 
@@ -94,6 +107,32 @@
 ```
 E1 05 [effect_id] [brightness] [sensitivity] ... (46 bytes total)
 ```
+
+### 0xE0 "v3" Command Wrapper
+
+```
+E0 {sub} {preview} {v2 payload}     # no checksum on any E0 command
+```
+
+`E0` is the app's third-generation command prefix, **not** a Telink opcode.
+`switch_led_v3` = `e001{preview}` + the entire `switch_led_v2` form proves it.
+Our "IOTBT effect" command `E0 02 00 {id} {speed} {bright}` is really the app's
+generic `scene_data_v3`. Full table in
+`protocol_docs/17_device_configuration.md`.
+
+### Packed hue+sat (0x3B colour, and everything derived from it)
+
+```
+packed  = (hue << 7) | sat          # hue 0-360, sat 0-100
+byte_hi = packed >> 8               # == hue // 2 for any sat <= 100
+byte_lo = packed & 0xFF             # == sat, or sat + 128 on odd hues
+```
+
+**Trap**: for saturated colours this is indistinguishable from "hue in
+half-degree units, then saturation". Test a desaturated colour on an odd hue
+before writing down a new encoding. This encoding turns up in the `0x3B` colour
+command, the `E0 01` colour command, and every `IOTBT_SEGMENT_EFFECT_SCENES`
+palette entry.
 
 ## State Response Parsing
 
