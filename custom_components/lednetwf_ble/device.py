@@ -523,7 +523,7 @@ class LEDNetWFDevice:
         """
         if self._iotbt_protocol_override == "segment":
             return True
-        if self._iotbt_protocol_override == "telink":
+        if self._iotbt_protocol_override in ("telink", "v3"):
             return False
         return self._is_iotbt_segment
 

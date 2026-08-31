@@ -423,9 +423,32 @@ Before confirming any device capability claim:
 **Date**: 31 August 2026 (PR #101)
 
 **Device**: Briturn app / JM Zengge "ZJ-BBLA-RGBWW" battery mood light.
-`product_id=0x00`, `effect_type=IOTBT`, `ble_version=7`, `led_version=68`,
+Reported by the integration as `product_id=0x00`, `effect_type=IOTBT`,
+`ble_version=7`, `firmware_version=68` (byte 10 of the service data below -
+this field is commonly labelled `led_version` in this codebase, but it is
+the firmware version: confirmed by a before/after firmware-update capture
+on another device where this exact byte moved. An LED hardware version
+would not change on a firmware update).
 `flags2=0x01` (14-byte 0x5A00 service data, MAC-derived bytes redacted:
 `5b 07 08 [XX XX XX XX XX] 00 3e 44 0a 01 01`).
+
+**The real product ID was being discarded.** Bytes 8-9 of that service
+data (`00 3e` above) are the device's actual product ID: **62**, not
+`0x00`. `parse_service_data` hardcodes `product_id: 0` for every 14-byte
+device, and `parse_manufacturer_data` separately forces `0x00` for any
+device whose name starts with `IOTBT`, so the real ID sitting right there
+in the advertisement is thrown away. Product 62 in the vendor app's
+`ble_devices.json` declares `colour_data_v3` (the `0xE0 0x01` command
+found below), `switch_led_v3`, `state_upload_v2` (matches the `0xEA 0x81`
+query captured below), `temp_value_v2`, and protocol family `common2_0`
+(the v3 family) - so this device speaks v3 *because of its product ID*,
+by the vendor's own classification, not as an edge case. It also means
+this device should have colour-temperature (CCT) support - the model name
+is literally "...RGBWW" and `temp_value_v2` is declared - but forced to
+`product_id=0x00` it inherits `has_ww: False, has_cw: False` and gets no
+CCT entity. Wiring up the real product ID is a separate, larger change
+(tracked as a follow-up issue) since several products declare functions
+that don't fully determine their actual command family on their own.
 
 **Problem**: A third 0x5A00-family variant exists alongside Telink (0xE2
 colour) and segment (0xE1 0x03 colour). It does not respond to 0xE2
@@ -486,16 +509,17 @@ The `[hue]` byte correctly mirrors live state (matched the active colour
 in every sample), confirming this is a genuine, readable status frame -
 useful for anyone adding state polling/sync for this device family.
 
-**Open question**: byte `[X]` (`0x3E` / 62 decimal on this unit) is
-constant across every sample taken in a short window, including in the
-device's raw advertisement manufacturer data (company ID 0x5A00) as well
-as the GATT notification - i.e. it appears in a passive broadcast, not
-just in response to a query. Tried to identify it as battery percentage,
-but the vendor app doesn't expose battery at all, so there's no reference
-to confirm against. The fact that it shows up unchanged in a passively
-broadcast advertisement is a point *against* it being battery (battery
-tracking doesn't usually get repeated into an always-on broadcast payload)
-and a point *for* it being a static device/firmware sub-identifier. Not
-resolved - flagging for whoever has a device they're willing to run down
-to a known low charge level and re-check.
+**Resolved**: byte `[X]` (`0x3E` / 62 decimal on this unit) is the
+device's **product ID**, not battery. Confirmed by matching it against the
+same field in the service data (see above): both frames agree on this
+byte *and* the adjacent one (service-data byte 11 / state-frame byte 5,
+both `0x0a`), which rules out coincidence. Originally suspected as
+battery percentage since it was constant across samples and the vendor
+app doesn't expose battery at all - the fact that it also shows up
+unchanged in the passively broadcast advertisement (not just in response
+to a query) turned out to be exactly the right instinct that pointed away
+from battery and toward a static identifier.
+
+Full annotated capture, including this frame and the colour commands
+below: https://gist.github.com/HelloPackets89/f7836b577a714576b206af4ca3574a1f
 

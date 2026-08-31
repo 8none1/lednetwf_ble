@@ -340,7 +340,7 @@ def build_iotbt_v3_color_command(r: int, g: int, b: int, brightness: int = 100) 
     # build_iotbt_segment_color_command) rather than dropping the HSV
     # value component, since the caller passes unscaled RGB plus a
     # separate brightness percentage.
-    val = max(0, min(100, round(brightness * v / 100)))
+    val = max(1, min(100, round(brightness * v / 100)))
     raw_cmd = bytearray([0xE0, 0x01, 0x00, 0xA1, hs_hi, hs_lo, val,
                           0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00])
     return wrap_command(raw_cmd, cmd_family=0x0a)
