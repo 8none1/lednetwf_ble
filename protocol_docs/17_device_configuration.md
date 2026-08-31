@@ -322,9 +322,18 @@ def detect_iotbt_response_type(data: bytes) -> str:
 | 0 | **0xEA** | Magic byte 1 (Telink "user all" opcode) |
 | 1 | **0x81** | Magic byte 2 (state query marker) |
 | 2 | ? | Reserved/unknown |
-| 3-4 | Address | Device mesh address (big-endian, & 0x7FFF) |
-| 5 | Mode | Current mode/brightness |
+| 3-4 | ~~Address~~ **product_id** | Big-endian. See correction below |
+| 5 | ~~Mode~~ **led_version** | See correction below |
 | 6 | Power | 0x23 = ON, others = OFF |
+
+**Correction, 31 August 2026**: bytes 3-4 are the **product ID**, not a mesh address.
+`DeviceState2.java`'s `& 0x7FFF` mask suggests its author was unsure too. Confirmed from a
+device (PR #101) whose service data and state frame both carry `0x003E` = 62 in the field we
+had labelled "mesh address" in both places, where product 62 in `ble_devices.json` declares
+exactly the capabilities the device demonstrably has. Byte 5 matches service-data byte 11 on
+the same device, which the realignment in `ai_instructions/iotbt_variant_findings.md` makes
+`led_version`. Note the same mislabelling exists in `parse_service_data`'s 14-byte branch,
+which additionally hardcodes `product_id: 0`.
 
 #### DeviceState Format (0x81 response)
 

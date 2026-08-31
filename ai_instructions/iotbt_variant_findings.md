@@ -288,13 +288,14 @@ remain correct for the payloads.
      it, but it is inferred from the layout, not read out of the app's parser. I did not find
      the app code that decodes the 14-byte form; `ADVModel` is the non-connect mesh ADV
      format, which is a different thing.
-   - **LOW on bytes 8-9 being product_id.** They are invariant across the firmware update,
-     but so is a provisioned mesh address, so invariance proves nothing either way. Both
-     observed values are small ints with a zero high byte, which fits both readings.
-     `0x00AD` = 173 is a real product ID in `ble_devices.json` (an `hc3` matrix/curtain
-     device that declares `switch_led_v3` **and** `colour_data_v3`, which is suggestive for a
-     segment lamp), but `0x00C2` = 194 is in neither our `PRODUCT_CAPABILITIES` nor
-     `ble_devices.json`.
+   - **CONFIRMED (upgraded from LOW, same day) that bytes 8-9 are the product ID.** See
+     the section below: PR #101's reporter supplied their service data and their `0xEA 0x81`
+     state frame, and the same value appears in both, in two fields we label "mesh address",
+     and it resolves to a real product whose declared capabilities match the device's
+     observed behaviour exactly. `0x00AD` = 173 is also a real product ID (an `hc3`
+     matrix/curtain device declaring `switch_led_v3` and `colour_data_v3`). Only
+     `0x00C2` = 194 is in neither database, which is consistent with a product newer than
+     this app version.
 
    **Why this matters more than the immediate PR**: if bytes 8-9 really are the product ID,
    then `parse_service_data` is discarding it and hardcoding `product_id: 0` for every
@@ -488,3 +489,67 @@ be generally right. Note the third byte differs (`00` vs `01`), which is the pos
 app's v3 templates call `{preview}`. That may be the discriminator, or `{preview}` may simply
 not apply to this sub-command. Unresolved; do not rely on either label as the meaning of
 `E0 14` in general.
+
+
+---
+
+# CONFIRMED: bytes 8-9 are the product ID (PR #101 reporter data, 31 August 2026)
+
+The reporter supplied both frames from the same device. The same two-byte value appears in
+each, in the field we label "mesh address" in both places:
+
+```
+service data (14 byte):  5b 07 08 [xx xx xx xx xx] 00 3e 44 0a 01 01
+                                                   ^^^^^ bytes 8-9
+0xEA 0x81 state frame:   ea 81 00 00 3e 0a 23 61 2b 40 f0 <hue> 64 64 ...
+                                  ^^^^^ bytes 3-4
+```
+
+`0x003E` = **62**, and byte 11 of the service data (`0x0a`) equals byte 5 of the state frame
+(`0x0a`), so the two frames agree on two adjacent fields, not just one.
+
+Product 62 in `ble_devices.json`, checked against what the device actually does:
+
+| Declared function | Matches observed behaviour? |
+|---|---|
+| `colour_data_v3` | **yes** - the `E0 01` colour command this PR adds |
+| `switch_led_v3` | consistent (the `e001{preview}` power form) |
+| `state_upload_v2` (`ea818a8b`) | **yes** - the device answers this query |
+| `temp_value_v2` | matches the "RGBWW" in the model name; see below |
+| `protocols: common, common1_0, common2_0` | `common2_0` **is** the v3 command family |
+| `stateProtocol: ...V1, ...V2` | matches the v2 state frame it returns |
+
+So the device speaks v3 **because of its product ID**, which the vendor app looks up. There is
+no advert heuristic to find: the answer was in bytes 8-9 all along, and we were discarding it.
+
+The reporter had independently narrowed `0x3E` down themselves, noting it was constant, present
+in the passive advertisement as well as the notification, and therefore "a point for it being a
+static device/firmware sub-identifier" rather than the battery level they first guessed. Correct
+reasoning; it is the product ID.
+
+## Consequences
+
+1. **`parse_service_data` hardcodes `product_id: 0` for every 14-byte device**
+   (protocol.py:2373 area) and `parse_manufacturer_data` separately forces `0x00` for any
+   name starting "IOTBT" (protocol.py:1869, an early return that also discards ble_version
+   and all state). Between them we manufacture the ambiguity that the `flags2` heuristic then
+   guesses at.
+2. **Product 62 is not in `PRODUCT_CAPABILITIES` at all.** It would need adding. Note the
+   name-lookup hit for `62` in const.py is an entry in `SYMPHONY_SCENE_EFFECTS` ("Blue Ring"),
+   an effect name, not a product.
+3. **The reporter's device is losing colour temperature.** It declares `temp_value_v2` and its
+   model name is ZJ-BBLA-**RGBWW**, but forced to `product_id = 0x00` it inherits
+   `has_ww: False, has_cw: False` and gets no CCT support at all. Worth telling them.
+4. **The DeviceState2 doc table is wrong too.** `protocol_docs/17_device_configuration.md`
+   labels bytes 3-4 of the `0xEA 0x81` response "Device mesh address (big-endian, & 0x7FFF)"
+   and byte 5 "Mode". They are product ID and (probably) led_version. The `& 0x7FFF` mask is
+   itself a hint that whoever wrote `DeviceState2.java` was unsure what the field was.
+
+## What this does not settle
+
+- Whether reading the product ID is sufficient to pick the command family in general.
+  Product 173 (IOTBT6BA, segment) also declares `colour_data_v3`, yet that device uses the
+  segment `0xE1 0x03` command. So the declared function list narrows the family but does not
+  fully determine it. Still a far better signal than `flags2`.
+- Product 194 (IOTBT812) is in neither database, so a product-ID-driven path needs a sane
+  fallback for unknown IDs.

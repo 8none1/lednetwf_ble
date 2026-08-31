@@ -405,12 +405,17 @@ real firmware update and byte 10 went `0x0E` -> `0x1D`, i.e. 14 -> 29. That is w
 firmware version byte does; an LED *hardware* version would not move. This one relabelling
 explains the whole "the discriminator keeps shifting" saga.
 
-The 14-byte format looks like the standard 16-byte ZengGe service data with the 2-byte
-manufacturer prefix omitted, which realigns every field by -2 and would make bytes 8-9
-(currently `mesh_address`) the **product ID**. Confidence is high on byte 10, medium on the
-realignment as a whole, and low on the product-ID reading specifically, since a provisioned
-mesh address is also invariant and also a small integer. Full evidence table and the cheapest
-way to settle it: `ai_instructions/iotbt_variant_findings.md`.
+The 14-byte format is the standard 16-byte ZengGe service data with the 2-byte manufacturer
+prefix omitted, which realigns every field by -2 and makes bytes 8-9 (currently
+`mesh_address`) the **product ID**. Confirmed the same day: PR #101's reporter supplied both
+their service data and their `0xEA 0x81` state frame, the same value `0x003E` (62) appears in
+both in fields we call "mesh address", and product 62 in `ble_devices.json` declares exactly
+the capabilities the device demonstrably has (`colour_data_v3`, `state_upload_v2`,
+`temp_value_v2`, protocol `common2_0`). The device speaks the v3 command family *because of
+its product ID*. Full evidence: `ai_instructions/iotbt_variant_findings.md`.
+
+The same mislabelling is in the `0xEA 0x81` (DeviceState2) response table in
+`protocol_docs/17_device_configuration.md`, which calls bytes 3-4 the mesh address.
 
 **Why it matters**: we force `product_id = 0x00` for these devices in two independent places
 (`parse_service_data` hardcodes it, and `parse_manufacturer_data` forces it for any
@@ -419,9 +424,14 @@ and all state). If the real product ID is sitting in bytes 8-9, we are discardin
 guessing the command family from a heuristic on a mislabelled neighbouring byte. Resolve this
 before adding more detection heuristics.
 
-**Not yet fixed in code.** Renaming the fields is easy; deciding whether to trust bytes 8-9
-as a product ID is not, and getting it wrong would misassign capabilities for every IOTBT
-device. Needs one corroborated advert first.
+**Not yet fixed in code.** Renaming the fields is easy. Actually *using* the product ID is a
+bigger change: product 62 is not in `PRODUCT_CAPABILITIES`, product 194 (IOTBT812) is in
+neither database, and product 173 declares `colour_data_v3` while actually using the segment
+command set, so the declared function list narrows the command family without fully
+determining it. Needs a plan, not a quick patch. Related consequence worth noting: PR #101's
+reporter has an RGBWW device that declares `temp_value_v2` but inherits
+`has_ww: False, has_cw: False` from the forced `product_id = 0x00`, so it has no colour
+temperature support at all.
 
 ---
 
