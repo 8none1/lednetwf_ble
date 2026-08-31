@@ -381,7 +381,7 @@ we already know.
 | Power `0x71 0x23`/`0x24` | works |
 | Colour `E2 0B <hue> <0xE0\|level>` (our Telink builder) | **accepted over BLE, silently ignored** |
 | Colour `E2 0B` with unquantised hue | ignored |
-| Colour `0x3B` HSV | ignored (per reporter) |
+| Colour `0x3B` HSV | ignored - **retested with our builder's exact bytes** |
 | Colour `0x31` legacy RGB | ignored (per reporter) |
 | Colour `E0 01 00 A1 ...` (below) | **works** |
 
@@ -412,50 +412,56 @@ Byte 9 of the inner body is `0x14` while setting red, yellow and blue, so it is 
 blue channel. It sits where the app's `temp_value_v2` template hardcodes `0x1e`, i.e. it
 looks like a transition/gradient parameter.
 
-## Open questions
+## Open questions - ALL RESOLVED (31 August 2026, PR #101 merged in 2.0.1-beta13)
 
-1. **Does the plain `0x3B` colour command work?** The reporter says no, but if the
-   `E0 01`-wrapped version of essentially the same body works, that deserves a retest with
-   exact bytes. Our builder emits, for red and blue:
+1. **Does the plain `0x3B` colour command work? NO.** The reporter tested the exact bytes our
+   builder emits:
    ```
-   00 00 80 00 00 0d 0e 0b 3b a1 00 64 64 00 00 ff 00 00 00 00 a3
-   00 00 80 00 00 0d 0e 0b 3b a1 78 64 64 00 00 00 00 ff 00 00 1b
+   00 00 80 00 00 0d 0e 0b 3b a1 00 64 64 00 00 ff 00 00 00 00 a3   (red)
+   00 00 80 00 00 0d 0e 0b 3b a1 78 64 64 00 00 00 00 ff 00 00 1b   (blue)
    ```
-   If either drives the lamp, this needs no new builder, only detection routing the device
-   to the standard `else` branch, exactly the conclusion reached for IOTBT812 above.
-   Requested in the PR.
-2. **Where did the inner `3b` go?** `switch_led_v3` = `e001{preview}` + the whole
-   `switch_led_v2` form, keeping its `3b` opcode. This capture has no `3b`. Either the
-   colour v3 form drops it the way `scene_data_v3` drops `38`, or it is missing from the
-   transcription. Needs the raw capture.
-3. **cmd_family.** PR #101 keeps `0x0a` ("expects response"), and that is probably fine.
-   The family byte is **not** consistent across IOTBT families, so do not assume `0x0b`:
+   Neither drives the lamp. **The `E0 01` envelope is load-bearing**, not merely a different
+   way of saying the same thing, so a separate builder genuinely was needed and this was not
+   a detection-only fix. Worth remembering: the payload being identical to a command the
+   device ignores does not mean the device will accept it unwrapped.
+2. **Where did the inner `3b` go? It is genuinely absent.** Offset 3 holds `0xa1` (the mode
+   byte) in all three captured colours. So the colour v3 form follows the `scene_data_v3`
+   pattern (`e0 02` replaces `38`) rather than the `switch_led_v3` pattern (`e001{preview}`
+   keeps the inner `3b`). Both patterns exist in the app; do not assume either.
+3. **cmd_family is `0x0a`**, read directly from envelope byte 7 of the capture, not inferred.
+   The family byte is **not** consistent across IOTBT families:
 
    | Capture | Family byte used for state-changing commands |
    |---------|----------------------------------------------|
    | IOTBT812 (Telink), 125 writes incl. `E0 02` effects | `0x0a` |
+   | ZJ-BBLA-RGBWW (v3), `E0 01` colour | `0x0a` |
    | IOTBT6BA / IOTBT4B0 (segment) | `0x0b`, with `0x0a` reserved for queries |
 
-   So `0x0a` has direct capture support for `E0` commands on the Telink family. Envelope
-   byte 7 of this device's raw capture would confirm it either way, but this is not a
-   likely source of breakage.
-4. **flags2** for this device, to key auto-detection.
+4. **flags2 = `0x01`** on this device (bit `0x08` clear, so it auto-detects as non-segment,
+   which is why the v3 override reaches the dispatch at all). Not used for detection: see
+   below, there is a much better signal.
 
-## Recommended fix shape
+## Fix as shipped (2.0.1-beta13)
 
 Not a swap of `build_iotbt_color_command`. That function is reached only from the
-`elif self.is_iotbt` branch (`device.py:1491`), which is the Telink family, and the `0xE2`
-form there is byte-exact against the IOTBT812 capture. Replacing it trades one working
-family for another.
+`elif self.is_iotbt` branch in `set_rgb_color`, which is the Telink family, and the `0xE2`
+form there is byte-exact against the IOTBT812 capture. Replacing it would have traded one
+working family for another. What landed instead:
 
-Instead:
+1. `build_iotbt_v3_color_command()` alongside the untouched Telink builder, using a new
+   shared `pack_hue_saturation()` helper that `build_color_command_0x3B()` now also uses, so
+   the two cannot drift. Verified byte-identical output for `0x3B` across 2592 colour and
+   brightness combinations before merging, since that path serves every Symphony and
+   addressable device.
+2. `IOTBT_PROTOCOL_V3` added to `CONF_IOTBT_PROTOCOL` (`auto`/`telink`/`segment`/`v3`), with
+   an `is_iotbt_v3` property and a dispatch branch ordered before `is_iotbt`. Note
+   `is_iotbt_segment` had to learn to return `False` for the `v3` override too, otherwise a
+   v3 device that auto-detected as segment would silently keep getting segment commands.
+3. **No auto-detection.** Override-only, on purpose. See below: the right signal is the
+   product ID, and that deserves doing properly rather than as a fourth heuristic.
 
-1. New builder (e.g. `build_iotbt_v3_color_command`), leaving the Telink one alone. It
-   should reuse the existing packed hue+sat helper rather than reimplementing `hue // 2`.
-2. A third value on the `CONF_IOTBT_PROTOCOL` override (currently `auto`/`telink`/`segment`,
-   `const.py:22`, `device.py:521`) so affected users have a manual escape hatch.
-3. Auto-detection keyed on the advert once we have this device's `flags2` and ideally a
-   second device of the same class.
+Brightness note: the `val` byte floors at 1, matching the segment builder, so a dim
+`rgb_color` at low brightness cannot round down to 0 and read as "off".
 
 ## Bonus: 0xEA 0x81 state frame from this device
 
@@ -466,11 +472,20 @@ EA 81 00 00 3E 0A 23 61 2B 40 F0 <hue> 64 64 00 ...
 ```
 
 The `<hue>` byte tracks live state, so this is a genuinely readable status frame for this
-class. Byte 4 (`0x3E`) is unidentified; the reporter guessed battery percent but the vendor
-app exposes no battery reading, so there is nothing to check it against. Given `64 64`
-follows the hue byte, the `<hue> 64 64` run is very likely the same packed-hue-high-byte /
-low-byte / brightness triple as the colour command, which would make byte 11 the hue high
-byte rather than a whole hue. Untested.
+class. **Byte 4 (`0x3E`) is the product ID, 62** - see the confirmation section at the end of
+this document. It was originally logged as unidentified, with battery percent as a guess.
+
+Byte 5 (`0x0A`) matches service-data byte 11 on the same device, i.e. `led_version` under the
+realignment. Bytes 6-7 are `0x23` power-on and `0x61` colour mode, matching the standard state
+layout.
+
+Still untested: given `64 64` follows the hue byte, the `<hue> 64 64` run is probably the same
+packed-hue-high-byte / low-byte / brightness triple as the colour command, which would make
+byte 11 the hue *high byte* rather than a whole hue. Nobody has driven the device to an odd
+hue and re-read the frame to check.
+
+Full annotated capture (contributor's gist, linked from `DISCOVERIES.md`):
+https://gist.github.com/HelloPackets89/f7836b577a714576b206af4ca3574a1f
 
 ---
 
