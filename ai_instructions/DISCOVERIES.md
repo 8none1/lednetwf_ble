@@ -424,14 +424,15 @@ and all state). If the real product ID is sitting in bytes 8-9, we are discardin
 guessing the command family from a heuristic on a mislabelled neighbouring byte. Resolve this
 before adding more detection heuristics.
 
-**Not yet fixed in code.** Renaming the fields is easy. Actually *using* the product ID is a
-bigger change: product 62 is not in `PRODUCT_CAPABILITIES`, product 194 (IOTBT812) is in
-neither database, and product 173 declares `colour_data_v3` while actually using the segment
-command set, so the declared function list narrows the command family without fully
-determining it. Needs a plan, not a quick patch. Related consequence worth noting: PR #101's
-reporter has an RGBWW device that declares `temp_value_v2` but inherits
-`has_ww: False, has_cw: False` from the forced `product_id = 0x00`, so it has no colour
-temperature support at all.
+**Partly fixed** in PR #103 (2.0.1-beta14): the fields are now parsed and named correctly,
+the product ID is logged, and it drives v3 command-family detection in place of the `flags2`
+heuristic. What is deliberately NOT done is using it for capability lookup, because that would
+re-resolve capabilities and the command family for every IOTBT device at once - product 173
+would become `Symphony_Curtain` and lose the segment command set that IOTBT6BA needs and
+currently works on. Remaining work: add product 62 to `PRODUCT_CAPABILITIES` (it declares
+`temp_value_v2` and its model name ends in RGBWW, but forced to `product_id = 0x00` it has no
+colour temperature support at all), and decide on a fallback for product IDs in neither
+database, such as IOTBT812's 194.
 
 ---
 

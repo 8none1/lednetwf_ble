@@ -542,23 +542,37 @@ in the passive advertisement as well as the notification, and therefore "a point
 static device/firmware sub-identifier" rather than the battery level they first guessed. Correct
 reasoning; it is the product ID.
 
-## Consequences
+## Consequences, and what was done about them (PR #103, shipped in 2.0.1-beta14)
 
-1. **`parse_service_data` hardcodes `product_id: 0` for every 14-byte device**
-   (protocol.py:2373 area) and `parse_manufacturer_data` separately forces `0x00` for any
-   name starting "IOTBT" (protocol.py:1869, an early return that also discards ble_version
-   and all state). Between them we manufacture the ambiguity that the `flags2` heuristic then
-   guesses at.
-2. **Product 62 is not in `PRODUCT_CAPABILITIES` at all.** It would need adding. Note the
-   name-lookup hit for `62` in const.py is an entry in `SYMPHONY_SCENE_EFFECTS` ("Blue Ring"),
-   an effect name, not a product.
-3. **The reporter's device is losing colour temperature.** It declares `temp_value_v2` and its
-   model name is ZJ-BBLA-**RGBWW**, but forced to `product_id = 0x00` it inherits
-   `has_ww: False, has_cw: False` and gets no CCT support at all. Worth telling them.
-4. **The DeviceState2 doc table is wrong too.** `protocol_docs/17_device_configuration.md`
-   labels bytes 3-4 of the `0xEA 0x81` response "Device mesh address (big-endian, & 0x7FFF)"
-   and byte 5 "Mode". They are product ID and (probably) led_version. The `& 0x7FFF` mask is
-   itself a hint that whoever wrote `DeviceState2.java` was unsure what the field was.
+1. **The mislabelled fields are fixed.** `parse_service_data`'s 14-byte branch now reports
+   `advertised_product_id` (bytes 8-9), `firmware_ver` (byte 10) and `led_version` (byte 11)
+   with their correct meanings, and logs the product ID at info level so bug reports carry
+   it. `mesh_address` is kept as an alias for the same value. The clincher for the layout was
+   that `parse_manufacturer_data`'s "Format B" branch, in the same file, already reads
+   exactly these offsets correctly - the correct layout was in the codebase all along, about
+   twelve hundred lines away.
+2. **v3 detection now uses the product ID, not `flags2`.** `IOTBT_V3_PRODUCT_IDS` (currently
+   just product 62) drives `is_iotbt_v3`, sourced from the vendor's own device database
+   rather than another byte heuristic. `is_iotbt_segment` returns `False` for a known-v3
+   product, otherwise a v3 device whose `flags2` bit happened to be set would be routed to
+   segment commands, since the segment branch is checked first in the dispatch.
+3. **`product_id` still resolves as `0x00` for capability lookup, deliberately.** Honouring
+   the real ID there would re-resolve capabilities, and therefore the command family, for
+   every IOTBT device at once. Concretely: product 173 resolves to `Symphony_Curtain` with
+   `effect_type: SYMPHONY`, which would take IOTBT6BA off the segment path it currently needs
+   and works on. Needs hardware to test.
+4. **Product 62 is still not in `PRODUCT_CAPABILITIES`,** so the ZJ-BBLA-RGBWW is still
+   missing colour temperature it should have: it declares `temp_value_v2` and its model name
+   ends in RGBWW, but forced to `product_id = 0x00` it inherits
+   `has_ww: False, has_cw: False`. This is the clearest next step and it needs the device.
+   Note the name-lookup hit for `62` in const.py is an entry in `SYMPHONY_SCENE_EFFECTS`
+   ("Blue Ring"), an effect name, not a product.
+5. **The DeviceState2 doc table was wrong the same way** and is corrected in this branch.
+   `protocol_docs/17_device_configuration.md` labelled bytes 3-4 of the `0xEA 0x81` response
+   "Device mesh address (big-endian, & 0x7FFF)" and byte 5 "Mode". The `& 0x7FFF` mask is
+   itself a hint that whoever wrote `DeviceState2.java` was unsure what the field was. The
+   parser for that response is not yet updated to expose the product ID from it; the
+   advertisement is the more useful source since it needs no connection.
 
 ## What this does not settle
 
