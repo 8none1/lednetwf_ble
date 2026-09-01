@@ -23,6 +23,17 @@ IOTBT_PROTOCOL_AUTO: Final = "auto"
 IOTBT_PROTOCOL_TELINK: Final = "telink"
 IOTBT_PROTOCOL_SEGMENT: Final = "segment"
 IOTBT_PROTOCOL_V3: Final = "v3"
+
+# Real product IDs (from advertisement bytes 8-9, see parse_service_data) that are
+# known to need the v3 command family. These devices advertise as "IOTBT*" and get
+# product_id 0x00 forced for capability lookup, so this set is the only place their
+# real identity is used.
+#
+# Product 62 (0x3E): JM Zengge ZJ-BBLA-RGBWW battery mood light. Declares
+# colour_data_v3 / switch_led_v3 / protocol common2_0 in the vendor app's
+# ble_devices.json, and confirmed on hardware to ignore the Telink 0xE2 colour
+# command while accepting 0xE0 0x01. Source: PR #101.
+IOTBT_V3_PRODUCT_IDS: Final = frozenset({62})
 IOTBT_PROTOCOL_CHOICES: Final = (
     IOTBT_PROTOCOL_AUTO,
     IOTBT_PROTOCOL_TELINK,

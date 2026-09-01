@@ -2391,17 +2391,34 @@ def parse_service_data(service_data: bytes) -> dict | None:
         Byte 14: check_key + fw_hi - Bits 0-1: check_key, Bits 2-7: firmware high (BLE v6+)
         Byte 15: firmware_flag - Feature flags (bits 0-4)
     """
-    # Handle IOTBT 14-byte format (Telink BLE Mesh)
-    # Format: [status][ble_ver][MAC 6 bytes][mesh_addr 2 bytes][led_ver][mode][flags][flags2]
-    # Status byte can be 0x80 (standard) or 0x56 (variant seen on some IOTBT devices)
-    # or other values. The 14-byte length with UUID 0x5A00 is the distinctive marker.
+    # Handle IOTBT 14-byte format.
+    #
+    # This is the standard ZengGe advertisement layout, NOT a bespoke Telink one.
+    # parse_manufacturer_data's "Format B" branch already reads exactly these
+    # offsets correctly (product ID at bytes 8-9, firmware at byte 10, LED version
+    # at byte 11); this branch used to label the same bytes "mesh_addr", "led_ver"
+    # and "mode", which is where a long run of IOTBT detection trouble came from.
+    #
+    # Evidence for the relabelling (see ai_instructions/iotbt_variant_findings.md):
+    #  - Byte 10 moved 0x0E -> 0x1D (14 -> 29) on a device that had a firmware
+    #    update, which is what a firmware version does and an LED hardware version
+    #    does not.
+    #  - Bytes 8-9 carry the same value as bytes 3-4 of the device's own 0xEA 0x81
+    #    state response, and that value resolves to a real product in the vendor's
+    #    ble_devices.json whose declared commands match what the device actually
+    #    speaks (product 62 declares colour_data_v3, and that device needs the
+    #    0xE0 0x01 colour command).
+    #
+    # Format: [sta][ble_ver][MAC 6 bytes][product_id 2 bytes][fw_ver][led_ver][flags][flags2]
+    # Status byte can be 0x80 (standard), 0x56 (segment variant) or 0x5B, among others.
+    # The 14-byte length with UUID 0x5A00 is the distinctive marker.
     if len(service_data) == 14:
         sta = service_data[0] & 0xFF
         ble_version = service_data[1] & 0xFF
         mac_bytes = service_data[2:8]
-        mesh_addr = (service_data[8] << 8) | service_data[9]
-        led_version = service_data[10] & 0xFF
-        mode = service_data[11] & 0xFF
+        advertised_product_id = (service_data[8] << 8) | service_data[9]
+        firmware_ver = service_data[10] & 0xFF
+        led_version = service_data[11] & 0xFF
         flags = service_data[12] & 0xFF
         flags2 = service_data[13] & 0xFF
 
@@ -2409,8 +2426,10 @@ def parse_service_data(service_data: bytes) -> dict | None:
 
         _LOGGER.debug(
             "Parsed IOTBT service data (14-byte format): sta=0x%02X, ble_v=%d, mac=%s, "
-            "mesh_addr=0x%04X, led_ver=%d, mode=0x%02X, flags=0x%02X",
-            sta, ble_version, mac_address, mesh_addr, led_version, mode, flags
+            "advertised_product_id=0x%02X (%d), fw_ver=%d, led_ver=%d, "
+            "flags=0x%02X, flags2=0x%02X",
+            sta, ble_version, mac_address, advertised_product_id,
+            advertised_product_id, firmware_ver, led_version, flags, flags2
         )
 
         return {
@@ -2419,14 +2438,21 @@ def parse_service_data(service_data: bytes) -> dict | None:
             "is_iotbt": True,
             "ble_version": ble_version,
             "mac_address": mac_address,
-            "mesh_address": mesh_addr,
+            # The device's real product ID, reported separately from "product_id"
+            # below. Capability lookup still uses 0x00 for these devices: honouring
+            # the real ID would change the resolved capabilities (and therefore the
+            # command family) for every IOTBT device at once, including ones that
+            # work today. See the note in iotbt_variant_findings.md.
+            "advertised_product_id": advertised_product_id,
+            # Kept under the old name as well: these are the same two bytes, and
+            # anything still reading "mesh_address" should keep working.
+            "mesh_address": advertised_product_id,
             "led_version": led_version,
-            "mode": mode,
             "flags2": flags2,
-            "firmware_ver": led_version,  # Use led_version as firmware indicator
-            "firmware_ver_str": str(led_version),
+            "firmware_ver": firmware_ver,
+            "firmware_ver_str": str(firmware_ver),
             "firmware_flag": flags,
-            "product_id": 0,  # IOTBT always product_id=0
+            "product_id": 0,  # Capability lookup key, deliberately not the real ID
         }
 
     if len(service_data) < 16:
