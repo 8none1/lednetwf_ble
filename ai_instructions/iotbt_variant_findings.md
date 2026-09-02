@@ -258,7 +258,62 @@ remain correct for the payloads.
 
    Post-update service data: `80 08 08 65 F0 17 58 12 00 C2 1D 06 01 05`.
    `led_version` moved 0x0E→0x1D, adjacent to 6BA's 0x1F, so it no longer separates Telink from
-   segment. **Conclusion: auto-detecting Telink vs segment from advert fields is not reliable
+   segment.
+
+   **ADDENDUM 31 August 2026: `led_version` is mislabelled. Byte 10 is the firmware
+   version.** That is why it "shifted": a firmware update is exactly what changes a firmware
+   version byte. 0x0E -> 0x1D is 14 -> 29, and the app's own gates talk in those terms
+   (`deviceMinVer: 10`, "firmware >= 11"). An LED *hardware* version would not move.
+
+   The 14-byte service data appears to be the standard 16-byte ZengGe layout with the 2-byte
+   manufacturer prefix (`mfr_hi`/`mfr_lo`) omitted. Every field then lines up:
+
+   | byte | our name | 16-byte layout, shifted by -2 | evidence |
+   |------|----------|-------------------------------|----------|
+   | 0 | sta | sta | same in both |
+   | 1 | ble_version | ble_version (16-byte byte 3) | same in both, and it did bump 7->8 |
+   | 2-7 | mac | mac (bytes 4-9) | same in both |
+   | 8-9 | mesh_address | **product_id, big-endian** (bytes 10-11) | unchanged across the update |
+   | 10 | led_version | **firmware_ver_lo** (byte 12) | 14 -> 29 across a firmware update |
+   | 11 | mode | **led_version** (byte 13) | 3 -> 6; see caveat |
+   | 12 | flags | check_key + fw_hi (byte 14) | unchanged (fw stayed under 64) |
+   | 13 | flags2 | firmware_flag (byte 15) | unchanged |
+
+   Confidence, honestly:
+
+   - **HIGH that byte 10 is a firmware version, not an LED version.** The 14 -> 29 jump on a
+     firmware update is decisive, and it is the single fact that explains why every
+     advert-based discriminator we tried kept moving.
+   - **MEDIUM on the whole -2 realignment.** All eight fields line up and nothing contradicts
+     it, but it is inferred from the layout, not read out of the app's parser. I did not find
+     the app code that decodes the 14-byte form; `ADVModel` is the non-connect mesh ADV
+     format, which is a different thing.
+   - **CONFIRMED (upgraded from LOW, same day) that bytes 8-9 are the product ID.** See
+     the section below: PR #101's reporter supplied their service data and their `0xEA 0x81`
+     state frame, and the same value appears in both, in two fields we label "mesh address",
+     and it resolves to a real product whose declared capabilities match the device's
+     observed behaviour exactly. `0x00AD` = 173 is also a real product ID (an `hc3`
+     matrix/curtain device declaring `switch_led_v3` and `colour_data_v3`). Only
+     `0x00C2` = 194 is in neither database, which is consistent with a product newer than
+     this app version.
+
+   **Why this matters more than the immediate PR**: if bytes 8-9 really are the product ID,
+   then `parse_service_data` is discarding it and hardcoding `product_id: 0` for every
+   14-byte device, and `parse_manufacturer_data` separately forces `product_id = 0x00` for
+   any device whose name starts "IOTBT" (protocol.py:1869, an early return that also throws
+   away ble_version and all state). We would be manufacturing the very ambiguity that the
+   flags2 heuristic then tries to guess its way out of. Worth resolving before adding more
+   heuristics.
+
+   **Cheapest way to settle it**: one advert from a device whose real product ID we can
+   corroborate another way. PR #101's reporter has been asked for their raw service data;
+   their byte 10 is 68, which under this reading means firmware 68, and their bytes 8-9 would
+   be the test case. Failing that, find the 14-byte parse in the app's Dart/Java.
+
+   Byte 11 caveat: under the realignment it is `led_version`, and it moved 3 -> 6 on the
+   update, which an LED hardware version arguably should not. Either the vendor bumped it, or
+   the realignment is off. It is still a better discriminator candidate than byte 10, and it
+   was originally dismissed only on the guess that "mode" meant operating state. **Conclusion: auto-detecting Telink vs segment from advert fields is not reliable
    across firmware. The manual override (Auto/Telink/Segment) must be the primary mechanism.**
 
 2. **Transport framing changed, keyed to `ble_version`:**
@@ -295,3 +350,240 @@ Verified by the 57 -> 60 change in the capture (`...01 00 39...` -> `...01 00 3C
 **Decision (Will, 2026):** NOT implementing read-back or sensors for this. The LED count
 stays a write-only config item, as it is now; the read-back data isn't worth surfacing. The
 format is recorded here only in case that changes.
+
+---
+
+# A third variant: the 0xE0 0x01 colour family (PR #101)
+
+**Date**: 31 August 2026. Source: PR #101, reporter's own HCI snoop capture of the vendor
+app. Not independently verified by us; the byte-level decode below is ours.
+
+## The device
+
+Briturn app / JM Zengge "ZJ-BBLA-RGBWW" battery-powered mood light.
+
+| Field | Value |
+|-------|-------|
+| product_id | 0x00 |
+| effect_type | IOTBT |
+| ble_version | 7 |
+| led_version | 68 (0x44) |
+| flags2 (service data byte 13) | **not yet supplied** |
+
+`led_version = 68` matches neither device we had data for (IOTBT6BA `0x1F`/31, IOTBT812
+`0x0E`/14), which is consistent with this being a third class rather than either of the two
+we already know.
+
+## What does and does not work on it
+
+| Command | Result |
+|---------|--------|
+| Power `0x71 0x23`/`0x24` | works |
+| Colour `E2 0B <hue> <0xE0\|level>` (our Telink builder) | **accepted over BLE, silently ignored** |
+| Colour `E2 0B` with unquantised hue | ignored |
+| Colour `0x3B` HSV | ignored - **retested with our builder's exact bytes** |
+| Colour `0x31` legacy RGB | ignored (per reporter) |
+| Colour `E0 01 00 A1 ...` (below) | **works** |
+
+Note the awkward combination: Telink power works, Telink colour does not. So power success is
+not evidence of command family, which is the same trap flagged for IOTBT812 further up this
+document.
+
+## The working colour command
+
+| Colour | Payload (after the standard 8-byte envelope) |
+|--------|---------------------------------------------|
+| red (0 deg) | `e0 01 00 a1 00 64 64 00 00 00 00 14 00 00` |
+| yellow (60 deg) | `e0 01 00 a1 1e 64 64 00 00 00 00 14 00 00` |
+| blue (240 deg) | `e0 01 00 a1 78 64 64 00 00 00 00 14 00 00` |
+
+Reporter verified the full hue range and a 5-100% brightness sweep, both from a standalone
+bleak script and through the HA entity.
+
+**This is not a new encoding.** The PR describes it as "hue = degrees / 2, then saturation",
+but `a1 <b1> <b2> <bright>` is the `0x3B` solid-colour command's mode byte plus the standard
+packed hue+sat pair plus brightness. The two readings are numerically identical for every
+even hue at saturation <= 100, and the three test colours are all even-hue saturated
+primaries, so the capture cannot distinguish them. See `DISCOVERIES.md`. The same four bytes
+turn up as each palette entry in `IOTBT_SEGMENT_EFFECT_SCENES`, so all three IOTBT families
+we know of use this one colour encoding.
+
+Byte 9 of the inner body is `0x14` while setting red, yellow and blue, so it is not the
+blue channel. It sits where the app's `temp_value_v2` template hardcodes `0x1e`, i.e. it
+looks like a transition/gradient parameter.
+
+## Open questions - ALL RESOLVED (31 August 2026, PR #101 merged in 2.0.1-beta13)
+
+1. **Does the plain `0x3B` colour command work? NO.** The reporter tested the exact bytes our
+   builder emits:
+   ```
+   00 00 80 00 00 0d 0e 0b 3b a1 00 64 64 00 00 ff 00 00 00 00 a3   (red)
+   00 00 80 00 00 0d 0e 0b 3b a1 78 64 64 00 00 00 00 ff 00 00 1b   (blue)
+   ```
+   Neither drives the lamp. **The `E0 01` envelope is load-bearing**, not merely a different
+   way of saying the same thing, so a separate builder genuinely was needed and this was not
+   a detection-only fix. Worth remembering: the payload being identical to a command the
+   device ignores does not mean the device will accept it unwrapped.
+2. **Where did the inner `3b` go? It is genuinely absent.** Offset 3 holds `0xa1` (the mode
+   byte) in all three captured colours. So the colour v3 form follows the `scene_data_v3`
+   pattern (`e0 02` replaces `38`) rather than the `switch_led_v3` pattern (`e001{preview}`
+   keeps the inner `3b`). Both patterns exist in the app; do not assume either.
+3. **cmd_family is `0x0a`**, read directly from envelope byte 7 of the capture, not inferred.
+   The family byte is **not** consistent across IOTBT families:
+
+   | Capture | Family byte used for state-changing commands |
+   |---------|----------------------------------------------|
+   | IOTBT812 (Telink), 125 writes incl. `E0 02` effects | `0x0a` |
+   | ZJ-BBLA-RGBWW (v3), `E0 01` colour | `0x0a` |
+   | IOTBT6BA / IOTBT4B0 (segment) | `0x0b`, with `0x0a` reserved for queries |
+
+4. **flags2 = `0x01`** on this device (bit `0x08` clear, so it auto-detects as non-segment,
+   which is why the v3 override reaches the dispatch at all). Not used for detection: see
+   below, there is a much better signal.
+
+## Fix as shipped (2.0.1-beta13)
+
+Not a swap of `build_iotbt_color_command`. That function is reached only from the
+`elif self.is_iotbt` branch in `set_rgb_color`, which is the Telink family, and the `0xE2`
+form there is byte-exact against the IOTBT812 capture. Replacing it would have traded one
+working family for another. What landed instead:
+
+1. `build_iotbt_v3_color_command()` alongside the untouched Telink builder, using a new
+   shared `pack_hue_saturation()` helper that `build_color_command_0x3B()` now also uses, so
+   the two cannot drift. Verified byte-identical output for `0x3B` across 2592 colour and
+   brightness combinations before merging, since that path serves every Symphony and
+   addressable device.
+2. `IOTBT_PROTOCOL_V3` added to `CONF_IOTBT_PROTOCOL` (`auto`/`telink`/`segment`/`v3`), with
+   an `is_iotbt_v3` property and a dispatch branch ordered before `is_iotbt`. Note
+   `is_iotbt_segment` had to learn to return `False` for the `v3` override too, otherwise a
+   v3 device that auto-detected as segment would silently keep getting segment commands.
+3. **No auto-detection.** Override-only, on purpose. See below: the right signal is the
+   product ID, and that deserves doing properly rather than as a fourth heuristic.
+
+Brightness note: the `val` byte floors at 1, matching the segment builder, so a dim
+`rgb_color` at low brightness cannot round down to 0 and read as "off".
+
+## Bonus: 0xEA 0x81 state frame from this device
+
+Reporter's capture of the response to an `EA 81` state query:
+
+```
+EA 81 00 00 3E 0A 23 61 2B 40 F0 <hue> 64 64 00 ...
+```
+
+The `<hue>` byte tracks live state, so this is a genuinely readable status frame for this
+class. **Byte 4 (`0x3E`) is the product ID, 62** - see the confirmation section at the end of
+this document. It was originally logged as unidentified, with battery percent as a guess.
+
+Byte 5 (`0x0A`) matches service-data byte 11 on the same device, i.e. `led_version` under the
+realignment. Bytes 6-7 are `0x23` power-on and `0x61` colour mode, matching the standard state
+layout.
+
+Still untested: given `64 64` follows the hue byte, the `<hue> 64 64` run is probably the same
+packed-hue-high-byte / low-byte / brightness triple as the colour command, which would make
+byte 11 the hue *high byte* rather than a whole hue. Nobody has driven the device to an odd
+hue and re-read the frame to check.
+
+Full annotated capture (contributor's gist, linked from `DISCOVERIES.md`):
+https://gist.github.com/HelloPackets89/f7836b577a714576b206af4ca3574a1f
+
+---
+
+# Caveat surfaced while writing the above: 0xE0 0x14 has two conflicting meanings
+
+Our notes now attribute `E0 14` to two different things:
+
+- **Effect brightness** on IOTBT812: `E0 14 00 <lvl> 01 90 00 01`, lvl 1-4 (table further up
+  this document).
+- **LED count commit** on IOTBT6BA segment: `E0 14 01 00 00 <leds> <segs> 00`
+  (`build_iotbt_segment_led_commit_command`, confirmed byte-for-byte from the samoswall
+  capture).
+
+Both are from real captures, so both payloads are real, but at most one of the *labels* can
+be generally right. Note the third byte differs (`00` vs `01`), which is the position the
+app's v3 templates call `{preview}`. That may be the discriminator, or `{preview}` may simply
+not apply to this sub-command. Unresolved; do not rely on either label as the meaning of
+`E0 14` in general.
+
+
+---
+
+# CONFIRMED: bytes 8-9 are the product ID (PR #101 reporter data, 31 August 2026)
+
+The reporter supplied both frames from the same device. The same two-byte value appears in
+each, in the field we label "mesh address" in both places:
+
+```
+service data (14 byte):  5b 07 08 [xx xx xx xx xx] 00 3e 44 0a 01 01
+                                                   ^^^^^ bytes 8-9
+0xEA 0x81 state frame:   ea 81 00 00 3e 0a 23 61 2b 40 f0 <hue> 64 64 ...
+                                  ^^^^^ bytes 3-4
+```
+
+`0x003E` = **62**, and byte 11 of the service data (`0x0a`) equals byte 5 of the state frame
+(`0x0a`), so the two frames agree on two adjacent fields, not just one.
+
+Product 62 in `ble_devices.json`, checked against what the device actually does:
+
+| Declared function | Matches observed behaviour? |
+|---|---|
+| `colour_data_v3` | **yes** - the `E0 01` colour command this PR adds |
+| `switch_led_v3` | consistent (the `e001{preview}` power form) |
+| `state_upload_v2` (`ea818a8b`) | **yes** - the device answers this query |
+| `temp_value_v2` | matches the "RGBWW" in the model name; see below |
+| `protocols: common, common1_0, common2_0` | `common2_0` **is** the v3 command family |
+| `stateProtocol: ...V1, ...V2` | matches the v2 state frame it returns |
+
+So the device speaks v3 **because of its product ID**, which the vendor app looks up. There is
+no advert heuristic to find: the answer was in bytes 8-9 all along, and we were discarding it.
+
+The reporter had independently narrowed `0x3E` down themselves, noting it was constant, present
+in the passive advertisement as well as the notification, and therefore "a point for it being a
+static device/firmware sub-identifier" rather than the battery level they first guessed. Correct
+reasoning; it is the product ID.
+
+## Consequences, and what was done about them (PR #103, shipped in 2.0.1-beta14)
+
+1. **The mislabelled fields are fixed.** `parse_service_data`'s 14-byte branch now reports
+   `advertised_product_id` (bytes 8-9), `firmware_ver` (byte 10) and `led_version` (byte 11)
+   with their correct meanings, and logs the product ID at info level so bug reports carry
+   it. `mesh_address` is kept as an alias for the same value. The clincher for the layout was
+   that `parse_manufacturer_data`'s "Format B" branch, in the same file, already reads
+   exactly these offsets correctly - the correct layout was in the codebase all along, about
+   twelve hundred lines away.
+   **Confirmed live on hardware (1 September 2026)**: with the manual override cleared back
+   to `auto`, colour works on the ZJ-BBLA-RGBWW, and the device logs
+   `advertised_product_id=0x3E (62), fw_ver=68, led_ver=10`. So the relabelling and the
+   product-ID detection path are both verified on a real device, not just against stored
+   captures.
+2. **v3 detection now uses the product ID, not `flags2`.** `IOTBT_V3_PRODUCT_IDS` (currently
+   just product 62) drives `is_iotbt_v3`, sourced from the vendor's own device database
+   rather than another byte heuristic. `is_iotbt_segment` returns `False` for a known-v3
+   product, otherwise a v3 device whose `flags2` bit happened to be set would be routed to
+   segment commands, since the segment branch is checked first in the dispatch.
+3. **`product_id` still resolves as `0x00` for capability lookup, deliberately.** Honouring
+   the real ID there would re-resolve capabilities, and therefore the command family, for
+   every IOTBT device at once. Concretely: product 173 resolves to `Symphony_Curtain` with
+   `effect_type: SYMPHONY`, which would take IOTBT6BA off the segment path it currently needs
+   and works on. Needs hardware to test.
+4. **Product 62 is still not in `PRODUCT_CAPABILITIES`,** so the ZJ-BBLA-RGBWW is still
+   missing colour temperature it should have: it declares `temp_value_v2` and its model name
+   ends in RGBWW, but forced to `product_id = 0x00` it inherits
+   `has_ww: False, has_cw: False`. This is the clearest next step and it needs the device.
+   Note the name-lookup hit for `62` in const.py is an entry in `SYMPHONY_SCENE_EFFECTS`
+   ("Blue Ring"), an effect name, not a product.
+5. **The DeviceState2 doc table was wrong the same way** and is corrected in this branch.
+   `protocol_docs/17_device_configuration.md` labelled bytes 3-4 of the `0xEA 0x81` response
+   "Device mesh address (big-endian, & 0x7FFF)" and byte 5 "Mode". The `& 0x7FFF` mask is
+   itself a hint that whoever wrote `DeviceState2.java` was unsure what the field was. The
+   parser for that response is not yet updated to expose the product ID from it; the
+   advertisement is the more useful source since it needs no connection.
+
+## What this does not settle
+
+- Whether reading the product ID is sufficient to pick the command family in general.
+  Product 173 (IOTBT6BA, segment) also declares `colour_data_v3`, yet that device uses the
+  segment `0xE1 0x03` command. So the declared function list narrows the family but does not
+  fully determine it. Still a far better signal than `flags2`.
+- Product 194 (IOTBT812) is in neither database, so a product-ID-driven path needs a sane
+  fallback for unknown IDs.

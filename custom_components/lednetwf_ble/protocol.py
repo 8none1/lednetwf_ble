@@ -531,9 +531,14 @@ def build_iotbt_segment_color_command(
 # const.IOTBT_SEGMENT_EFFECTS (keep the two aligned). Each entry carries:
 #   scene   - the device's internal scene byte (NOT unique across scenes)
 #   m1, m2  - per-scene mode bytes (animation style / direction; stored verbatim)
-#   palette - list of (b1, b2, b3) triples sent as `A1 b1 b2 b3` segment entries,
-#             where b1 = hue on the device's 0-180 scale and b2/b3 carry
-#             saturation/value plus an anchor flag in the high bit.
+#   palette - list of (b1, b2, b3) triples sent as `A1 b1 b2 b3` segment entries.
+#             b1/b2 are the standard packed hue+sat pair, `(hue << 7) | sat`
+#             big-endian, exactly as in build_color_command_0x3B; b3 is
+#             brightness 0-100. So b1 == hue // 2 for any sat <= 100, and b2 is
+#             sat + 128 on odd hues, which is why 76 of the 166 entries have
+#             b2 > 100. (There is no "anchor flag" in the high bit - that was an
+#             earlier misreading. All 166 entries decode to a valid hue 0-340 and
+#             sat 0-100 under the packed reading. See ai_instructions/DISCOVERIES.md.)
 # All 46 templates round-trip byte-exact against the capture, so every scene
 # reproduces the app exactly. Speed is supplied by the caller (the device's
 # Effect Speed control), not baked into the template.

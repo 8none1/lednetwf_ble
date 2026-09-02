@@ -322,9 +322,18 @@ def detect_iotbt_response_type(data: bytes) -> str:
 | 0 | **0xEA** | Magic byte 1 (Telink "user all" opcode) |
 | 1 | **0x81** | Magic byte 2 (state query marker) |
 | 2 | ? | Reserved/unknown |
-| 3-4 | Address | Device mesh address (big-endian, & 0x7FFF) |
-| 5 | Mode | Current mode/brightness |
+| 3-4 | ~~Address~~ **product_id** | Big-endian. See correction below |
+| 5 | ~~Mode~~ **led_version** | See correction below |
 | 6 | Power | 0x23 = ON, others = OFF |
+
+**Correction, 31 August 2026**: bytes 3-4 are the **product ID**, not a mesh address.
+`DeviceState2.java`'s `& 0x7FFF` mask suggests its author was unsure too. Confirmed from a
+device (PR #101) whose service data and state frame both carry `0x003E` = 62 in the field we
+had labelled "mesh address" in both places, where product 62 in `ble_devices.json` declares
+exactly the capabilities the device demonstrably has. Byte 5 matches service-data byte 11 on
+the same device, which the realignment in `ai_instructions/iotbt_variant_findings.md` makes
+`led_version`. Note the same mislabelling exists in `parse_service_data`'s 14-byte branch,
+which additionally hardcodes `product_id: 0`.
 
 #### DeviceState Format (0x81 response)
 
@@ -367,19 +376,145 @@ def detect_iotbt_response_type(data: bytes) -> str:
 | 2 | cc | Quantized hue (1-240, 0=white) |
 | 3 | bb | Brightness (0xE0 OR level, level=0-31) |
 
+**Scope**: this is a genuine Telink opcode and it applies to the Telink command
+family only. Confirmed byte-exact against a capture of the vendor app driving an
+IOTBT812 (`pcap/surplife.pcapng`): the app sends `e2 0b 51 ff`, `e2 0b a1 ff`,
+`e2 0b 01 e0`. See `ai_instructions/iotbt_variant_findings.md`.
+
+**Do not assume it works on every `product_id=0x00` device.** At least one such
+device (Briturn / JM Zengge ZJ-BBLA-RGBWW, `led_version=68`) accepts the write
+over BLE without error and ignores it completely. That device uses the 0xE0 v3
+wrapper below instead. Reported in PR #101.
+
 ### Effect Command (0xE0 0x02)
 
 ```
-00 00 80 00 00 06 07 0a e0 02 ff ss bb
+00 00 80 00 00 06 07 0a e0 02 00 ff ss bb
 ```
 
 | Byte | Value | Description |
 |------|-------|-------------|
 | 0 | 0xE0 | Effect opcode |
 | 1 | 0x02 | Sub-command (effect mode) |
-| 2 | ff | Effect ID (1-12) |
-| 3 | ss | Speed (1-100) |
-| 4 | bb | Brightness percent (1-100) |
+| 2 | 0x00 | Wrapper `preview` byte (see below) |
+| 3 | ff | Effect ID |
+| 4 | ss | Speed (1-100) |
+| 5 | bb | Brightness percent (1-100) |
+
+**Table corrected 31 August 2026**: this previously listed 5 payload bytes and
+omitted byte 2, which contradicted both the envelope length in the example above
+(`06`) and `build_iotbt_effect_command`, which has always sent 6.
+
+**This is not a Telink command.** It is the app's generic `scene_data_v3`
+template (see the 0xE0 v3 wrapper section below), where byte 2 is the wrapper's
+`preview` flag rather than part of the effect payload. That is why the same
+command works across device families that share nothing else. The IOTBT812
+capture shows effect IDs up to 0x32 (50), not the 12 in `const.IOTBT_EFFECTS`.
+
+---
+
+## The 0xE0 "v3" Command Wrapper
+
+**Source**: `assets/flutter_assets/packages/magichome2_home_data_provide/assets/wifi_dp_cmd.json`
+
+The app has a third generation of several commands, named `*_v3`, all prefixed
+with `0xE0` and a sub-command byte. Two of them make the pattern explicit:
+
+| Template | Command form |
+|----------|--------------|
+| `switch_led_v2` | `3b{open}0000000000{gradient}{gradient}{gradient}{delay}{delay}` |
+| `switch_led_v3` | `e001{preview}` **+ the whole v2 form above** |
+| `scene_data_v2` | `38{model}{speed}{bright}` |
+| `scene_data_v3` | `e002{preview}{model}{speed}{bright}` |
+
+So the wrapper is:
+
+```
+E0 <sub> <preview> <v2 payload>
+```
+
+- Byte 2 is named `{preview}` in the app template. Observed value `0x00`. Its
+  meaning is not confirmed; the name suggests "preview in the UI without
+  committing". **The `{preview}` byte is only attested for `E0 01` and `E0 02`.**
+  Do not assume every `E0` sub-command has one: the confirmed
+  `E0 14 01 00 00 <leds> <segs> 00` LED-count commit has `01` in that position
+  while committing, which is the opposite of what the name implies.
+- **`needChecksum` is `false` for every `e0` template.** The v2 forms it wraps
+  all have `needChecksum: true`, so the wrapper drops the payload checksum.
+- Whether the inner v2 opcode survives depends on the sub-command:
+  `switch_led_v3` keeps its `3b`, while `scene_data_v3` has `e0 02` *replace*
+  the `38`. Both patterns exist, so do not assume either.
+
+### Known 0xE0 sub-commands
+
+| Command | Template / observed bytes | Source |
+|---------|---------------------------|--------|
+| `E0 01` | `e001{preview}3b{open}...` (power, wraps `switch_led_v2`) | `wifi_dp_cmd.json` |
+| `E0 01` | `e0 01 00 a1 <hs_hi> <hs_lo> <bright> 00 00 00 00 14 00 00` (solid colour) | PR #101 capture |
+| `E0 02` | `e002{preview}{model}{speed}{bright}` (effect / scene) | `wifi_dp_cmd.json` |
+| `E0 06` | `e006` - `get_timer_list_v2` | `wifi_dp_cmd.json` |
+| `E0 08` | `e008` - `wake_up_inquire` | `wifi_dp_cmd.json` |
+| `E0 0A` | `e00a` - `fall_asleep_inquire` | `wifi_dp_cmd.json` |
+| `E0 0D` | `e00d` - `countdown` | `wifi_dp_cmd.json` |
+| `E0 0E` | `e0 0e 01` (effect speed) | IOTBT812 capture |
+| `E0 14` | `e0 14 00 <lvl> 01 90 00 01`, lvl 1-4 (effect brightness) | IOTBT812 capture |
+| `E0 14` | `e0 14 01 00 00 <leds> <segs> 00` (LED count commit) | IOTBT6BA capture |
+
+Note the two conflicting `E0 14` entries. Both payloads come from real captures,
+so at most one of the *labels* is generally right. See
+`ai_instructions/iotbt_variant_findings.md`.
+
+`colour_data_v3` **is** a declared function in `ble_devices.json` (`type: Hex`,
+`deviceMinVer: 10`, alongside `colour_data_v2`), but no product defines a
+`cmdForm` for it and there is no template for it in any `*_dp_cmd.json`. So the
+solid-colour command is built in code, not from a template, which is why the
+`E0 01` colour form above had to come from a capture. If you want the
+authoritative bytes, `colour_data_v3` is the function name to grep the app's
+Dart/Java for.
+
+### The E0 01 colour payload (PR #101)
+
+Captured from a Briturn / JM Zengge ZJ-BBLA-RGBWW (`product_id=0x00`,
+`ble_version=7`, `led_version=68`) while setting known colours:
+
+| Colour | Payload |
+|--------|---------|
+| red | `e0 01 00 a1 00 64 64 00 00 00 00 14 00 00` |
+| yellow | `e0 01 00 a1 1e 64 64 00 00 00 00 14 00 00` |
+| blue | `e0 01 00 a1 78 64 64 00 00 00 00 14 00 00` |
+
+This is the standard `0x3B` solid-colour body (see
+[05_basic_commands.md](05_basic_commands.md)), not a new encoding. Line the 11
+bytes after `e0 01 00` up against that command with its `3b` opcode removed:
+
+| idx | `3B` colour command | This capture | Match |
+|-----|---------------------|--------------|-------|
+| 1 | Mode `0xA1` (solid colour) | `a1` | yes |
+| 2 | Hue+sat packed, high byte | `00` / `1e` / `78` | yes |
+| 3 | Hue+sat packed, low byte | `64` (= sat 100) | yes |
+| 4 | Brightness 0-100 | `64` | yes |
+| 5-6 | Params | `00 00` | yes |
+| 7-9 | Redundant RGB | `00 00 14` | see below |
+| 10-11 | Time | `00 00` | yes |
+
+For the three test colours the packed hue+sat bytes are exactly `00 64`,
+`1e 64` and `78 64`, which is what `(hue << 7) | sat` produces for red (0 deg),
+yellow (60 deg) and blue (240 deg) at full saturation. **Beware**: the high byte
+of that packing equals `hue // 2` for any saturation up to 100, so a capture of
+saturated colours can easily be misread as "hue in half-degree units". See
+`ai_instructions/DISCOVERIES.md`.
+
+The `0x14` at idx 9 is the one byte that does not fit the redundant-RGB reading
+(the colours are red/yellow/blue, so a blue channel of 20 makes no sense). It
+sits in the same slot as the hardcoded `1e` in the app's own
+`temp_value_v2` = `3bb1000000{cct}{bright}00001e0000`, so idx 9 looks like a
+transition or gradient parameter in the v2/v3 command family that our builder
+happens to fill with the blue channel.
+
+**Open question**: `switch_led_v3` keeps the inner `3b` opcode but this capture
+does not have one. Either the colour v3 form drops it the way `scene_data_v3`
+drops `38`, or the byte is missing from the transcription. Needs the raw
+capture to settle.
 
 ---
 
@@ -396,6 +531,19 @@ From `com/telink/bluetooth/light/Opcode.java`:
 | E4 | 0xE4 | Set device time |
 | EA | 0xEA | User all (generic query) |
 | EB | 0xEB | User all notify |
+
+**Caution: an 0xE0 or 0xEA prefix does not mean the command is Telink.** The
+ZengGe app reuses the same leading bytes for its own commands, and those are the
+ones our builders actually send:
+
+| Bytes | Telink meaning | ZengGe meaning (what we send) |
+|-------|----------------|-------------------------------|
+| `E0 ..` | Set device address | The `*_v3` command wrapper (see above) |
+| `EA 81` | User all (generic query) | `state_upload_v2` = `ea818a8b` in `wifi_dp_cmd.json` |
+
+Only `0xE2` (colour) and `0x71` (power) in our IOTBT builders are genuinely
+Telink-lineage. `0xE0 0x02` effects and the `0xEA 0x81` state query are standard
+ZengGe v2/v3 commands that happen to be used by Telink-family devices too.
 
 ---
 
