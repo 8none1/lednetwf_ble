@@ -551,6 +551,11 @@ reasoning; it is the product ID.
    that `parse_manufacturer_data`'s "Format B" branch, in the same file, already reads
    exactly these offsets correctly - the correct layout was in the codebase all along, about
    twelve hundred lines away.
+   **Confirmed live on hardware (1 September 2026)**: with the manual override cleared back
+   to `auto`, colour works on the ZJ-BBLA-RGBWW, and the device logs
+   `advertised_product_id=0x3E (62), fw_ver=68, led_ver=10`. So the relabelling and the
+   product-ID detection path are both verified on a real device, not just against stored
+   captures.
 2. **v3 detection now uses the product ID, not `flags2`.** `IOTBT_V3_PRODUCT_IDS` (currently
    just product 62) drives `is_iotbt_v3`, sourced from the vendor's own device database
    rather than another byte heuristic. `is_iotbt_segment` returns `False` for a known-v3
