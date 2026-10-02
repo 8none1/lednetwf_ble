@@ -524,7 +524,7 @@ PRODUCT_CAPABILITIES: Final = {
     32:  {"name": "Ctrl_Mini_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
     37:  {"name": "Ctrl_RGBCW_Both", "has_rgb": True, "has_ww": True, "has_cw": True, "effect_type": EffectType.SIMPLE},
     38:  {"name": "Ctrl_Mini_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
-    39:  {"name": "Ctrl_Mini_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE},
+    39:  {"name": "Ctrl_Mini_RGBW", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE, "uses_color_v2": True},
     72:  {"name": "Ctrl_Mini_RGBW_Mic", "has_rgb": True, "has_ww": True, "has_cw": False, "effect_type": EffectType.SIMPLE, "has_builtin_mic": True, "mic_cmd_format": "simple"},
 
     # Controllers with RGB only

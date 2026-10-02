@@ -778,6 +778,34 @@ def build_color_command_0x3B(r: int, g: int, b: int, brightness: int = 100) -> b
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
+def build_color_command_v2(r: int, g: int, b: int, brightness: int = 100, delay_ms: int = 0) -> bytearray:
+    """
+    Build the unified-protocol colour command (colour_data_v2) for SIMPLE devices on BLE v5+.
+
+    Same opcode, mode and packed hue+sat as build_color_command_0x3B, but bytes 7-9 are a
+    24-bit big-endian delay in ms (as in bright_value_v2), not redundant RGB, and bytes
+    10-11 are the gradient. Verified on product 0x27 (Ctrl_Mini_RGBW, BLE v5, fw 14.01):
+    with RGB in bytes 7-9 the device waited (R << 16 | G << 8 | B) ms before changing, so
+    pure blue arrived after 255 ms, pure green after 65 s and any red colour after hours.
+    Brightness is 0-100; the device stores the colour pre-scaled by it.
+    """
+    h, s, _ = rgb_to_hsv(r, g, b)
+    hs_hi, hs_lo = pack_hue_saturation(h, s)
+    delay_ms = max(0, min(int(delay_ms), 0xFFFFFF))
+
+    raw_cmd = bytearray([
+        0x3B,                       # Command opcode
+        0xA1,                       # Mode: solid color
+        hs_hi, hs_lo,               # Packed hue + saturation
+        min(brightness, 100) & 0xFF,  # Brightness (0-100)
+        0x00, 0x00,                 # Params
+        (delay_ms >> 16) & 0xFF, (delay_ms >> 8) & 0xFF, delay_ms & 0xFF,  # Delay (ms)
+        0x00, 0x00,                 # Gradient
+    ])
+    raw_cmd.append(calculate_checksum(raw_cmd))
+    return wrap_command(raw_cmd, cmd_family=0x0b)
+
+
 def build_color_command_0x31(r: int, g: int, b: int, ww: int = 0, cw: int = 0) -> bytearray:
     """
     Build color command using 0x31 format (9-byte format with WW+CW).
@@ -1552,7 +1580,9 @@ def build_sound_reactive_symphony(
 # RESPONSE PARSING
 # =============================================================================
 
-def parse_state_response(data: bytes, simple_effects: bool = False) -> dict | None:
+def parse_state_response(
+    data: bytes, simple_effects: bool = False, unified_color: bool = False
+) -> dict | None:
     """
     Parse state query response (0x81 format).
 
@@ -1563,6 +1593,11 @@ def parse_state_response(data: bytes, simple_effects: bool = False) -> dict | No
             byte instead of using the 0x25 "effect mode" marker with the ID in
             sub_mode. Effect 37 is 0x25, so the two encodings collide on the
             first effect in the list and must be disambiguated by device type.
+        unified_color: True for unified-protocol devices (``uses_color_v2``:
+            product 0x27 on BLE v5), which carry the colour-mode flag in byte 12
+            (0xF0 = RGB, 0x0F = white) instead of in sub_mode. Byte 12 means other
+            things on other devices (0xF0 on product 0x08), so it is only decoded
+            when this is set.
 
     Source: tc/b.java method c() lines 47-62, DeviceState.java
     Source: protocol_docs/08_state_query_response_parsing.md
@@ -1633,14 +1668,30 @@ def parse_state_response(data: bytes, simple_effects: bool = False) -> dict | No
     # Determine color mode from sub_mode (when in static mode)
     is_rgb_mode = False
     is_white_mode = False
+    # Unified-state (wifibleLightStandardV2) devices put something else in byte 4
+    # (0x16 on product 0x27 fw 14.01) and carry the colour mode flag in byte 12
+    # instead: 0xF0 = RGB, 0x0F = white, with the white level in byte 9.
+    unified_flag = data[12] if len(data) > 12 else None
+    is_unified_static = (
+        unified_color
+        and mode_type == 0x61
+        and sub_mode not in (0xF0, 0x01, 0x0B, 0x0F)
+        and unified_flag in (0xF0, 0x0F)
+    )
     if mode_type == 0x61:  # Static mode
         if sub_mode in (0xF0, 0x01, 0x0B):
             is_rgb_mode = True
         elif sub_mode == 0x0F:
             is_white_mode = True
+        elif is_unified_static:
+            is_rgb_mode = unified_flag == 0xF0
+            is_white_mode = unified_flag == 0x0F
 
     # Byte 5: Value1 (brightness 0-100 for white mode, other uses for RGB)
     value1 = data[5]
+    if is_unified_static and is_white_mode:
+        # value1 is constant there; the white channel level (0-255) is the brightness
+        value1 = round(data[9] * 100 / 255)
 
     # Bytes 6-8: RGB (or brightness/speed in effect mode)
     r, g, b = data[6], data[7], data[8]
@@ -1649,6 +1700,9 @@ def parse_state_response(data: bytes, simple_effects: bool = False) -> dict | No
     ww = data[9]
     led_version = data[10]  # This is LED/firmware version, NOT brightness
     cw = data[11]
+    if is_unified_static and is_white_mode:
+        # Byte 9 is the single white channel's level, not a colour temperature
+        ww = 0
 
     # Effect ID is sub_mode when in effect mode, except for SIMPLE devices
     # where mode_type itself is the effect ID
@@ -1875,6 +1929,7 @@ def parse_manufacturer_data(
     manu_data: dict[int, bytes],
     device_name: str | None = None,
     simple_effects: bool = False,
+    unified_color: bool = False,
 ) -> dict | None:
     """
     Parse manufacturer data from BLE advertisement (Format B - bleak).
@@ -1900,6 +1955,9 @@ def parse_manufacturer_data(
             which report the running effect ID in the mode_type byte rather
             than via the 0x25 effect-mode marker. Effect 37 is 0x25, so the
             encodings collide and must be disambiguated by device type.
+        unified_color: True for unified-protocol devices (``uses_color_v2``),
+            which carry the colour-mode flag in byte 24 (0xF0 = RGB, 0x0F =
+            white). Only then is that byte decoded.
 
     Returns dict with:
         - product_id: int
@@ -2197,6 +2255,21 @@ def parse_manufacturer_data(
                     _LOGGER.debug(
                         "%sManu data Settled Mode effect: id=%d, rgb=%s, speed=%d",
                         log_prefix, effect_id, rgb, effect_speed
+                    )
+                elif unified_color and len(data) > 24 and data[24] in (0xF0, 0x0F):
+                    # Unified-state (wifibleLightStandardV2) devices put another value in
+                    # byte 16 (0x16 on product 0x27 fw 14.01) and carry the colour mode
+                    # flag in byte 24: 0xF0 = RGB, 0x0F = white, white level in byte 21.
+                    if data[24] == 0xF0:
+                        color_mode = 'rgb'
+                        rgb = (data[18], data[19], data[20])
+                    else:
+                        color_mode = 'cct'
+                        brightness_percent = round(data[21] * 100 / 255)
+                        color_temp_percent = 0  # single white channel
+                    _LOGGER.debug(
+                        "%sManu data unified state (0x61/0x%02X, flag 0x%02X): mode=%s rgb=%s",
+                        log_prefix, sub_mode, data[24], color_mode, rgb
                     )
                 else:
                     # Log full state bytes for debugging unknown sub-modes

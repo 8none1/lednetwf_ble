@@ -473,13 +473,23 @@ class LEDNetWFDevice:
         return bool(self._capabilities.get("has_candle_mode"))
 
     @property
+    def uses_color_v2(self) -> bool:
+        """Return True if colour and white go through the unified 0x3B commands (colour_data_v2).
+
+        Flagged per product and only on BLE v5+ firmware, where the vendor app switches to
+        the unified protocol; earlier firmware keeps the 0x31 colour command.
+        """
+        return bool(self._capabilities.get("uses_color_v2")) and (self._ble_version or 0) >= 5
+
+    @property
     def uses_0x38_effects(self) -> bool:
         """Return True if device uses 0x38 command format for effects with brightness.
 
         Devices 0x54 and 0x5B use 0x38 command format which includes brightness,
         unlike standard SIMPLE devices that use 0x61 format without brightness.
         """
-        return bool(self._capabilities.get("uses_0x38_effects"))
+        # Unified-protocol devices (uses_color_v2) ignore 0x61 effects and run 0x38 ones
+        return bool(self._capabilities.get("uses_0x38_effects")) or self.uses_color_v2
 
     @property
     def mic_command_format(self) -> str:
@@ -976,7 +986,9 @@ class LEDNetWFDevice:
         - Effect mode: from byte 6 (R position), scaled 0-100 → 0-255
         """
         result = protocol.parse_state_response(
-            data, simple_effects=self.effect_type == EffectType.SIMPLE
+            data,
+            simple_effects=self.effect_type == EffectType.SIMPLE,
+            unified_color=self.uses_color_v2,
         )
         if not result:
             return
@@ -1554,6 +1566,15 @@ class LEDNetWFDevice:
                 "IOTBT device: RGB=(%d,%d,%d), brightness=%d%% -> hue-based color",
                 rgb[0], rgb[1], rgb[2], brightness_pct
             )
+        elif self.uses_color_v2:
+            # Unified 0x3B colour command: brightness travels in its own byte and the
+            # device stores the scaled colour. Bytes 7-9 must stay zero (they are a delay).
+            brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
+            packet = protocol.build_color_command_v2(rgb[0], rgb[1], rgb[2], brightness_pct)
+            _LOGGER.debug(
+                "colour_data_v2 command: RGB=(%d,%d,%d), brightness=%d%%",
+                rgb[0], rgb[1], rgb[2], brightness_pct
+            )
         elif eff_type == EffectType.SIMPLE:
             # SIMPLE devices use 0x31 command format (9-byte direct RGB)
             # Brightness is applied directly to RGB values (no separate brightness field)
@@ -1614,7 +1635,7 @@ class LEDNetWFDevice:
         eff_type = self.effect_type
         kelvin = max(MIN_KELVIN, min(MAX_KELVIN, kelvin))
 
-        if eff_type == EffectType.SIMPLE:
+        if eff_type == EffectType.SIMPLE and not self.uses_color_v2:
             # SIMPLE devices use 0x31 command format with WW/CW channels
             # Convert kelvin to WW/CW values (brightness is applied to channel values)
             ww, cw = protocol.kelvin_to_ww_cw(kelvin, brightness)
@@ -1628,6 +1649,14 @@ class LEDNetWFDevice:
             # (temperature percentage + brightness percentage)
             # Per working old code: 0% = warm/2700K, 100% = cool/6500K
             temp_pct = int((kelvin - MIN_KELVIN) * 100 / (MAX_KELVIN - MIN_KELVIN))
+            if (
+                self.uses_color_v2
+                and self._capabilities.get("has_ww")
+                and not self._capabilities.get("has_cw")
+            ):
+                # Unified-protocol devices with a single white channel answer at 0%
+                # only; higher values would drive a cool channel they don't have
+                temp_pct = 0
             # Use max(1, ...) to prevent 0% brightness from turning off the light
             brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
 
@@ -2345,6 +2374,7 @@ class LEDNetWFDevice:
             manu_data,
             self._name,
             simple_effects=self.effect_type == EffectType.SIMPLE,
+            unified_color=self.uses_color_v2,
         )
         if not result:
             return False
