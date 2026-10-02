@@ -15,6 +15,7 @@
 | ID | Hex | Name | Has Mic | Notes |
 |----|-----|------|---------|-------|
 | 6 | 0x06 | Ctrl_Mini_RGBW | No | Has CCT (temp_value) |
+| 39 | 0x27 | Ctrl_Mini_RGBW | No | **Not in ble_devices.json.** Sold as "sunset lamp" (issue #75). BLE v5 firmware ignores 0x31; colour/white/effects need unified 0x3B and 0x38 (PR #104) |
 | 68 | 0x44 | Bulb_RGBW | No | warm_value only |
 | 72 | 0x48 | Ctrl_Mini_RGBW_Mic | Yes | rgb_mini_mic protocol |
 | 84 | 0x54 | Downlight_RGBW | No | |
