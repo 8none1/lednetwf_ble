@@ -986,7 +986,9 @@ class LEDNetWFDevice:
         - Effect mode: from byte 6 (R position), scaled 0-100 → 0-255
         """
         result = protocol.parse_state_response(
-            data, simple_effects=self.effect_type == EffectType.SIMPLE
+            data,
+            simple_effects=self.effect_type == EffectType.SIMPLE,
+            unified_color=self.uses_color_v2,
         )
         if not result:
             return
@@ -1647,9 +1649,13 @@ class LEDNetWFDevice:
             # (temperature percentage + brightness percentage)
             # Per working old code: 0% = warm/2700K, 100% = cool/6500K
             temp_pct = int((kelvin - MIN_KELVIN) * 100 / (MAX_KELVIN - MIN_KELVIN))
-            if self._capabilities.get("has_ww") and not self._capabilities.get("has_cw"):
-                # A single white channel answers at 0% only; higher values would
-                # drive a cool channel the device doesn't have
+            if (
+                self.uses_color_v2
+                and self._capabilities.get("has_ww")
+                and not self._capabilities.get("has_cw")
+            ):
+                # Unified-protocol devices with a single white channel answer at 0%
+                # only; higher values would drive a cool channel they don't have
                 temp_pct = 0
             # Use max(1, ...) to prevent 0% brightness from turning off the light
             brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
@@ -2368,6 +2374,7 @@ class LEDNetWFDevice:
             manu_data,
             self._name,
             simple_effects=self.effect_type == EffectType.SIMPLE,
+            unified_color=self.uses_color_v2,
         )
         if not result:
             return False

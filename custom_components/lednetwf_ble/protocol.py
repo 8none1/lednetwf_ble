@@ -1580,7 +1580,9 @@ def build_sound_reactive_symphony(
 # RESPONSE PARSING
 # =============================================================================
 
-def parse_state_response(data: bytes, simple_effects: bool = False) -> dict | None:
+def parse_state_response(
+    data: bytes, simple_effects: bool = False, unified_color: bool = False
+) -> dict | None:
     """
     Parse state query response (0x81 format).
 
@@ -1591,6 +1593,11 @@ def parse_state_response(data: bytes, simple_effects: bool = False) -> dict | No
             byte instead of using the 0x25 "effect mode" marker with the ID in
             sub_mode. Effect 37 is 0x25, so the two encodings collide on the
             first effect in the list and must be disambiguated by device type.
+        unified_color: True for unified-protocol devices (``uses_color_v2``:
+            product 0x27 on BLE v5), which carry the colour-mode flag in byte 12
+            (0xF0 = RGB, 0x0F = white) instead of in sub_mode. Byte 12 means other
+            things on other devices (0xF0 on product 0x08), so it is only decoded
+            when this is set.
 
     Source: tc/b.java method c() lines 47-62, DeviceState.java
     Source: protocol_docs/08_state_query_response_parsing.md
@@ -1666,7 +1673,8 @@ def parse_state_response(data: bytes, simple_effects: bool = False) -> dict | No
     # instead: 0xF0 = RGB, 0x0F = white, with the white level in byte 9.
     unified_flag = data[12] if len(data) > 12 else None
     is_unified_static = (
-        mode_type == 0x61
+        unified_color
+        and mode_type == 0x61
         and sub_mode not in (0xF0, 0x01, 0x0B, 0x0F)
         and unified_flag in (0xF0, 0x0F)
     )
@@ -1921,6 +1929,7 @@ def parse_manufacturer_data(
     manu_data: dict[int, bytes],
     device_name: str | None = None,
     simple_effects: bool = False,
+    unified_color: bool = False,
 ) -> dict | None:
     """
     Parse manufacturer data from BLE advertisement (Format B - bleak).
@@ -1946,6 +1955,9 @@ def parse_manufacturer_data(
             which report the running effect ID in the mode_type byte rather
             than via the 0x25 effect-mode marker. Effect 37 is 0x25, so the
             encodings collide and must be disambiguated by device type.
+        unified_color: True for unified-protocol devices (``uses_color_v2``),
+            which carry the colour-mode flag in byte 24 (0xF0 = RGB, 0x0F =
+            white). Only then is that byte decoded.
 
     Returns dict with:
         - product_id: int
@@ -2244,7 +2256,7 @@ def parse_manufacturer_data(
                         "%sManu data Settled Mode effect: id=%d, rgb=%s, speed=%d",
                         log_prefix, effect_id, rgb, effect_speed
                     )
-                elif len(data) > 24 and data[24] in (0xF0, 0x0F):
+                elif unified_color and len(data) > 24 and data[24] in (0xF0, 0x0F):
                     # Unified-state (wifibleLightStandardV2) devices put another value in
                     # byte 16 (0x16 on product 0x27 fw 14.01) and carry the colour mode
                     # flag in byte 24: 0xF0 = RGB, 0x0F = white, white level in byte 21.
