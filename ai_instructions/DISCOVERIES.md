@@ -4,6 +4,40 @@ This document tracks significant findings and corrections made during the revers
 
 ## Documentation Errors Found and Fixed
 
+### 0x3B colour: bytes 7-9 are a delay, and BLE v5 Ctrl_Mini_RGBW ignores 0x31
+
+**Date**: 1 October 2026
+
+**Device**: product 0x27 (Ctrl_Mini_RGBW, sold as a "sunset lamp"), BLE v5,
+firmware 14.01, advertising `LEDnetWF02002728xxxx`.
+
+**Findings** (standalone bleak client, integration disabled, every change
+confirmed by eye and by the 0x81 state notifications):
+
+- `0x31` colour and white commands are delivered (write-with-response is
+  confirmed) but do nothing. `0x3B 0x23/0x24` power works, so the device is on
+  the unified ("common 2.0") command set, matching the app's switch for the
+  sibling product 6 at newer firmware.
+- In `0x3B 0xA1`, bytes 7-9 are a **24-bit big-endian delay in ms**, the same
+  layout as `bright_value_v2`, not redundant RGB. With RGB there:
+  `00 00 FF` (blue) applied after 255 ms, `00 FF 00` (green) crept in over about
+  65 s, and any colour with red (`FF xx xx`) waited hours, which looked
+  like "ignored". With zeros every colour lands within ~0.3 s.
+- The brightness byte (0-100) is honoured. The device stores the colour
+  pre-scaled: (255,43,0) at 30% reports (77,13,0).
+- `0x3B 0xB1` with 0% temperature lights the single white channel (a cool
+  white LED on this lamp).
+- State layout: byte 4 of the 0x81 response (byte 16 of the advertisement) is
+  `0x16` and byte 5 is a constant `0x0F`. The mode flag is byte 12 (byte 24):
+  `0xF0` = RGB, `0x0F` = white, white level in byte 9 (byte 21). A transitional
+  `0x5A` appears while it fades between modes.
+- The transport sequence byte matters: a repeated sequence number can be
+  dropped, so build captures with fresh sequence numbers.
+
+**Fix**: `build_color_command_v2` (zero delay and gradient), a `uses_color_v2`
+capability (product 39, BLE v5+), white via `0x3B 0xB1`, and parsing of the
+unified flag byte.
+
 ### Effect ID 37 collides with the 0x25 "effect mode" marker
 
 **Date**: 1 August 2026 (issue #99)
