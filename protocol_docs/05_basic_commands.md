@@ -202,6 +202,25 @@ Non-zero values cause delays (interpreted as seconds):
 - `0x00, 0x1E` = ~30 second delay
 - `0x00, 0x32` = ~50 second delay
 
+### Bytes 7-11 by sub-command (what the app templates actually send)
+
+The meaning of bytes 7-11 is **not fixed across 0x3B sub-commands**. The app's
+`wifi_dp_cmd.json` templates name the fields explicitly:
+
+| Function | Template | Bytes 7-9 | Bytes 10-11 |
+|----------|----------|-----------|-------------|
+| `bright_value_v2` (0x01) | `3b010000{value}00{value}{delay}{delay}{delay}{gradient}{gradient}` | delay, 24-bit ms | gradient |
+| `temp_value_v2` (0xB1) | `3bb1000000{cct}{bright}00001e0000` | `00 00 1E` = 30 ms delay | `00 00` |
+| `switch_led_v2` (0x23/0x24) | `3b{open}0000000000{gradient}{gradient}{gradient}{delay}{delay}` | gradient | delay |
+| 0xA1 colour, Symphony | (not in the JSON; from working captures) | redundant RGB | time |
+| 0xA1 colour, product 0x27 BLE v5 | (from device testing, PR #104) | delay, 24-bit ms | gradient |
+
+Practical rule: **send zeros in bytes 7-11 unless a capture for that exact
+device shows otherwise.** On product 0x27 the Symphony-style RGB in bytes 7-9
+was read as a delay of `(R << 16 | G << 8 | B)` ms, so pure blue arrived
+after 255 ms, green after about 65 s and anything with red after hours. That
+looked exactly like "the device ignores 0x3B".
+
 ---
 
 ## CCT via 0x3B (Mode 0xB1)
@@ -215,7 +234,7 @@ Alternative CCT command for Symphony/Ring Light devices.
 | 2-4 | Zeros | 0x00 × 3 |
 | 5 | Temperature % | 0-100 |
 | 6 | Brightness % | 0-100 |
-| 7-9 | Zeros | 0x00 × 3 |
+| 7-9 | Delay (ms) | 0x00 × 3 works; the app's `temp_value_v2` sends 0x00, 0x00, 0x1E (30 ms) |
 | 10-11 | Time | 0x00, 0x00 for instant |
 | 12 | Checksum | Sum of bytes 0-11 |
 

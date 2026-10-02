@@ -360,6 +360,8 @@ These product IDs appear in documentation but NOT in the current app database:
 | 0x3B (59) | Bulb_RGBCW - may be legacy |
 | 0xA7 (167) | Symphony_new - may be legacy |
 | 0xA9 (169) | Symphony_new - may be legacy |
+| 0x27 (39) | Ctrl_Mini_RGBW, sold as a "sunset lamp" (issue #75, PR #104). On BLE v5 firmware 0x31 is ignored and the device uses the unified 0x3B command set; see the 0x3B entry at the top of this file |
+| 0x20 (32), 0x26 (38) | Ctrl_Mini_RGBW siblings present in `PRODUCT_CAPABILITIES` only. Probably need the same treatment as 0x27 on newer firmware, unverified |
 
 These are marked with (†) in the documentation.
 
