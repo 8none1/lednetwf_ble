@@ -31,6 +31,7 @@ confirmed by eye and by the 0x81 state notifications):
   `0x16` and byte 5 is a constant `0x0F`. The mode flag is byte 12 (byte 24):
   `0xF0` = RGB, `0x0F` = white, white level in byte 9 (byte 21). A transitional
   `0x5A` appears while it fades between modes.
+- Effects: `0x61` is ignored; `0x38` (effect id, speed, brightness) runs them. Effect 37 reports `mode_type = 0x25` with the RGB fading.
 - The transport sequence byte matters: a repeated sequence number can be
   dropped, so build captures with fresh sequence numbers.
 

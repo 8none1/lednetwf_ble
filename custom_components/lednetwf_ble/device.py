@@ -488,7 +488,8 @@ class LEDNetWFDevice:
         Devices 0x54 and 0x5B use 0x38 command format which includes brightness,
         unlike standard SIMPLE devices that use 0x61 format without brightness.
         """
-        return bool(self._capabilities.get("uses_0x38_effects"))
+        # Unified-protocol devices (uses_color_v2) ignore 0x61 effects and run 0x38 ones
+        return bool(self._capabilities.get("uses_0x38_effects")) or self.uses_color_v2
 
     @property
     def mic_command_format(self) -> str:
