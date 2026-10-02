@@ -167,8 +167,8 @@ For BLE v5+ / Symphony devices. Uses HSV color space.
 | 2-3 | Hue+Sat packed | `(hue << 7) \| sat` as big-endian |
 | 4 | Brightness | 0-100 |
 | 5-6 | Params | Mode-specific |
-| 7-9 | RGB / delay | Mode- and family-dependent: redundant RGB on Symphony; a 24-bit delay in ms on unified-protocol SIMPLE devices (product 0x27 BLE v5). Send zeros there |
-| 10-11 | Time | Duration (use 0x00, 0x00 for instant!) |
+| 7-9 | RGB / delay | Depends on sub-command and device family: redundant RGB on Symphony 0xA1, a 24-bit delay in ms on unified 0xA1 (product 0x27 BLE v5). See [Bytes 7-11 by sub-command](#bytes-7-11-by-sub-command-what-the-app-templates-actually-send); send zeros |
+| 10-11 | Time / gradient | Depends on sub-command and device family: time on Symphony 0xA1, gradient on unified 0xA1. Use 0x00, 0x00 for instant |
 | 12 | Checksum | Sum of bytes 0-11 |
 
 ### HSV Encoding
