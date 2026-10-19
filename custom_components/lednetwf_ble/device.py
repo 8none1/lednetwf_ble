@@ -1276,7 +1276,20 @@ class LEDNetWFDevice:
 
             _LOGGER.debug("SIMPLE effect mode: effect=%s (id=%d), speed=%d, brightness=%d",
                           self._effect, effect_id, self._effect_speed, self._brightness)
-
+        elif (
+            self._product_id == 0x41
+            and result["mode_type"] == 0x61
+        ):
+            # Ctrl_Dim reports brightness as 0-100% in the R field.
+            self._effect = None
+            self._rgb = None
+            self._color_temp_kelvin = None
+            brightness_pct = max(0, min(100, result["r"]))
+            self._brightness = round(brightness_pct * 255 / 100)
+            _LOGGER.debug(
+                "Ctrl_Dim state: brightness=%d%% (%d/255)",
+                brightness_pct, self._brightness
+            )
         else:
             # Unknown mode - use raw values with same HSV reconstruction
             # For SIMPLE devices, DON'T clear effect state from unknown mode responses.
@@ -1459,7 +1472,36 @@ class LEDNetWFDevice:
             self._notify_callbacks()
             return True
         return False
+        
+    async def set_brightness(self, brightness: int) -> bool:
+        """Set brightness for Ctrl_Dim (0x41), using 0-255 HA scale."""
+        if self._product_id != 0x41:
+            return False
 
+        brightness = max(0, min(255, brightness))
+        percent = round(brightness * 100 / 255)
+
+        _LOGGER.debug(
+            "Ctrl_Dim brightness request: %d/255 (%d%%)",
+            brightness, percent
+        )
+
+        raw = build_command(
+            self._product_id,
+            "bright_value",
+            {"value": percent, "gradient": 0},
+            firmware_version=self.device_version,
+        )
+        if not raw:
+            _LOGGER.warning("No brightness command for Ctrl_Dim")
+            return False
+
+        packet = protocol.wrap_command(raw)
+        await self._send_command(packet)
+        self._brightness = brightness
+        self._notify_callbacks()
+        return True
+        
     async def set_rgb_color(self, rgb: tuple[int, int, int], brightness: int = 255) -> bool:
         """Set RGB color.
 
