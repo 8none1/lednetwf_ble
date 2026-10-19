@@ -301,11 +301,15 @@ class LEDNetWFDevice:
         command: both are write-without-response and the 0x3B lands before the
         device has committed the colour, re-applying the old one (issue #99).
         Colour changes carry their own brightness in the scaled RGB.
+
+        Ctrl_Dim (0x41) is also supported via the legacy bright_value
+        command (0x31), instead of the standalone 0x3B command.
         """
         return bool(
-            self._capabilities.get("has_brightness_cmd")
-            or self._capabilities.get("has_dim")
-        )
+        self._capabilities.get("has_brightness_cmd")
+        or self._capabilities.get("has_dim")
+        or self._product_id == 0x41
+    )
 
     @property
     def has_effects(self) -> bool:
@@ -1473,35 +1477,6 @@ class LEDNetWFDevice:
             return True
         return False
         
-    async def set_brightness(self, brightness: int) -> bool:
-        """Set brightness for Ctrl_Dim (0x41), using 0-255 HA scale."""
-        if self._product_id != 0x41:
-            return False
-
-        brightness = max(0, min(255, brightness))
-        percent = round(brightness * 100 / 255)
-
-        _LOGGER.debug(
-            "Ctrl_Dim brightness request: %d/255 (%d%%)",
-            brightness, percent
-        )
-
-        raw = build_command(
-            self._product_id,
-            "bright_value",
-            {"value": percent, "gradient": 0},
-            firmware_version=self.device_version,
-        )
-        if not raw:
-            _LOGGER.warning("No brightness command for Ctrl_Dim")
-            return False
-
-        packet = protocol.wrap_command(raw)
-        await self._send_command(packet)
-        self._brightness = brightness
-        self._notify_callbacks()
-        return True
-        
     async def set_rgb_color(self, rgb: tuple[int, int, int], brightness: int = 255) -> bool:
         """Set RGB color.
 
@@ -1731,7 +1706,7 @@ class LEDNetWFDevice:
         Args:
             brightness: Brightness 0-255 (converted to 0-100 percent for protocol)
         """
-        if not self.has_brightness_cmd:
+        if not self.has_brightness_cmd and self._product_id != 0x41:
             _LOGGER.warning(
                 "Device %s does not support the standalone brightness command",
                 self._name
@@ -1740,7 +1715,19 @@ class LEDNetWFDevice:
 
         brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
         _LOGGER.debug("Standalone brightness: %d/255 -> %d%%", brightness, brightness_pct)
-        packet = protocol.build_brightness_command_0x3B(brightness_pct)
+        if self._product_id == 0x41:
+            raw = build_command(
+                self._product_id,
+                "bright_value",
+                {"value": brightness_pct, "gradient": 0},
+                firmware_version=self.device_version,
+            )
+            if not raw:
+                _LOGGER.warning("No brightness command for Ctrl_Dim")
+                return False
+            packet = protocol.wrap_command(raw)
+        else:
+            packet = protocol.build_brightness_command_0x3B(brightness_pct)
 
         if await self._send_command(packet):
             self._brightness = brightness
