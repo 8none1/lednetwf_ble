@@ -424,6 +424,32 @@ IOTBT_EFFECTS: Final = {
     12: "Effect 12",
 }
 
+# Number of 0xE0 0x02 effects offered for IOTBT (Telink-style) devices.
+IOTBT_DEFAULT_EFFECT_COUNT: Final = 12
+
+# Real product IDs (advertisement bytes 8-9, see parse_service_data) whose 0xE0 0x02
+# effect range is known to go past IOTBT_DEFAULT_EFFECT_COUNT. Like
+# IOTBT_V3_PRODUCT_IDS, this keys on the advertised product ID because IOTBT
+# devices resolve their capabilities as product 0x00.
+#
+# Product 194 (0xC2): LED curtain light sold with the Surplife app (advertises as
+# IOTBT812, IOTBT925, ...). The app selects effects 1-17 with
+# E0 02 00 <id> <speed> <brightness> (pcap/surplife.pcapng and
+# pcap/surplife_after_upgrade.pcapng), and the device echoes the running ID in
+# byte 8 of its 0xEA 0x81 state. 17 is the highest ID seen in those captures.
+IOTBT_EFFECT_COUNT_BY_PRODUCT: Final = {194: 17}
+
+
+def get_iotbt_effects(effect_count: int = IOTBT_DEFAULT_EFFECT_COUNT) -> dict[int, str]:
+    """Return the IOTBT 0xE0 0x02 effects (ID -> name) for a device.
+
+    IDs 1-12 keep their IOTBT_EFFECTS names; higher IDs follow the same
+    "Effect N" pattern. Never returns fewer than the 12 default effects.
+    """
+    count = max(len(IOTBT_EFFECTS), effect_count)
+    return {eid: IOTBT_EFFECTS.get(eid, f"Effect {eid}") for eid in range(1, count + 1)}
+
+
 # IOTBT music reactive effects (0xE1 0x05 command)
 # Source: model_iotbt_0x80.py - Music mode uses effect IDs shifted by << 8
 # Only effects 1, 2, 3, 4, 7, 8, 12, 13 exist on the device (5, 6, 9, 10, 11 don't exist)
@@ -715,6 +741,7 @@ def get_effect_list(
     has_ic_config: bool = False,
     has_builtin_mic: bool = False,
     has_candle_mode: bool = False,
+    iotbt_effect_count: int = IOTBT_DEFAULT_EFFECT_COUNT,
 ) -> list[str]:
     """Get list of effect names for the given effect type.
 
@@ -724,6 +751,8 @@ def get_effect_list(
         has_ic_config: If True, device is a Symphony controller (0xA1-0xAD), not 0x56/0x80
         has_builtin_mic: If True, include "Sound Reactive" option for devices with built-in mic
         has_candle_mode: If True, include "Candle Mode" option (0x54, 0x5B devices)
+        iotbt_effect_count: Number of 0xE0 0x02 effects for IOTBT devices
+            (see IOTBT_EFFECT_COUNT_BY_PRODUCT)
 
     Returns:
         List of effect names
@@ -752,9 +781,10 @@ def get_effect_list(
         # 0x53 Ring Light effects (113 effects + Cycle All)
         effects = list(ADDRESSABLE_0x53_EFFECTS.values())
     elif effect_type == EffectType.IOTBT:
-        # IOTBT devices have 12 effects via 0xE0 0x02 command
+        # IOTBT devices have 12 effects via 0xE0 0x02 command (more on some
+        # products, see IOTBT_EFFECT_COUNT_BY_PRODUCT)
         # Plus 8 music reactive effects via 0xE1 0x05 command
-        effects = list(IOTBT_EFFECTS.values())
+        effects = list(get_iotbt_effects(iotbt_effect_count).values())
         effects.extend(list(IOTBT_MUSIC_EFFECTS.values()))
     elif effect_type == EffectType.IOTBT_SEGMENT:
         # IOTBT Segment-based devices have 99 effects via 0xE1 0x01 command
@@ -788,6 +818,7 @@ def get_effect_id(
     has_ic_config: bool = False,
     has_builtin_mic: bool = False,
     has_candle_mode: bool = False,
+    iotbt_effect_count: int = IOTBT_DEFAULT_EFFECT_COUNT,
 ) -> int | None:
     """Get effect ID from name.
 
@@ -798,6 +829,8 @@ def get_effect_id(
         has_ic_config: If True, device is a Symphony controller (0xA1-0xAD), not 0x56/0x80
         has_builtin_mic: If True, recognize "Sound Reactive" effect
         has_candle_mode: If True, recognize "Candle Mode" effect (0x54, 0x5B devices)
+        iotbt_effect_count: Number of 0xE0 0x02 effects for IOTBT devices
+            (see IOTBT_EFFECT_COUNT_BY_PRODUCT)
 
     Returns:
         Effect ID or None if not found.
@@ -852,8 +885,8 @@ def get_effect_id(
             if name == effect_name:
                 return eid
     elif effect_type == EffectType.IOTBT:
-        # Regular effects (1-12)
-        for eid, name in IOTBT_EFFECTS.items():
+        # Regular effects (1-12, or more for products in IOTBT_EFFECT_COUNT_BY_PRODUCT)
+        for eid, name in get_iotbt_effects(iotbt_effect_count).items():
             if name == effect_name:
                 return eid
         # Music reactive effects (encoded as effect_num << 8)

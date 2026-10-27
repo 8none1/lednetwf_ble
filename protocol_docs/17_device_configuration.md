@@ -370,16 +370,21 @@ def detect_iotbt_response_type(data: bytes) -> str:
 ### Effect Command (0xE0 0x02)
 
 ```
-00 00 80 00 00 06 07 0a e0 02 ff ss bb
+00 00 80 00 00 06 07 0a e0 02 00 ff ss bb
 ```
 
 | Byte | Value | Description |
 |------|-------|-------------|
 | 0 | 0xE0 | Effect opcode |
 | 1 | 0x02 | Sub-command (effect mode) |
-| 2 | ff | Effect ID (1-12) |
-| 3 | ss | Speed (1-100) |
-| 4 | bb | Brightness percent (1-100) |
+| 2 | 0x00 | Constant (the vendor app's `scene_data_v3` calls it `preview`; always 0x00 in captures) |
+| 3 | ff | Effect ID (1-12; 1-17 on product 194, see `IOTBT_EFFECT_COUNT_BY_PRODUCT`) |
+| 4 | ss | Speed (1-100) |
+| 5 | bb | Brightness percent (1-100) |
+
+The device reports the running effect ID in byte 8 of its `0xEA 0x81` state
+(byte 7 = `0x67` while an effect runs, `0x66` for a static colour), and the
+speed in byte 9. Source: `pcap/surplife.pcapng`, product 194.
 
 ---
 

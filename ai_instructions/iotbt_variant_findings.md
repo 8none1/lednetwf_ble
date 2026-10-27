@@ -188,7 +188,7 @@ handle 0x0003, standard `00 <seq> 80 00 00 <len> <len+1> 0a` envelope. Payloads 
 |---|---|---|---|
 | Power on / off | `71 23` / `71 24` | `0x71` (Telink) | `build_iotbt_power_command` ✓ |
 | Colour (hue+bri) | `E2 0B <hue> <0xE0\|level>` e.g. `e20b51ff` `e20ba1ff` `e20b01e0..ff` | `0xE2` (Telink) | `build_iotbt_color_command` ✓ **exact** |
-| Effect select (~50) | `E0 02 00 <id> 50 50`, id `0x01`..`0x32` | `0xE0 0x02` (Telink) | `build_iotbt_effect_command` ✓ format (but we clamp id to 12) |
+| Effect select (54 writes) | `E0 02 00 <id> <speed> <bri>`, id `0x01`..`0x11` (1-17) | `0xE0 0x02` (Telink) | `build_iotbt_effect_command` ✓ format; IDs 13-17 enabled for product 194 via `IOTBT_EFFECT_COUNT_BY_PRODUCT` |
 | Effect brightness | `E0 14 00 <lvl> 01 90 00 01`, lvl 1-4 | `0xE0 0x14` | not implemented |
 | Effect speed | `E0 0E 01` | `0xE0 0x0E` | not implemented (we use the speed byte in 0xE0 0x02) |
 | IC type | `E1 0A 01 <t> 00`, t: 1=Common 2=SM16703P 3=WS2812E 4=UC1903B | `0xE1 0x0A` | not implemented |
@@ -212,7 +212,9 @@ threshold is unconfirmed. More captures from other segment/Telink units would le
 properly.
 
 ### Bonus follow-ups (not required for the core fix)
-- IOTBT (Telink) effect list is only 12 in `const.IOTBT_EFFECTS`; this device has ~50. Expand later.
+- ~~IOTBT (Telink) effect list is only 12 in `const.IOTBT_EFFECTS`; this device has ~50.~~ Done:
+  the captures select effect IDs 1-17 (54 `E0 02` writes, the "~50" was the write count, not the
+  ID range). Product 194 now offers 17 effects through `IOTBT_EFFECT_COUNT_BY_PRODUCT`.
 - IC-type config (`0xE1 0x0A 01 <t> 00`) could become an LED-type setting for Telink IOTBT.
 
 ## Confidence
@@ -273,6 +275,11 @@ remain correct for the payloads.
    ALL writes (incl. power). This is NOT IOTBT-specific — it affects any LEDnetWF device whose
    firmware reaches ble_version 8. **wrap_command should branch on advertised ble_version
    (>=8 → v1 framing).** Likely higher priority than the Telink/segment split.
+
+   **Update (2026-10-27):** an IOTBT925 on exactly this post-update firmware (service data
+   `80 08 08 65 F0 08 C9 25 00 C2 1D 06 01 05`: product 194, ble_version 8, firmware 29) turns on
+   and off fine with the v0 header, so this firmware still accepts v0 writes. The app's switch to
+   v1 (`ZGHBWriteUtils.getWriteVersion()`: `bleVersion >= 8`) is still the safer long-term target.
 
 ## IOTBT segment "LEDs per segment" - confirmed fix + read-back format (issue #83, 2026-06-28)
 
