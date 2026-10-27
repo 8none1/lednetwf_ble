@@ -33,6 +33,9 @@ from .const import (
     SOUND_REACTIVE_MARKER,
     CANDLE_MODE_MARKER,
     IOTBT_V3_PRODUCT_IDS,
+    IOTBT_DEFAULT_EFFECT_COUNT,
+    IOTBT_EFFECT_COUNT_BY_PRODUCT,
+    get_iotbt_effects,
 )
 from . import protocol
 from .capabilities import CAPABILITIES
@@ -270,7 +273,20 @@ class LEDNetWFDevice:
         """Return list of available effects."""
         return get_effect_list(
             self.effect_type, self.has_bg_color, self.has_ic_config,
-            self.has_builtin_mic, self.has_candle_mode
+            self.has_builtin_mic, self.has_candle_mode,
+            iotbt_effect_count=self.iotbt_effect_count,
+        )
+
+    @property
+    def iotbt_effect_count(self) -> int:
+        """Return the number of 0xE0 0x02 effects for an IOTBT device.
+
+        Keyed on the advertised product ID (IOTBT devices resolve their
+        capabilities as product 0x00, so the capability table cannot carry
+        this). Defaults to 12 until the product is known.
+        """
+        return IOTBT_EFFECT_COUNT_BY_PRODUCT.get(
+            self._advertised_product_id, IOTBT_DEFAULT_EFFECT_COUNT
         )
 
     @property
@@ -1383,10 +1399,12 @@ class LEDNetWFDevice:
             from .const import ADDRESSABLE_0x53_EFFECTS
             return ADDRESSABLE_0x53_EFFECTS.get(effect_id)
         elif eff_type == EffectType.IOTBT:
-            # IOTBT devices: regular effects (1-12) and music effects (0x100+)
-            from .const import IOTBT_EFFECTS, IOTBT_MUSIC_EFFECTS
-            if effect_id in IOTBT_EFFECTS:
-                return IOTBT_EFFECTS[effect_id]
+            # IOTBT devices: regular effects (1-12, more on some products)
+            # and music effects (0x100+)
+            from .const import IOTBT_MUSIC_EFFECTS
+            iotbt_effects = get_iotbt_effects(self.iotbt_effect_count)
+            if effect_id in iotbt_effects:
+                return iotbt_effects[effect_id]
             elif effect_id in IOTBT_MUSIC_EFFECTS:
                 return IOTBT_MUSIC_EFFECTS[effect_id]
             return None
@@ -1728,7 +1746,8 @@ class LEDNetWFDevice:
         eff_type = self.effect_type
         effect_id = get_effect_id(
             effect_name, eff_type, self.has_bg_color, self.has_ic_config,
-            self.has_builtin_mic, self.has_candle_mode
+            self.has_builtin_mic, self.has_candle_mode,
+            iotbt_effect_count=self.iotbt_effect_count,
         )
 
         if effect_id is None:
@@ -1813,6 +1832,7 @@ class LEDNetWFDevice:
                 fg_rgb=fg_rgb,
                 bg_rgb=bg_rgb,
                 uses_0x38_effects=self.uses_0x38_effects,
+                iotbt_effect_count=self.iotbt_effect_count,
             )
         if packet is None:
             return False
