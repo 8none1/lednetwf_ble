@@ -2713,8 +2713,11 @@ def get_service_data_from_advertisement(
 
     LEDnetWF devices may use different service UUIDs:
     - 0xFFFF: Standard service UUID
-    - 0x5A00: ZengGe manufacturer-specific (seen on IOTBT devices)
-    - 0x5B00: ZengGe manufacturer-specific variant
+    - 0x5A00-0x5EFF: ZengGe manufacturer-specific (seen on IOTBT devices).
+      The vendor app (ZGHBDevice.newDevice / getManufacturer) accepts any
+      16-bit UUID whose high byte is 0x5A-0x5E; the low byte is the device's
+      status byte and varies between devices and over time (0x5A00, 0x5A02,
+      0x5B00, ...).
 
     Args:
         service_data_dict: Dict from BluetoothServiceInfoBleak.service_data
@@ -2737,6 +2740,19 @@ def get_service_data_from_advertisement(
         uuid_str = f"0000{prefix}-0000-1000-8000-00805f9b34fb"
         if uuid_str in service_data_dict:
             return service_data_dict[uuid_str]
+
+    # Any other ZengGe UUID in 0x5A00-0x5EFF (e.g. 0x5A02 on an IOTBT925 LED
+    # curtain). Missing it leaves flags2 unknown, and the manufacturer-data
+    # fallback in update_from_advertisement() then wrongly picks the segment
+    # command set for Telink-style devices.
+    for key, data in service_data_dict.items():
+        k = key.lower()
+        if (
+            k.startswith("0000")
+            and k.endswith("-0000-1000-8000-00805f9b34fb")
+            and k[4:6] in ("5a", "5b", "5c", "5d", "5e")
+        ):
+            return data
 
     # Try just "ffff" or "FFFF" as fallback
     for key in service_data_dict:

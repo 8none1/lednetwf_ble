@@ -261,8 +261,19 @@ class LEDNetWFDevice:
     @property
     def effect_type(self) -> EffectType:
         """Return the effect type as proper enum (handles int conversion)."""
-        # IOTBT segment-based variant uses different effect commands
-        if self._is_iotbt_segment:
+        # IOTBT segment-based variant uses different effect commands. An explicit
+        # telink/segment protocol override wins over auto-detection, as it does
+        # for colour (is_iotbt_segment); without this, a device auto-detected as
+        # segment kept the segment effect list after being overridden to telink.
+        # The v3 override and the v3 product check are left on auto-detection.
+        override = self._iotbt_protocol_override
+        if override == "telink":
+            segment = False
+        elif override == "segment":
+            segment = True
+        else:
+            segment = self._is_iotbt_segment
+        if segment:
             return EffectType.IOTBT_SEGMENT
 
         val = self._capabilities.get("effect_type", EffectType.NONE)
