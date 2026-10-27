@@ -15,6 +15,7 @@ from typing import Tuple
 
 from .const import (
     EffectType,
+    IOTBT_DEFAULT_EFFECT_COUNT,
     MIN_KELVIN,
     MAX_KELVIN,
     SYMPHONY_BG_COLOR_EFFECTS,
@@ -367,7 +368,12 @@ def build_iotbt_white_command(brightness: int = 100) -> bytearray:
     return wrap_command(raw_cmd, cmd_family=0x0a)
 
 
-def build_iotbt_effect_command(effect_id: int, speed: int = 50, brightness: int = 100) -> bytearray:
+def build_iotbt_effect_command(
+    effect_id: int,
+    speed: int = 50,
+    brightness: int = 100,
+    max_effect_id: int = IOTBT_DEFAULT_EFFECT_COUNT,
+) -> bytearray:
     """
     Build IOTBT effect command (0xE0 0x02 format).
 
@@ -376,13 +382,14 @@ def build_iotbt_effect_command(effect_id: int, speed: int = 50, brightness: int 
 
     Format: [0xE0, 0x02, 0x00, effect_id, speed, brightness] - 6 bytes!
     - 0x00: Constant byte (required!)
-    - effect_id: 1-12 (IOTBT has 12 effects)
+    - effect_id: 1-max_effect_id (12 on most IOTBT devices; see
+      IOTBT_EFFECT_COUNT_BY_PRODUCT for products with more)
     - speed: 1-100
     - brightness: 1-100 (percentage)
 
     Uses cmd_family=0x0a (expects response)
     """
-    effect_id = max(1, min(12, effect_id))
+    effect_id = max(1, min(max(IOTBT_DEFAULT_EFFECT_COUNT, max_effect_id), effect_id))
     speed = max(1, min(100, speed))
     brightness = max(1, min(100, brightness))
 
@@ -1221,6 +1228,7 @@ def build_effect_command(
     uses_0x38_effects: bool = False,
     fg_rgb: tuple[int, int, int] | None = None,
     bg_rgb: tuple[int, int, int] | None = None,
+    iotbt_effect_count: int = IOTBT_DEFAULT_EFFECT_COUNT,
 ) -> bytearray | None:
     """
     Build effect command based on device effect type.
@@ -1235,6 +1243,7 @@ def build_effect_command(
         has_ic_config: If True, device is a true Symphony controller (0xA1-0xAD)
         fg_rgb: Foreground RGB for static effects (optional)
         bg_rgb: Background RGB for static effects (optional)
+        iotbt_effect_count: Highest 0xE0 0x02 effect ID for IOTBT devices
 
     Returns:
         Command packet or None if effect type is NONE
@@ -1245,7 +1254,7 @@ def build_effect_command(
         - Regular effects: effect_id directly (1-99, 255)
 
     IOTBT devices (product_id=0x00):
-        - Regular effects (1-12): 0xE0 0x02 command format
+        - Regular effects (1-iotbt_effect_count, default 12): 0xE0 0x02 command format
         - Music effects (encoded as effect_num << 8): 0xE1 0x05 command format
           Speed parameter is used as mic sensitivity for music mode
     """
@@ -1269,8 +1278,10 @@ def build_effect_command(
             # Speed is used as sensitivity for music mode
             return build_iotbt_music_command(music_effect_id, brightness, speed)
         else:
-            # Regular effect (1-12) via 0xE0 0x02 command
-            return build_iotbt_effect_command(effect_id, speed, brightness)
+            # Regular effect (1-12, or up to iotbt_effect_count) via 0xE0 0x02 command
+            return build_iotbt_effect_command(
+                effect_id, speed, brightness, max_effect_id=iotbt_effect_count
+            )
     elif effect_type == EffectType.ADDRESSABLE_0x53:
         # 4 bytes, NO checksum - brightness is critical!
         return build_effect_command_0x53(effect_id, speed, brightness)
