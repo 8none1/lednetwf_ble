@@ -185,6 +185,27 @@ hue = packed >> 7
 saturation = packed & 0x7F
 ```
 
+#### Reading this encoding out of a capture (important)
+
+For any saturation up to 100, `byte_hi` is **numerically identical to
+`hue // 2`**, because `sat` never reaches the 256 needed to carry into the high
+byte:
+
+```
+byte_hi = ((hue << 7) | sat) >> 8 == hue // 2       for sat <= 100
+byte_lo = ((hue << 7) | sat) & 0xFF == sat + (128 if hue is odd else 0)
+```
+
+So a capture of fully saturated colours looks exactly like "hue in half-degree
+units followed by a saturation byte", and both readings produce the same bytes
+for every even hue. They diverge only on odd hues, where the correct low byte is
+`sat + 128` (a half-degree of hue). This has already caused one misreading of a
+capture, see `ai_instructions/DISCOVERIES.md`.
+
+If you are decoding a new device, test a **desaturated** colour on an **odd**
+hue before concluding which encoding it uses. Pure red, yellow and blue cannot
+tell them apart.
+
 ### Mode Values
 
 | Mode | Purpose |
@@ -220,6 +241,21 @@ device shows otherwise.** On product 0x27 the Symphony-style RGB in bytes 7-9
 was read as a delay of `(R << 16 | G << 8 | B)` ms, so pure blue arrived
 after 255 ms, green after about 65 s and anything with red after hours. That
 looked exactly like "the device ignores 0x3B".
+
+### Byte 9 is not always the blue channel
+
+Bytes 7-9 are documented above as redundant RGB, which is what our colour
+builder puts there. But the app's own templates put a transition/gradient value
+in byte 9 for other modes:
+
+- `temp_value_v2` = `3bb1000000{cct}{bright}00001e0000` - a hardcoded `0x1E` at
+  byte 9.
+- The `E0 01` colour capture in
+  [17_device_configuration.md](17_device_configuration.md) has `0x14` at byte 9
+  while setting red, yellow and blue, so it cannot be a blue channel there
+  either.
+
+Treat byte 9 as mode-dependent when decoding a capture.
 
 ---
 
