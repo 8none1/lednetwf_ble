@@ -31,7 +31,7 @@ Source: tc/b.java method c() lines 47-62, DeviceState.java
 | 9    | Warm White (WW) | f23868m           | Warm white (0-255)               |
 | 10   | LED Version     | f23860d (via i()) | LED/firmware version - NOT brightness! |
 | 11   | Cool White (CW) | f23869n           | Cool white (0-255)               |
-| 12   | Reserved        | f23870p           | Device-specific                  |
+| 12   | Reserved        | f23870p           | Device-specific, see below       |
 | 13   | Checksum        | -                 | Sum of bytes 0-12 mod 256        |
 
 ### Byte 10 Clarification (LED Version, NOT Brightness)
@@ -39,6 +39,29 @@ Source: tc/b.java method c() lines 47-62, DeviceState.java
 **IMPORTANT**: Byte 10 is stored as `ledVersionNum` in the Java app, NOT brightness!
 The app uses `u0()` to retrieve this value and checks it for firmware version features.
 Never use this byte for brightness calculations.
+
+### Byte 12 (Reserved) Observed Values
+
+The app stores byte 12 but the meaning differs by family, so **do not key any
+parsing decision on it without also checking the product and firmware**:
+
+| Device | Observed value | Meaning |
+|--------|----------------|---------|
+| Product 0x08 (Ctrl_Mini_RGB_Mic), issue #99 capture | `0xF0` in solid colour *and* while an effect runs | Constant; not a mode flag |
+| Product 0x53 ring light (v1 `model_0x53.py`) | varies | LED count |
+| Product 0x27 (Ctrl_Mini_RGBW) BLE v5 fw 14.01, PR #104 | `0xF0` RGB, `0x0F` white, `0x5A` while fading between them | Colour-mode flag (sub-mode byte 4 is `0x16` on this firmware, byte 5 a constant `0x0F`) |
+
+Example frames from the product 0x08 capture, checksums verified:
+
+```
+81 08 23 61 23 10 6B FD 02 00 03 00 F0 9D   solid colour, byte 12 = F0
+81 08 23 25 23 10 57 FF 03 00 03 00 F0 50   effect 37 running, byte 12 = F0
+```
+
+Because `0xF0` shows up on a device that uses sub-mode `0x23` (the power-state
+echo), a test of the form "unknown sub-mode and byte 12 is 0xF0/0x0F" will
+match existing SIMPLE devices. Any decode that relies on byte 12 must be gated
+on the device type (product 0x27 on BLE v5), not on the byte pattern alone.
 
 ### Mode Type (Byte 3) Values
 

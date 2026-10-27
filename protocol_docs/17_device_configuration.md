@@ -397,9 +397,13 @@ wrapper below instead. Reported in PR #101.
 | 0 | 0xE0 | Effect opcode |
 | 1 | 0x02 | Sub-command (effect mode) |
 | 2 | 0x00 | Wrapper `preview` byte (see below) |
-| 3 | ff | Effect ID |
+| 3 | ff | Effect ID (1-12; 1-17 on product 194, see `IOTBT_EFFECT_COUNT_BY_PRODUCT`) |
 | 4 | ss | Speed (1-100) |
 | 5 | bb | Brightness percent (1-100) |
+
+The device reports the running effect ID in byte 8 of its `0xEA 0x81` state
+(byte 7 = `0x67` while an effect runs, `0x66` for a static colour), and the
+speed in byte 9. Source: `pcap/surplife.pcapng`, product 194.
 
 **Table corrected 31 August 2026**: this previously listed 5 payload bytes and
 omitted byte 2, which contradicted both the envelope length in the example above
@@ -408,8 +412,10 @@ omitted byte 2, which contradicted both the envelope length in the example above
 **This is not a Telink command.** It is the app's generic `scene_data_v3`
 template (see the 0xE0 v3 wrapper section below), where byte 2 is the wrapper's
 `preview` flag rather than part of the effect payload. That is why the same
-command works across device families that share nothing else. The IOTBT812
-capture shows effect IDs up to 0x32 (50), not the 12 in `const.IOTBT_EFFECTS`.
+command works across device families that share nothing else. The Surplife
+captures select effect IDs 1-17 (0x01-0x11) on product 194, not the 12 in
+`const.IOTBT_EFFECTS`. An earlier "up to 0x32" reading was the count of writes,
+not the ID range.
 
 ---
 

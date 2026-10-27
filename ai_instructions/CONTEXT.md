@@ -178,6 +178,31 @@ Some product IDs in documentation aren't in the current app database:
 
 These may be deprecated or handled dynamically.
 
+### 5. BLE version (and firmware-gated behaviour) only comes from advertisements
+
+`LEDNetWFDevice._ble_version` is populated solely by `update_from_advertisement()`.
+It is not stored in the config entry and the constructor does not read the
+cached advertisement. Any capability that is gated on firmware (for example
+"use unified 0x3B colour on BLE v5+") is therefore `False` until the first
+advert is parsed.
+
+In practice this is fine: Home Assistant's `async_register_callback` replays
+the last known advertisement for the address as soon as the callback is
+registered (the `replay` argument defaults to on), so after a normal restart
+the version is known before any command is sent. The only gap is a cold boot
+where the device has not advertised yet when the entry loads. If that ever
+matters, the config flow already parses the manufacturer data
+(`config_flow.py`, `parse_manufacturer_data`), so `ble_version` could be
+persisted next to `product_id` and used to seed the device.
+
+### 6. The 0x3B "reserved" bytes are not the same across sub-commands
+
+Bytes 7-11 of a 0x3B command are delay/gradient on some sub-commands and
+redundant RGB on others, and the same colour sub-command (0xA1) differs
+between Symphony and the BLE v5 Ctrl_Mini_RGBW. See the "Bytes 7-11 by
+sub-command" table in `protocol_docs/05_basic_commands.md`. When in doubt
+send zeros.
+
 ## Integration Development
 
 The Home Assistant integration is in `custom_components/lednetwf_ble/`.
