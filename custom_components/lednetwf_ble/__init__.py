@@ -22,6 +22,7 @@ from .const import (
     CONF_LED_TYPE,
     CONF_COLOR_ORDER,
     CONF_IOTBT_PROTOCOL,
+    CONF_DEFAULT_TRANSITION,
     IOTBT_PROTOCOL_AUTO,
     DEFAULT_DISCONNECT_DELAY,
     DEFAULT_LED_COUNT,
@@ -91,6 +92,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device.set_iotbt_protocol_override(
         entry.options.get(CONF_IOTBT_PROTOCOL, IOTBT_PROTOCOL_AUTO)
     )
+
+    # Default fade for native-transition devices (unset keeps the device default)
+    device.default_transition = entry.options.get(CONF_DEFAULT_TRANSITION)
 
     # For devices that don't report power state in advertisements (like IOTBT),
     # query state on startup to ensure proper availability
@@ -169,6 +173,8 @@ async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None
     device.set_iotbt_protocol_override(
         entry.options.get(CONF_IOTBT_PROTOCOL, IOTBT_PROTOCOL_AUTO)
     )
+
+    device.default_transition = entry.options.get(CONF_DEFAULT_TRANSITION)
 
     # Check if LED settings need to be applied
     product_id = entry.data.get(CONF_PRODUCT_ID)

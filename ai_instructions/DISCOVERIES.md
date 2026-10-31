@@ -4,6 +4,29 @@ This document tracks significant findings and corrections made during the revers
 
 ## Documentation Errors Found and Fixed
 
+### Unified 0x3B bytes 7-9 are a fade time in 10 ms units, not a delay in ms
+
+**Date**: 30 October 2026
+
+**Device**: product 0x27 (Ctrl_Mini_RGBW "sunset lamp"), BLE v5, fw 14.01.
+
+**Findings** (standalone bleak client, polling `0x81` every ~0.3 s):
+
+- `3b a1 78 64 64 00 00 00 01 2c 00 00` (blue, bytes 7-9 = 300) from red:
+  the reported output stepped linearly `CC0032`, `B4004A`, ... `0400FA`,
+  `0000FF` and finished ~3.1 s after the write. It is a **fade**, not a
+  wait-then-jump, and the unit is **10 ms** (300 -> 3 s; 2000 gave ~20 s).
+  The earlier "delay in ms" reading below came from RGB landing in this field.
+- The same holds for `0x3B 0x01` brightness and `0x3B 0x23/0x24` power (the
+  default `00 00 32` is the app's 0.5 s soft on/off).
+- A non-zero `{gradient}` in bytes 10-11 of `0xA1` (`... 00 00 00 01 2c`)
+  made the device ignore the command entirely. Keep bytes 10-11 zero.
+
+**Fix**: `transition_to_v2_delay()` and a `delay` argument on the unified
+builders; the light entity advertises `LightEntityFeature.TRANSITION` on
+`uses_color_v2` devices and maps `transition` (or the new
+`default_transition` option) onto it.
+
 ### 0x3B colour: bytes 7-9 are a delay, and BLE v5 Ctrl_Mini_RGBW ignores 0x31
 
 **Date**: 1 October 2026

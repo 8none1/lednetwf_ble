@@ -9,6 +9,7 @@ from homeassistant.components.light import (
     ATTR_COLOR_TEMP_KELVIN,
     ATTR_EFFECT,
     ATTR_RGB_COLOR,
+    ATTR_TRANSITION,
     ColorMode,
     LightEntity,
     LightEntityFeature,
@@ -78,6 +79,8 @@ class LEDNetWFLight(LightEntity):
         features = LightEntityFeature(0)
         if device.has_effects:
             features |= LightEntityFeature.EFFECT
+        if device.supports_transition:
+            features |= LightEntityFeature.TRANSITION
         self._attr_supported_features = features
 
         # Color temp range
@@ -235,9 +238,22 @@ class LEDNetWFLight(LightEntity):
         """Turn the light on."""
         _LOGGER.debug("turn_on called with kwargs: %s", kwargs)
 
+        # None falls back to the device's default_transition (ignored if unsupported)
+        transition = kwargs.get(ATTR_TRANSITION)
+
         # Ensure light is on
         if not self._device.is_on:
-            await self._device.turn_on()
+            power_transition = transition
+            # When a colour/CCT/brightness command follows and carries the fade
+            # itself, keep the power-on at the standard 0.5 s soft-on. Passing the
+            # fade to both would fade in, then fade a second time.
+            follow_up_fades = not kwargs.get(ATTR_EFFECT) and any(
+                k in kwargs
+                for k in (ATTR_COLOR_TEMP_KELVIN, ATTR_RGB_COLOR, ATTR_BRIGHTNESS)
+            )
+            if follow_up_fades and self._device.supports_transition:
+                power_transition = 0.5
+            await self._device.turn_on(power_transition)
 
         # Determine brightness
         brightness = kwargs.get(ATTR_BRIGHTNESS)
@@ -256,12 +272,14 @@ class LEDNetWFLight(LightEntity):
 
         # Handle color temperature
         if ATTR_COLOR_TEMP_KELVIN in kwargs:
-            await self._device.set_color_temp(kwargs[ATTR_COLOR_TEMP_KELVIN], brightness)
+            await self._device.set_color_temp(
+                kwargs[ATTR_COLOR_TEMP_KELVIN], brightness, transition
+            )
             return
 
         # Handle RGB color
         if ATTR_RGB_COLOR in kwargs:
-            await self._device.set_rgb_color(kwargs[ATTR_RGB_COLOR], brightness)
+            await self._device.set_rgb_color(kwargs[ATTR_RGB_COLOR], brightness, transition)
             return
 
         # Just brightness change - resend current color/mode
@@ -272,7 +290,7 @@ class LEDNetWFLight(LightEntity):
                 # so brightness can be changed without disturbing the current
                 # colour or effect. Avoids re-sending the effect, which is what
                 # made brightness changes jump into an effect on 0x08/0x3C.
-                await self._device.set_brightness(brightness)
+                await self._device.set_brightness(brightness, transition)
             elif self._device.effect:
                 # Re-send effect with new brightness
                 await self._device.set_effect(
@@ -282,16 +300,18 @@ class LEDNetWFLight(LightEntity):
                 )
             elif self._device.color_temp_kelvin and self._device.has_color_temp:
                 await self._device.set_color_temp(
-                    self._device.color_temp_kelvin, brightness
+                    self._device.color_temp_kelvin, brightness, transition
                 )
             elif self._device.rgb_color and self._device.has_rgb:
-                await self._device.set_rgb_color(self._device.rgb_color, brightness)
+                await self._device.set_rgb_color(
+                    self._device.rgb_color, brightness, transition
+                )
             elif self._device.has_dim:
-                await self._device.set_brightness(brightness)
+                await self._device.set_brightness(brightness, transition)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        await self._device.turn_off()
+        await self._device.turn_off(kwargs.get(ATTR_TRANSITION))
 
 
 class LEDNetWFBackgroundLight(LightEntity):

@@ -29,6 +29,24 @@ _LOGGER = logging.getLogger(__name__)
 # CHECKSUM
 # =============================================================================
 
+# Unified 0x3B commands carry a 24-bit transition time in bytes 7-9, in 10 ms units
+# (bright_value_v2's {delay}). Measured on product 0x27: 300 fades red -> blue in ~3 s,
+# with the reported output stepping linearly. A non-zero 16-bit {gradient} in bytes
+# 10-11 of 0xA1 made the device ignore the command, so keep it zero.
+V2_DELAY_UNIT_S = 0.01
+V2_DELAY_MAX = 0xFFFFFF
+
+
+def transition_to_v2_delay(seconds: float) -> int:
+    """Convert a transition in seconds to the unified-protocol delay field (10 ms units)."""
+    return max(0, min(round(seconds / V2_DELAY_UNIT_S), V2_DELAY_MAX))
+
+
+def _v2_delay_bytes(delay: int) -> list[int]:
+    delay = max(0, min(int(delay), V2_DELAY_MAX))
+    return [(delay >> 16) & 0xFF, (delay >> 8) & 0xFF, delay & 0xFF]
+
+
 def calculate_checksum(data: bytes) -> int:
     """Calculate checksum (sum of all bytes & 0xFF)."""
     return sum(data) & 0xFF
@@ -130,32 +148,34 @@ def kelvin_to_ww_cw(kelvin: int, brightness: int = 255) -> Tuple[int, int]:
 # POWER COMMANDS
 # =============================================================================
 
-def build_power_command_0x3B(turn_on: bool) -> bytearray:
+def build_power_command_0x3B(turn_on: bool, delay: int = 0x32) -> bytearray:
     """
     Build power command using 0x3B format (BLE v5+).
 
-    Format: [0x3B, mode, 0, 0, 0, 0, 0, 0, 0, time_lo, 0, 0, checksum]
+    Format: [0x3B, mode, 0, 0, 0, 0, 0, delay(3), 0, 0, checksum]
     Mode: 0x23 = ON, 0x24 = OFF
+    delay: fade time in 10 ms units (see transition_to_v2_delay); the default 0x32
+           is the 0.5 s soft on/off this command has always used.
     """
     mode = 0x23 if turn_on else 0x24
     raw_cmd = bytearray([
         0x3B, mode,
         0x00, 0x00, 0x00,  # HSV placeholder
         0x00, 0x00,        # Params
-        0x00, 0x00, 0x32,  # RGB + time (50ms)
+        *_v2_delay_bytes(delay),
         0x00, 0x00
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
-def build_brightness_command_0x3B(brightness_pct: int) -> bytearray:
+def build_brightness_command_0x3B(brightness_pct: int, delay: int = 0) -> bytearray:
     """
     Build standalone brightness command using 0x3B format.
 
     Source: ble_dp_cmd.json - bright_value_v2
     Format: [0x3B, 0x01, 0, 0, bright, 0, bright, delay(3), gradient(2), checksum]
-    Brightness is 0-100 (percent).
+    Brightness is 0-100 (percent). delay is in 10 ms units (see transition_to_v2_delay).
     """
     brightness_pct = max(0, min(100, brightness_pct))
     raw_cmd = bytearray([
@@ -164,7 +184,7 @@ def build_brightness_command_0x3B(brightness_pct: int) -> bytearray:
         brightness_pct & 0xFF,
         0x00,
         brightness_pct & 0xFF,
-        0x00, 0x00, 0x00,  # Delay (24-bit big-endian)
+        *_v2_delay_bytes(delay),  # Delay (24-bit big-endian)
         0x00, 0x00          # Gradient (16-bit big-endian)
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
@@ -790,28 +810,26 @@ def build_color_command_0x3B(r: int, g: int, b: int, brightness: int = 100) -> b
     return wrap_command(raw_cmd, cmd_family=0x0b)
 
 
-def build_color_command_v2(r: int, g: int, b: int, brightness: int = 100, delay_ms: int = 0) -> bytearray:
+def build_color_command_v2(r: int, g: int, b: int, brightness: int = 100, delay: int = 0) -> bytearray:
     """
     Build the unified-protocol colour command (colour_data_v2) for SIMPLE devices on BLE v5+.
 
     Same opcode, mode and packed hue+sat as build_color_command_0x3B, but bytes 7-9 are a
-    24-bit big-endian delay in ms (as in bright_value_v2), not redundant RGB, and bytes
-    10-11 are the gradient. Verified on product 0x27 (Ctrl_Mini_RGBW, BLE v5, fw 14.01):
-    with RGB in bytes 7-9 the device waited (R << 16 | G << 8 | B) ms before changing, so
-    pure blue arrived after 255 ms, pure green after 65 s and any red colour after hours.
-    Brightness is 0-100; the device stores the colour pre-scaled by it.
+    24-bit big-endian transition time in 10 ms units (bright_value_v2's {delay}), not
+    redundant RGB, and bytes 10-11 are the gradient. Verified on product 0x27
+    (Ctrl_Mini_RGBW, BLE v5, fw 14.01): the device fades to the new colour over that
+    time, which is why RGB in bytes 7-9 made blue lag a couple of seconds, green take
+    minutes and any red colour hours. Brightness is 0-100; the device stores the colour pre-scaled by it.
     """
     h, s, _ = rgb_to_hsv(r, g, b)
     hs_hi, hs_lo = pack_hue_saturation(h, s)
-    delay_ms = max(0, min(int(delay_ms), 0xFFFFFF))
-
     raw_cmd = bytearray([
         0x3B,                       # Command opcode
         0xA1,                       # Mode: solid color
         hs_hi, hs_lo,               # Packed hue + saturation
         min(brightness, 100) & 0xFF,  # Brightness (0-100)
         0x00, 0x00,                 # Params
-        (delay_ms >> 16) & 0xFF, (delay_ms >> 8) & 0xFF, delay_ms & 0xFF,  # Delay (ms)
+        *_v2_delay_bytes(delay),    # Transition (10 ms units)
         0x00, 0x00,                 # Gradient
     ])
     raw_cmd.append(calculate_checksum(raw_cmd))
@@ -877,7 +895,7 @@ def build_white_command(ww: int, cw: int) -> bytearray:
 
 
 def build_cct_command_0x3B(temp_percent: int, brightness_percent: int,
-                          duration: int = 0) -> bytearray:
+                          duration: int = 0, delay: int = 0) -> bytearray:
     """
     Build CCT temperature command using 0x3B format with mode 0xB1.
 
@@ -893,6 +911,7 @@ def build_cct_command_0x3B(temp_percent: int, brightness_percent: int,
         temp_percent: 0-100 (0=cool/6500K, 100=warm/2700K)
         brightness_percent: 0-100
         duration: Transition time (default 0 = instant, matches working old code)
+        delay: Unified-protocol (uses_color_v2) transition in 10 ms units, bytes 7-9
 
     Returns:
         13-byte command packet wrapped in transport layer
@@ -907,7 +926,7 @@ def build_cct_command_0x3B(temp_percent: int, brightness_percent: int,
         0x00,                      # Brightness param (unused for CCT)
         temp_percent & 0xFF,       # Temperature %
         brightness_percent & 0xFF, # Brightness %
-        0x00, 0x00, 0x00,          # RGB (unused)
+        *_v2_delay_bytes(delay),   # RGB (unused) / unified-protocol transition
         (duration >> 8) & 0xFF,    # Time high byte
         duration & 0xFF,           # Time low byte
     ])
