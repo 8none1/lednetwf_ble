@@ -243,7 +243,17 @@ class LEDNetWFLight(LightEntity):
 
         # Ensure light is on
         if not self._device.is_on:
-            await self._device.turn_on(transition)
+            power_transition = transition
+            # When a colour/CCT/brightness command follows and carries the fade
+            # itself, keep the power-on at the standard 0.5 s soft-on. Passing the
+            # fade to both would fade in, then fade a second time.
+            follow_up_fades = not kwargs.get(ATTR_EFFECT) and any(
+                k in kwargs
+                for k in (ATTR_COLOR_TEMP_KELVIN, ATTR_RGB_COLOR, ATTR_BRIGHTNESS)
+            )
+            if follow_up_fades and self._device.supports_transition:
+                power_transition = 0.5
+            await self._device.turn_on(power_transition)
 
         # Determine brightness
         brightness = kwargs.get(ATTR_BRIGHTNESS)
