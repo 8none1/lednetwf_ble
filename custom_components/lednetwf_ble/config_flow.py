@@ -36,6 +36,7 @@ from .const import (
     CONF_LED_TYPE,
     CONF_COLOR_ORDER,
     CONF_IOTBT_PROTOCOL,
+    CONF_DEFAULT_TRANSITION,
     IOTBT_PROTOCOL_AUTO,
     IOTBT_PROTOCOL_CHOICES,
     DEFAULT_DISCONNECT_DELAY,
@@ -714,6 +715,22 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 )
             )
 
+        # Native-transition devices: default fade for calls without a transition
+        # (Alexa/emulated Hue, dashboard toggles). Unset keeps the device default.
+        if device is not None and device.supports_transition:
+            current_transition = options.get(CONF_DEFAULT_TRANSITION)
+            schema_dict[
+                vol.Optional(
+                    CONF_DEFAULT_TRANSITION,
+                    description={"suggested_value": current_transition},
+                )
+            ] = NumberSelector(
+                NumberSelectorConfig(
+                    min=0, max=60, step=0.1, unit_of_measurement="s",
+                    mode=NumberSelectorMode.BOX,
+                )
+            )
+
         # Calculate total LEDs for display in description
         placeholders = {}
         if caps.get("has_ic_config") or is_iotbt_segment:
@@ -764,5 +781,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         if CONF_IOTBT_PROTOCOL in user_input:
             new_options[CONF_IOTBT_PROTOCOL] = user_input[CONF_IOTBT_PROTOCOL]
+        if user_input.get(CONF_DEFAULT_TRANSITION) is not None:
+            new_options[CONF_DEFAULT_TRANSITION] = float(user_input[CONF_DEFAULT_TRANSITION])
 
         return self.async_create_entry(title="", data=new_options)

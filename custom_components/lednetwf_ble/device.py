@@ -77,6 +77,9 @@ class LEDNetWFDevice:
         self._name = name
         self._product_id = product_id
         self._disconnect_delay = disconnect_delay
+        # Default fade (seconds) for devices with native transitions; None keeps the
+        # device's built-in behaviour (instant colour, 0.5 s soft on/off).
+        self.default_transition: float | None = None
         self._setup_mode = setup_mode
 
         # Connection state
@@ -507,6 +510,19 @@ class LEDNetWFDevice:
         the unified protocol; earlier firmware keeps the 0x31 colour command.
         """
         return bool(self._capabilities.get("uses_color_v2")) and (self._ble_version or 0) >= 5
+
+    @property
+    def supports_transition(self) -> bool:
+        """Return True if the device fades natively (unified 0x3B delay field)."""
+        return self.uses_color_v2
+
+    def _v2_delay(self, transition: float | None, fallback: int) -> int:
+        """Resolve a transition (seconds) to the 0x3B delay field, falling back to the default."""
+        if transition is None:
+            transition = self.default_transition
+        if transition is None or not self.supports_transition:
+            return fallback
+        return protocol.transition_to_v2_delay(transition)
 
     @property
     def uses_0x38_effects(self) -> bool:
@@ -1457,8 +1473,8 @@ class LEDNetWFDevice:
 
     # ----- Public command methods -----
 
-    async def turn_on(self) -> bool:
-        """Turn on the device."""
+    async def turn_on(self, transition: float | None = None) -> bool:
+        """Turn on the device, fading over transition seconds where supported."""
         if self.is_iotbt_segment:
             # IOTBT segment-based variant uses standard 0x3B power command
             packet = protocol.build_power_command_0x3B(turn_on=True)
@@ -1466,15 +1482,17 @@ class LEDNetWFDevice:
             # Standard IOTBT devices use 0x71 power command format
             packet = protocol.build_iotbt_power_command(turn_on=True)
         else:
-            packet = protocol.build_power_command_0x3B(turn_on=True)
+            packet = protocol.build_power_command_0x3B(
+                turn_on=True, delay=self._v2_delay(transition, 0x32)
+            )
         if await self._send_command(packet):
             self._is_on = True
             self._notify_callbacks()
             return True
         return False
 
-    async def turn_off(self) -> bool:
-        """Turn off the device."""
+    async def turn_off(self, transition: float | None = None) -> bool:
+        """Turn off the device, fading over transition seconds where supported."""
         if self.is_iotbt_segment:
             # IOTBT segment-based variant uses standard 0x3B power command
             packet = protocol.build_power_command_0x3B(turn_on=False)
@@ -1482,19 +1500,25 @@ class LEDNetWFDevice:
             # Standard IOTBT devices use 0x71 power command format
             packet = protocol.build_iotbt_power_command(turn_on=False)
         else:
-            packet = protocol.build_power_command_0x3B(turn_on=False)
+            packet = protocol.build_power_command_0x3B(
+                turn_on=False, delay=self._v2_delay(transition, 0x32)
+            )
         if await self._send_command(packet):
             self._is_on = False
             self._notify_callbacks()
             return True
         return False
 
-    async def set_rgb_color(self, rgb: tuple[int, int, int], brightness: int = 255) -> bool:
+    async def set_rgb_color(
+        self, rgb: tuple[int, int, int], brightness: int = 255, transition: float | None = None
+    ) -> bool:
         """Set RGB color.
 
         Args:
             rgb: Tuple of (R, G, B) values 0-255
             brightness: Brightness 0-255
+            transition: Fade time in seconds (native-transition devices only;
+                None uses default_transition)
 
         For devices in Settled Mode effects (Symphony has_ic_config), changing color
         updates the foreground color via 0x41 command while staying in the effect.
@@ -1597,9 +1621,11 @@ class LEDNetWFDevice:
             )
         elif self.uses_color_v2:
             # Unified 0x3B colour command: brightness travels in its own byte and the
-            # device stores the scaled colour. Bytes 7-9 must stay zero (they are a delay).
+            # device stores the scaled colour. Bytes 7-9 are the fade time, not RGB.
             brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
-            packet = protocol.build_color_command_v2(rgb[0], rgb[1], rgb[2], brightness_pct)
+            packet = protocol.build_color_command_v2(
+                rgb[0], rgb[1], rgb[2], brightness_pct, delay=self._v2_delay(transition, 0)
+            )
             _LOGGER.debug(
                 "colour_data_v2 command: RGB=(%d,%d,%d), brightness=%d%%",
                 rgb[0], rgb[1], rgb[2], brightness_pct
@@ -1646,12 +1672,16 @@ class LEDNetWFDevice:
             return True
         return False
 
-    async def set_color_temp(self, kelvin: int, brightness: int = 255) -> bool:
+    async def set_color_temp(
+        self, kelvin: int, brightness: int = 255, transition: float | None = None
+    ) -> bool:
         """Set color temperature.
 
         Args:
             kelvin: Color temperature in Kelvin (2700-6500)
             brightness: Brightness 0-255
+            transition: Fade time in seconds (native-transition devices only;
+                None uses default_transition)
         """
         if not self.has_color_temp:
             _LOGGER.warning("Device %s does not support color temperature", self._name)
@@ -1689,7 +1719,9 @@ class LEDNetWFDevice:
             # Use max(1, ...) to prevent 0% brightness from turning off the light
             brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
 
-            packet = protocol.build_cct_command_0x3B(temp_pct, brightness_pct)
+            packet = protocol.build_cct_command_0x3B(
+                temp_pct, brightness_pct, delay=self._v2_delay(transition, 0)
+            )
             _LOGGER.debug("Setting CCT: kelvin=%d, temp_pct=%d%% (0=warm, 100=cool), brightness_pct=%d%%",
                           kelvin, temp_pct, brightness_pct)
 
@@ -1702,7 +1734,9 @@ class LEDNetWFDevice:
             return True
         return False
 
-    async def set_brightness(self, brightness: int = 255) -> bool:
+    async def set_brightness(
+        self, brightness: int = 255, transition: float | None = None
+    ) -> bool:
         """Set brightness using the standalone brightness command.
 
         Uses the 0x3B 0x01 standalone brightness command (bright_value_v2) to
@@ -1717,6 +1751,8 @@ class LEDNetWFDevice:
 
         Args:
             brightness: Brightness 0-255 (converted to 0-100 percent for protocol)
+            transition: Fade time in seconds (native-transition devices only;
+                None uses default_transition)
         """
         if not self.has_brightness_cmd:
             _LOGGER.warning(
@@ -1727,7 +1763,9 @@ class LEDNetWFDevice:
 
         brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
         _LOGGER.debug("Standalone brightness: %d/255 -> %d%%", brightness, brightness_pct)
-        packet = protocol.build_brightness_command_0x3B(brightness_pct)
+        packet = protocol.build_brightness_command_0x3B(
+            brightness_pct, delay=self._v2_delay(transition, 0)
+        )
 
         if await self._send_command(packet):
             self._brightness = brightness

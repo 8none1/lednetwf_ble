@@ -230,16 +230,16 @@ The meaning of bytes 7-11 is **not fixed across 0x3B sub-commands**. The app's
 
 | Function | Template | Bytes 7-9 | Bytes 10-11 |
 |----------|----------|-----------|-------------|
-| `bright_value_v2` (0x01) | `3b010000{value}00{value}{delay}{delay}{delay}{gradient}{gradient}` | delay, 24-bit ms | gradient |
+| `bright_value_v2` (0x01) | `3b010000{value}00{value}{delay}{delay}{delay}{gradient}{gradient}` | fade, 24-bit, 10 ms units | gradient (keep 0) |
 | `temp_value_v2` (0xB1) | `3bb1000000{cct}{bright}00001e0000` | `00 00 1E` = 30 ms delay | `00 00` |
 | `switch_led_v2` (0x23/0x24) | `3b{open}0000000000{gradient}{gradient}{gradient}{delay}{delay}` | gradient | delay |
 | 0xA1 colour, Symphony | (not in the JSON; from working captures) | redundant RGB | time |
-| 0xA1 colour, product 0x27 BLE v5 | (from device testing, PR #104) | delay, 24-bit ms | gradient |
+| 0xA1 colour, product 0x27 BLE v5 | (from device testing, PR #104) | fade, 24-bit, 10 ms units | gradient (non-zero: command ignored) |
 
 Practical rule: **send zeros in bytes 7-11 unless a capture for that exact
 device shows otherwise.** On product 0x27 the Symphony-style RGB in bytes 7-9
-was read as a delay of `(R << 16 | G << 8 | B)` ms, so pure blue arrived
-after 255 ms, green after about 65 s and anything with red after hours. That
+was read as a fade time of `(R << 16 | G << 8 | B)` x 10 ms, so pure blue took
+a couple of seconds, green minutes and anything with red hours. That
 looked exactly like "the device ignores 0x3B".
 
 ### Byte 9 is not always the blue channel

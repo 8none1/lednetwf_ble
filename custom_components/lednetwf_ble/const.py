@@ -16,6 +16,7 @@ CONF_SEGMENTS: Final = "segments"
 CONF_LED_TYPE: Final = "led_type"
 CONF_COLOR_ORDER: Final = "color_order"
 CONF_IOTBT_PROTOCOL: Final = "iotbt_protocol"
+CONF_DEFAULT_TRANSITION: Final = "default_transition"
 
 # IOTBT protocol override choices (for the 0x5A00 family where Telink vs segment
 # cannot be auto-detected reliably across firmware versions).
