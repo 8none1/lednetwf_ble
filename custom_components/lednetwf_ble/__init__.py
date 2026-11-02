@@ -143,6 +143,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Hold the link open if configured (disconnect_delay 0)
+    device.start_keepalive()
+
     return True
 
 
@@ -167,7 +170,7 @@ async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None
 
     # Update disconnect delay
     new_delay = entry.options.get(CONF_DISCONNECT_DELAY, DEFAULT_DISCONNECT_DELAY)
-    device._disconnect_delay = new_delay
+    device.set_disconnect_delay(new_delay)
 
     # Apply IOTBT protocol override (Telink vs segment)
     device.set_iotbt_protocol_override(

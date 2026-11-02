@@ -17,6 +17,9 @@ from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant, callback
 
 from .const import (
+    KEEPALIVE_RETRY_MIN,
+    KEEPALIVE_RETRY_MAX,
+    KEEPALIVE_RECONNECT_DELAY,
     WRITE_CHARACTERISTIC_UUID,
     NOTIFY_CHARACTERISTIC_UUID,
     DEFAULT_DISCONNECT_DELAY,
@@ -88,6 +91,10 @@ class LEDNetWFDevice:
         self._disconnect_timer: asyncio.TimerHandle | None = None
         self._seq: int = 0
         self._connect_lock = asyncio.Lock()
+        # Keep-alive (disconnect_delay == 0): hold the link and reconnect when it drops
+        self._keepalive_task: asyncio.Task | None = None
+        self._link_lost = asyncio.Event()
+        self._stopping = False
 
         # Device state
         self._is_on: bool | None = None
@@ -784,10 +791,70 @@ class LEDNetWFDevice:
         self._schedule_disconnect()
         return self._client
 
+    @property
+    def keep_connected(self) -> bool:
+        """Return True if the link should be held open (disconnect_delay of 0)."""
+        return self._disconnect_delay == 0
+
+    def set_disconnect_delay(self, delay: int) -> None:
+        """Apply a new disconnect delay, starting or stopping the keep-alive."""
+        self._disconnect_delay = delay
+        if self.keep_connected:
+            if self._disconnect_timer:
+                self._disconnect_timer.cancel()
+                self._disconnect_timer = None
+            self.start_keepalive()
+        else:
+            if self._keepalive_task and not self._keepalive_task.done():
+                self._keepalive_task.cancel()
+            self._keepalive_task = None
+            if self._client and self._client.is_connected:
+                self._schedule_disconnect()
+
+    def start_keepalive(self) -> None:
+        """Start holding the connection open if configured to."""
+        if not self.keep_connected or self._stopping:
+            return
+        if self._keepalive_task and not self._keepalive_task.done():
+            return
+        self._keepalive_task = self._hass.async_create_background_task(
+            self._keepalive_loop(), f"lednetwf_ble keep-alive {self._address}"
+        )
+
+    async def _keepalive_loop(self) -> None:
+        """Connect, then reconnect whenever the link drops, backing off on failure.
+
+        Backoff matters on weak links: tight reconnect loops keep the adapter
+        busy and starve other BLE devices on it.
+        """
+        backoff = KEEPALIVE_RETRY_MIN
+        while self.keep_connected and not self._stopping:
+            self._link_lost.clear()
+            if not (self._client and self._client.is_connected):
+                try:
+                    await self._ensure_connected()
+                except Exception as ex:  # noqa: BLE001 - BLE stack raises all sorts
+                    _LOGGER.debug(
+                        "Keep-alive connect to %s failed (%s: %s), retrying in %ss",
+                        self._name, type(ex).__name__, ex, backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, KEEPALIVE_RETRY_MAX)
+                    continue
+                backoff = KEEPALIVE_RETRY_MIN
+                # Connected devices stop advertising, so refresh state over the link
+                await self.query_state()
+            if self._client and self._client.is_connected:
+                await self._link_lost.wait()
+            await asyncio.sleep(KEEPALIVE_RECONNECT_DELAY)
+
     def _schedule_disconnect(self) -> None:
-        """Schedule a disconnection after the delay."""
+        """Schedule a disconnection after the delay (none when keeping connected)."""
         if self._disconnect_timer:
             self._disconnect_timer.cancel()
+            self._disconnect_timer = None
+        if self.keep_connected:
+            return
 
         self._disconnect_timer = self._hass.loop.call_later(
             self._disconnect_delay,
@@ -813,6 +880,7 @@ class LEDNetWFDevice:
         """Handle disconnection."""
         _LOGGER.debug("Disconnected from %s", self._name)
         self._client = None
+        self._link_lost.set()
 
     def _on_notification(self, sender: int, data: bytearray) -> None:
         """Handle incoming notifications."""
@@ -2795,6 +2863,10 @@ class LEDNetWFDevice:
 
     async def stop(self) -> None:
         """Stop the device and clean up."""
+        self._stopping = True
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+        self._keepalive_task = None
         if self._disconnect_timer:
             self._disconnect_timer.cancel()
             self._disconnect_timer = None
