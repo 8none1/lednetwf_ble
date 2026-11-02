@@ -64,6 +64,7 @@ Search for "LEDnetWF BLE" and click install.  You will also get notified of futu
 - **Default**: 120 seconds
 - **Range**: 0 (never disconnect) to any positive number
 - **Description**: How long to wait before disconnecting from the device when not in use. Setting to 0 means the connection will be maintained permanently, this is not recommended. Shorter timeouts may cause slower response times when controlling the device but will more quickly free up Bluetooth connections for use by other devices.
+- **Keeping connected (0)**: the integration connects at startup and holds one connection slot for the device. If the link drops it reconnects after 2 seconds, and if connecting fails it backs off (15 seconds, doubling up to 5 minutes) so an out-of-range device doesn't tie up the adapter. State is queried after each reconnect. While Home Assistant holds the connection, the vendor app cannot connect to the device. This is mainly useful for devices with a weak signal, where each on-demand connection is slow.
 - **Tip**: If you only make infrequent changes to your lights, consider trying a timeout of 20 seconds. This can help save connection slots for other Bluetooth devices while still providing reasonable responsiveness.
 
 **Device Name**
