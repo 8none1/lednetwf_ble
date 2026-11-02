@@ -43,7 +43,10 @@ IOTBT_PROTOCOL_CHOICES: Final = (
 )
 
 # Default values
-DEFAULT_DISCONNECT_DELAY: Final = 30  # seconds
+DEFAULT_DISCONNECT_DELAY: Final = 30  # seconds; 0 = stay connected (keep-alive)
+KEEPALIVE_RECONNECT_DELAY: Final = 2  # seconds after a drop before reconnecting
+KEEPALIVE_RETRY_MIN: Final = 15  # first retry after a failed keep-alive connect, doubling
+KEEPALIVE_RETRY_MAX: Final = 300
 DEFAULT_LED_COUNT: Final = 60
 DEFAULT_SEGMENTS: Final = 1
 DEFAULT_EFFECT_SPEED: Final = 50  # 0-100

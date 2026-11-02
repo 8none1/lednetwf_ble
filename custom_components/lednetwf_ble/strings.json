@@ -19,7 +19,7 @@
         "title": "Device Options",
         "description": "Configure options for **{name}**. Total LEDs: {total_leds}",
         "data": {
-          "disconnect_delay": "Disconnect delay (seconds)",
+          "disconnect_delay": "Disconnect delay (seconds, 0 = stay connected)",
           "led_count": "LEDs per segment",
           "segments": "Number of segments",
           "led_type": "LED chip type",
@@ -44,7 +44,7 @@
         "title": "Device Options",
         "description": "Total LEDs: {total_leds}",
         "data": {
-          "disconnect_delay": "Disconnect delay (seconds)",
+          "disconnect_delay": "Disconnect delay (seconds, 0 = stay connected)",
           "led_count": "LEDs per segment",
           "segments": "Number of segments",
           "led_type": "LED chip type",

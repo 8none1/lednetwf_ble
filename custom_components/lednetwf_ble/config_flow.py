@@ -383,7 +383,7 @@ class LEDNetWFConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(
                 CONF_DISCONNECT_DELAY,
                 default=DEFAULT_DISCONNECT_DELAY,
-            ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=300)),
         }
 
         # Only show LED config for addressable strips
@@ -598,7 +598,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 CONF_DISCONNECT_DELAY,
                 default=options.get(CONF_DISCONNECT_DELAY, DEFAULT_DISCONNECT_DELAY),
-            ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=300)),
         }
 
         if is_iotbt_segment:
