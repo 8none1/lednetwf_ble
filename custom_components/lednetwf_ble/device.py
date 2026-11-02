@@ -730,7 +730,7 @@ class LEDNetWFDevice:
             except Exception as ex:
                 _LOGGER.exception("Error in callback: %s", ex)
 
-    async def _ensure_connected(self) -> BleakClient:
+    async def _ensure_connected(self, quiet: bool = False) -> BleakClient:
         """Ensure we have an active BLE connection."""
         if self._disconnect_timer:
             self._disconnect_timer.cancel()
@@ -784,7 +784,13 @@ class LEDNetWFDevice:
                 _LOGGER.debug("Connected and notifications started for %s", self._name)
 
             except BleakError as ex:
-                _LOGGER.error("Failed to connect to %s: %s", self._name, ex)
+                # The keep-alive loop retries forever, so it asks for quiet failures
+                # and does its own (rate-limited) logging. Otherwise an unplugged
+                # lamp would log an ERROR every retry, indefinitely.
+                if quiet:
+                    _LOGGER.debug("Failed to connect to %s: %s", self._name, ex)
+                else:
+                    _LOGGER.error("Failed to connect to %s: %s", self._name, ex)
                 self._client = None
                 raise
 
@@ -828,22 +834,37 @@ class LEDNetWFDevice:
         busy and starve other BLE devices on it.
         """
         backoff = KEEPALIVE_RETRY_MIN
+        warned = False
         while self.keep_connected and not self._stopping:
             self._link_lost.clear()
             if not (self._client and self._client.is_connected):
                 try:
-                    await self._ensure_connected()
+                    await self._ensure_connected(quiet=True)
                 except Exception as ex:  # noqa: BLE001 - BLE stack raises all sorts
-                    _LOGGER.debug(
-                        "Keep-alive connect to %s failed (%s: %s), retrying in %ss",
+                    # Warn once per outage; later retries stay at debug so a
+                    # lamp that is switched off doesn't flood the log.
+                    _LOGGER.log(
+                        logging.DEBUG if warned else logging.WARNING,
+                        "Keep-alive connect to %s failed (%s: %s), retrying in %ss"
+                        " (further retries logged at debug)",
                         self._name, type(ex).__name__, ex, backoff,
                     )
+                    warned = True
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, KEEPALIVE_RETRY_MAX)
                     continue
                 backoff = KEEPALIVE_RETRY_MIN
-                # Connected devices stop advertising, so refresh state over the link
-                await self.query_state()
+                warned = False
+                # Connected devices stop advertising, so refresh state over the link.
+                # Guarded: an unexpected exception here must not end the loop, or
+                # the link would never be re-established until a reload.
+                try:
+                    await self.query_state()
+                except Exception as ex:  # noqa: BLE001
+                    _LOGGER.debug(
+                        "Keep-alive state query for %s failed (%s: %s)",
+                        self._name, type(ex).__name__, ex,
+                    )
             if self._client and self._client.is_connected:
                 await self._link_lost.wait()
             await asyncio.sleep(KEEPALIVE_RECONNECT_DELAY)
