@@ -302,12 +302,25 @@ class LEDNetWFLight(LightEntity):
                 await self._device.set_color_temp(
                     self._device.color_temp_kelvin, brightness, transition
                 )
-            elif self._device.rgb_color and self._device.has_rgb:
+            elif (
+                self._device.rgb_color
+                and any(self._device.rgb_color)
+                and self._device.has_rgb
+            ):
+                # any(): (0, 0, 0) is a non-empty tuple and so truthy, but there
+                # is nothing to scale. Re-sending black at a new brightness is
+                # still black, and on some bulbs it switches the light off.
                 await self._device.set_rgb_color(
                     self._device.rgb_color, brightness, transition
                 )
             elif self._device.has_dim:
                 await self._device.set_brightness(brightness, transition)
+            else:
+                _LOGGER.debug(
+                    "Brightness change not sent: no colour, colour temperature or "
+                    "effect to apply it to (rgb_color=%s)",
+                    self._device.rgb_color,
+                )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
