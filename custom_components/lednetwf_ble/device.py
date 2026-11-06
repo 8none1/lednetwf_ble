@@ -36,6 +36,7 @@ from .const import (
     SOUND_REACTIVE_MARKER,
     CANDLE_MODE_MARKER,
     IOTBT_V3_PRODUCT_IDS,
+    IOTBT_SEGMENT_PRODUCT_IDS,
     IOTBT_DEFAULT_EFFECT_COUNT,
     IOTBT_EFFECT_COUNT_BY_PRODUCT,
     get_iotbt_effects,
@@ -596,6 +597,10 @@ class LEDNetWFDevice:
         # the segment branch is checked first in the colour dispatch.
         if self._advertised_product_id in IOTBT_V3_PRODUCT_IDS:
             return False
+        # A product ID known to need segment commands is a segment device even
+        # when flags2 bit 0x08 is clear (issue #114, product 170).
+        if self._advertised_product_id in IOTBT_SEGMENT_PRODUCT_IDS:
+            return True
         return self._is_iotbt_segment
 
     @property
@@ -2493,8 +2498,14 @@ class LEDNetWFDevice:
                             self._name, adv_pid, adv_pid,
                         )
                     if self.is_iotbt:
+                        # A listed product ID wins over the flags2 heuristic, so a
+                        # later advert cannot flip a known segment product back to
+                        # Telink. _is_iotbt_segment also drives effect_type, which
+                        # is why the product check is applied here as well as in
+                        # the is_iotbt_segment property.
                         seg = (
-                            protocol.is_iotbt_segment_from_flags2(sd_result.get("flags2"))
+                            self._advertised_product_id in IOTBT_SEGMENT_PRODUCT_IDS
+                            or protocol.is_iotbt_segment_from_flags2(sd_result.get("flags2"))
                             or sd_result.get("sta") == 0x56
                         )
                         if seg != self._is_iotbt_segment:
