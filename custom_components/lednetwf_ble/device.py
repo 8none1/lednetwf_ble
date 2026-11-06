@@ -36,6 +36,7 @@ from .const import (
     SOUND_REACTIVE_MARKER,
     CANDLE_MODE_MARKER,
     IOTBT_V3_PRODUCT_IDS,
+    IOTBT_SEGMENT_PRODUCT_IDS,
     IOTBT_DEFAULT_EFFECT_COUNT,
     IOTBT_EFFECT_COUNT_BY_PRODUCT,
     get_iotbt_effects,
@@ -596,6 +597,10 @@ class LEDNetWFDevice:
         # the segment branch is checked first in the colour dispatch.
         if self._advertised_product_id in IOTBT_V3_PRODUCT_IDS:
             return False
+        # A product ID known to need segment commands is a segment device even
+        # when flags2 bit 0x08 is clear (issue #114, product 170).
+        if self._advertised_product_id in IOTBT_SEGMENT_PRODUCT_IDS:
+            return True
         return self._is_iotbt_segment
 
     @property
@@ -1064,6 +1069,32 @@ class LEDNetWFDevice:
                 "DeviceState2 LED config: segments=%d, leds_per_segment=%d",
                 self._segments, self._led_count,
             )
+
+        # Segment IOTBT devices also report their output mode, effect speed and
+        # white-mode brightness here (layout in protocol.parse_iotbt_segment_state2).
+        # Only the fields the device updates straight away are applied:
+        #   - white mode: brightness from byte 15
+        #   - scene: effect speed from byte 9
+        # The colour fields (bytes 11-13) are deliberately not applied. They lag by
+        # one command, so after HA sends a colour the frame still carries the
+        # previous one and would make the colour picker jump back. The scene byte
+        # is not mapped to an effect name either, because several scenes in
+        # IOTBT_SEGMENT_EFFECTS share a scene byte.
+        seg_state = protocol.parse_iotbt_segment_state2(data) if self.is_iotbt_segment else None
+        if seg_state:
+            _LOGGER.debug(
+                "DeviceState2 segment state: static=%s, white=%s, scene_mode=%s, "
+                "scene=0x%02X, speed=%d, hue=%d, sat=%d, val=%d, white_bri=%d",
+                seg_state["is_static_colour"], seg_state["is_white_mode"],
+                seg_state["is_scene_mode"], seg_state["scene"], seg_state["speed"],
+                seg_state["hue"], seg_state["saturation"], seg_state["value"],
+                seg_state["white_brightness"],
+            )
+            if seg_state["is_white_mode"]:
+                white_pct = min(100, seg_state["white_brightness"])
+                self._brightness = round(white_pct * 255 / 100)
+            elif seg_state["is_scene_mode"] and 1 <= seg_state["speed"] <= 100:
+                self._effect_speed = seg_state["speed"]
 
         # NOTE: DeviceState2 format (IOTBT devices) does NOT use standard RGB encoding
         # in bytes 7-9. IOTBT devices use hue-based color commands (0xE2) not RGB.
@@ -2493,8 +2524,14 @@ class LEDNetWFDevice:
                             self._name, adv_pid, adv_pid,
                         )
                     if self.is_iotbt:
+                        # A listed product ID wins over the flags2 heuristic, so a
+                        # later advert cannot flip a known segment product back to
+                        # Telink. _is_iotbt_segment also drives effect_type, which
+                        # is why the product check is applied here as well as in
+                        # the is_iotbt_segment property.
                         seg = (
-                            protocol.is_iotbt_segment_from_flags2(sd_result.get("flags2"))
+                            self._advertised_product_id in IOTBT_SEGMENT_PRODUCT_IDS
+                            or protocol.is_iotbt_segment_from_flags2(sd_result.get("flags2"))
                             or sd_result.get("sta") == 0x56
                         )
                         if seg != self._is_iotbt_segment:

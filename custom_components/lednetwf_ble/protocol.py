@@ -2886,3 +2886,59 @@ def is_iotbt_segment_from_flags2(flags2: int | None) -> bool:
     if flags2 is None:
         return False
     return bool(flags2 & IOTBT_SEGMENT_FLAGS2_BIT)
+
+
+# Byte 7 of a segment-family 0xEA 0x81 state frame: which kind of output is running.
+IOTBT_SEGMENT_STATE_STATIC = 0x24  # static colour (0xE1 0x03); byte 8 reads 0x01
+IOTBT_SEGMENT_STATE_MODE = 0x25    # white mode or a scene, told apart by byte 8
+# Byte 8 value for white mode (0xE0 0x01 ... <brightness>) when byte 7 is 0x25.
+IOTBT_SEGMENT_STATE_WHITE = 0x6F
+
+
+def parse_iotbt_segment_state2(data: bytes) -> dict | None:
+    """
+    Parse the state fields of a segment-family 0xEA 0x81 (DeviceState2) frame.
+
+    Only meaningful for IOTBT segment devices; on Telink IOTBT the same bytes mean
+    something else. Layout, verified against an IOTBTC68 capture (issue #114) and
+    consistent with the IOTBT6BA manufacturer-data state from issue #83:
+
+        [0:2]   EA 81
+        [3:5]   product ID (big-endian)
+        [6]     power: 0x23 on, 0x24 off
+        [7]     0x24 static colour, 0x25 white mode or scene
+        [8]     0x01 for static colour; with [7] = 0x25: 0x6F white mode,
+                otherwise the device scene byte (0x01 is also a valid scene byte,
+                so [7] is what tells static colour and scene 0x01 apart)
+        [9]     effect speed 1-100
+        [11:13] packed hue + saturation, (hue << 7) | sat, the same encoding the
+                0xE1 0x03 and 0xE1 0x01 commands use (0xE4 = hue bit 0 + sat 100)
+        [13]    colour value 0-100
+        [15]    white-mode brightness 0-100
+        [16]    segment count, [17:19] LEDs per segment (parsed by the caller)
+
+    The colour fields ([11:14]) lag by one command: after an 0xE1 0x03 the frame
+    still carries the colour from the command before it. [7], [8], [9] and [15]
+    update straight away. In scene mode [11:14] hold the scene's first palette
+    colour, not a user-chosen colour.
+
+    Returns None if the frame is too short to carry these fields.
+    """
+    if len(data) < 16 or data[0] != 0xEA or data[1] != 0x81:
+        return None
+
+    output = data[7] & 0xFF
+    scene = data[8] & 0xFF
+    packed = (data[11] << 8) | data[12]
+    return {
+        "is_on": data[6] == 0x23,
+        "is_static_colour": output == IOTBT_SEGMENT_STATE_STATIC,
+        "is_white_mode": output == IOTBT_SEGMENT_STATE_MODE and scene == IOTBT_SEGMENT_STATE_WHITE,
+        "is_scene_mode": output == IOTBT_SEGMENT_STATE_MODE and scene != IOTBT_SEGMENT_STATE_WHITE,
+        "scene": scene,
+        "speed": data[9] & 0xFF,
+        "hue": packed >> 7,
+        "saturation": data[12] & 0x7F,
+        "value": data[13] & 0xFF,
+        "white_brightness": data[15] & 0xFF,
+    }

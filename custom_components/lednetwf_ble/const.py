@@ -35,6 +35,19 @@ IOTBT_PROTOCOL_V3: Final = "v3"
 # ble_devices.json, and confirmed on hardware to ignore the Telink 0xE2 colour
 # command while accepting 0xE0 0x01. Source: PR #101.
 IOTBT_V3_PRODUCT_IDS: Final = frozenset({62})
+
+# Real product IDs (advertisement bytes 8-9) known to need the segment command
+# family (0xE1 0x03 colour, 0xE1 0x01 scenes). When the protocol override is
+# auto, a product listed here is treated as segment whatever service-data flags2
+# says, because the flags2 bit 0x08 heuristic is known to miss some of them.
+#
+# Product 170 (0xAA): IOTBTC68 lamp, issue #114. Declares protocol symphonyE1 in
+# the vendor app's ble_devices.json. Advertises flags2 = 0x07 (bit 0x08 clear),
+# so flags2 alone picked Telink; the owner's Surplife capture shows the segment
+# command set, and the manual 'segment' override is confirmed working.
+# Product 173 (0xAD): IOTBT6BA, issue #83. Already detected as segment from
+# flags2 = 0x0D (bit 0x08 set); listed so it no longer depends on that bit.
+IOTBT_SEGMENT_PRODUCT_IDS: Final = frozenset({170, 173})
 IOTBT_PROTOCOL_CHOICES: Final = (
     IOTBT_PROTOCOL_AUTO,
     IOTBT_PROTOCOL_TELINK,
