@@ -315,6 +315,8 @@ def detect_iotbt_response_type(data: bytes) -> str:
 
 #### DeviceState2 Format (0xEA 0x81 response)
 
+> Segment-family (product 170 / 173) byte meanings for bytes 7-15 are in `ai_instructions/iotbt_variant_findings.md` ("A fourth variant", issue #114).
+
 **Source**: `com/zengge/wifi/Device/DeviceState2.java`
 
 | Byte | Field | Description |

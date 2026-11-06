@@ -594,3 +594,64 @@ reasoning; it is the product ID.
   fully determine it. Still a far better signal than `flags2`.
 - Product 194 (IOTBT812) is in neither database, so a product-ID-driven path needs a sane
   fallback for unknown IDs.
+
+# A fourth variant: IOTBTC68 floor lamp, product 170 / 0xAA (issue #114, 6 November 2026)
+
+## The device
+
+| Field | Value |
+|---|---|
+| BLE name | IOTBTC68 (RGB+IC and warm white floor lamp) |
+| Service data | `80 07 08 65 F0 06 5C 68 00 AA 21 0A 01 07` |
+| Product ID (bytes 8-9) | `0x00AA` = **170**, `Symphony_Line` in `const.py`, protocol `symphonyE1` in `ble_devices.json` |
+| ble_version / led_version / flags2 | 7 / 10 / `0x07` |
+
+## Why auto-detection failed
+
+`flags2` bit `0x08` is clear, so `is_iotbt_segment_from_flags2` chose Telink. The lamp needs the
+segment command set. This is the third device to disagree with the flags2 heuristic. The issue
+reply first said `0xAA` was a mesh address; that was wrong, bytes 8-9 are the product ID (see
+the CONFIRMED section above).
+
+Reporter's manual override results: `segment` gives colour, brightness, effects and speed. `v3`
+gives colour and speed only. `telink` (auto) gives power and speed only.
+
+## Commands (from the Surplife app capture, btsnoop, one action at a time)
+
+| Action | Command |
+|---|---|
+| Power | `71 23` / `71 24` (the integration's segment path sends `0x3B`; works per the reporter) |
+| Static colour | `e1 03 00 14 00 00 14` + 20 x `a1 H S V` |
+| Scene | `e1 01 00 64 <scene> 00 01 64 <speed> 00 a1 00 00 00 <n> [a1 H S V] x n` |
+| White mode | `e0 01 00 b1 00 00 00 00 <bri 0-100> 00 00 14 00 00` (colour-temperature byte not yet known) |
+| State query | `ea 81` |
+
+## `0xEA 0x81` state frame (payload offsets, payload[0] = `0xEA`)
+
+| Byte | Meaning |
+|---|---|
+| 6 | Power: `0x23` on, `0x24` off |
+| 7 | `0x24` static colour, `0x25` white mode or scene |
+| 8 | With byte 7 = `0x25`: `0x6F` white mode, otherwise the scene id. `0x01` is ambiguous on its own (scene 1 also reports it), so read byte 7 first |
+| 9 | Effect speed 1-100 |
+| 11-12 | Hue and saturation as `(hue << 7) \| sat`: hue = byte11 * 2 + (byte12 >> 7), sat = byte12 & 0x7F |
+| 13 | Value 0-100 |
+| 15 | White-mode brightness 0-100 (reports one less than sent at low levels) |
+| 16, 17-18 | Segment count, LEDs per segment (already parsed) |
+
+The colour bytes (11-13) lag by one command, so the integration only logs them. The `FF/16/6E`
+values in byte 8 seen in the reporter's first log were remote scene ids, not brightness.
+
+## What was done (branch `fix/iotbt-170-segment`)
+
+- `IOTBT_SEGMENT_PRODUCT_IDS = {170, 173}` in `const.py`; a listed product is segment whatever
+  flags2 says. Manual overrides still win and v3 products still return False.
+- `protocol.parse_iotbt_segment_state2()`, used only when `is_iotbt_segment`: white brightness
+  and scene speed update state; static colour does not.
+- Tests: `tests/` (30 passing), built from the capture.
+
+## Still open
+
+- Warm white: needs a capture of the colour-temperature slider (requested on the issue).
+- Scene byte to effect name: several `IOTBT_SEGMENT_EFFECT_SCENES` entries share a scene byte.
+- Layout only verified on this lamp; no IOTBT6BA `EA 81` frame checked.
