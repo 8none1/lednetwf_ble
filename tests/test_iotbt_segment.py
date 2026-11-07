@@ -119,3 +119,45 @@ def test_v3_product_is_never_segment():
 
 def test_product_lists_do_not_overlap():
     assert not (IOTBT_SEGMENT_PRODUCT_IDS & IOTBT_V3_PRODUCT_IDS)
+
+
+# --- White mode for product 170 (issue #114) ---
+
+def test_segment_white_command_bytes():
+    from lednetwf_ble.protocol import build_iotbt_segment_white_command
+
+    packet = build_iotbt_segment_white_command(100)
+    # Payload from the btsnoop capture: e0 01 00 b1 00 00 00 00 <bri> 00 00 14 00 00
+    assert bytes(packet).endswith(bytes.fromhex("e00100b10000000064000014 0000".replace(" ", "")))
+    assert bytes(build_iotbt_segment_white_command(0))[-6] == 0x00
+    assert bytes(build_iotbt_segment_white_command(250))[-6] == 0x64  # clamped
+
+
+def test_only_product_170_has_segment_white():
+    device = make_device()
+    advertise(device, ADV_IOTBTC68)
+    assert device.has_segment_white is True
+    assert device.advertised_product_id == 170
+
+    other = make_device("IOTBT6BA")
+    advertise(other, ADV_IOTBT6BA)
+    assert other.is_iotbt_segment is True
+    assert other.has_segment_white is False
+
+
+def test_set_white_sends_command_and_sets_mode():
+    import asyncio
+
+    device = make_device()
+    advertise(device, ADV_IOTBTC68)
+    sent = []
+
+    async def fake_send(packet):
+        sent.append(bytes(packet))
+        return True
+
+    device._send_command = fake_send
+    assert asyncio.run(device.set_white(128)) is True
+    assert sent[0][-6] == 50  # 128/255 -> 50%
+    assert device.white_mode is True
+    assert device.rgb_color is None

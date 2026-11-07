@@ -10,6 +10,7 @@ from homeassistant.components.light import (
     ATTR_EFFECT,
     ATTR_RGB_COLOR,
     ATTR_TRANSITION,
+    ATTR_WHITE,
     ColorMode,
     LightEntity,
     LightEntityFeature,
@@ -68,6 +69,9 @@ class LEDNetWFLight(LightEntity):
             color_modes.add(ColorMode.RGB)
         if device.has_color_temp:
             color_modes.add(ColorMode.COLOR_TEMP)
+        if device.has_segment_white:
+            # Fixed warm-white channel, brightness only (issue #114)
+            color_modes.add(ColorMode.WHITE)
 
         # If no color modes, at least support brightness
         if not color_modes:
@@ -164,6 +168,10 @@ class LEDNetWFLight(LightEntity):
         # Product ID (hex format for easy lookup in docs)
         if self._device.product_id is not None:
             attrs["product_id"] = f"0x{self._device.product_id:02X}"
+        # IOTBT lamps all report product 0x00; the real ID is in the advertisement
+        advertised = self._device.advertised_product_id
+        if advertised is not None and advertised != self._device.product_id:
+            attrs["advertised_product_id"] = f"0x{advertised:02X} ({advertised})"
 
         # Effect type (command format used by device)
         attrs["effect_type"] = self._device.effect_type.name
@@ -225,6 +233,8 @@ class LEDNetWFLight(LightEntity):
             # devices fall through to the normal handling below.
             if ColorMode.BRIGHTNESS in self._attr_supported_color_modes:
                 return ColorMode.BRIGHTNESS
+        if self._device.white_mode and ColorMode.WHITE in self._attr_supported_color_modes:
+            return ColorMode.WHITE
         if self._device.color_temp_kelvin and self._device.has_color_temp:
             return ColorMode.COLOR_TEMP
         if self._device.rgb_color and self._device.has_rgb:
@@ -270,6 +280,11 @@ class LEDNetWFLight(LightEntity):
                 await self._device.set_effect(effect, brightness=brightness)
                 return
 
+        # Fixed white channel: ATTR_WHITE carries the brightness
+        if ATTR_WHITE in kwargs:
+            await self._device.set_white(kwargs[ATTR_WHITE])
+            return
+
         # Handle color temperature
         if ATTR_COLOR_TEMP_KELVIN in kwargs:
             await self._device.set_color_temp(
@@ -285,7 +300,9 @@ class LEDNetWFLight(LightEntity):
         # Just brightness change - resend current color/mode
         # IMPORTANT: Check effect FIRST since it takes priority over stored color values
         if ATTR_BRIGHTNESS in kwargs:
-            if self._device.has_brightness_cmd:
+            if self._device.white_mode:
+                await self._device.set_white(brightness)
+            elif self._device.has_brightness_cmd:
                 # Device has a standalone brightness command (bright_value_v2),
                 # so brightness can be changed without disturbing the current
                 # colour or effect. Avoids re-sending the effect, which is what
