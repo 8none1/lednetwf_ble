@@ -153,9 +153,9 @@ Thanks!
 
 ## Supporters
 
-Thanks to everyone who has helped by testing, capturing BLE traffic and reporting what their lights do:
+Special thanks to those who bought me a coffee:
 
-- [DasMiMiMi](https://github.com/DasMiMiMi) for the IOTBTC68 captures that got product 170 working (#114).
+- [DasMiMiMi](https://github.com/DasMiMiMi)
 
 ## Support
 
