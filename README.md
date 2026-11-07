@@ -153,6 +153,8 @@ Thanks!
 
 ## Supporters
 
+Thanks to everyone who has provided BLE traces and captures. They are what make support for new devices possible.
+
 Special thanks to those who bought me a coffee:
 
 - [DasMiMiMi](https://github.com/DasMiMiMi)
