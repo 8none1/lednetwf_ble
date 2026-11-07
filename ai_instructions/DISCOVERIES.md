@@ -725,3 +725,11 @@ from battery and toward a static identifier.
 Full annotated capture, including this frame and the colour commands
 below: https://gist.github.com/HelloPackets89/f7836b577a714576b206af4ca3574a1f
 
+
+---
+
+### Product 170: colour-temperature capture was unnecessary
+
+**Date**: 7 November 2026 (issue #114)
+
+We asked the reporter for a colour-temperature slider capture, but the Surplife app has no such slider for this device. The white button is brightness only (one fixed warm-white channel). See `iotbt_variant_findings.md`.

@@ -48,6 +48,11 @@ IOTBT_V3_PRODUCT_IDS: Final = frozenset({62})
 # Product 173 (0xAD): IOTBT6BA, issue #83. Already detected as segment from
 # flags2 = 0x0D (bit 0x08 set); listed so it no longer depends on that bit.
 IOTBT_SEGMENT_PRODUCT_IDS: Final = frozenset({170, 173})
+
+# Segment products with a fixed warm-white channel driven by 0xE0 0x01 0x00 0xB1
+# (brightness only, no colour temperature). Issue #114 capture; 173 is not
+# included until someone captures it.
+IOTBT_SEGMENT_WHITE_PRODUCT_IDS: Final = frozenset({170})
 IOTBT_PROTOCOL_CHOICES: Final = (
     IOTBT_PROTOCOL_AUTO,
     IOTBT_PROTOCOL_TELINK,

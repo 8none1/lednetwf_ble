@@ -648,10 +648,20 @@ values in byte 8 seen in the reporter's first log were remote scene ids, not bri
   flags2 says. Manual overrides still win and v3 products still return False.
 - `protocol.parse_iotbt_segment_state2()`, used only when `is_iotbt_segment`: white brightness
   and scene speed update state; static colour does not.
-- Tests: `tests/` (30 passing), built from the capture.
+- Tests: `tests/` (33 passing), built from the capture.
+
+## White mode (issue #114, reporter comment 2026-11-07)
+
+Product 170's Surplife app has no colour-temperature slider. The white button is brightness
+only, and the white LEDs are one fixed warm-white channel, so no colour-temperature command
+exists to capture. White mode command (cmd_family 0x0a wrapper, same as other IOTBT commands),
+seen in the issue #114 btsnoop capture:
+
+`e0 01 00 b1 00 00 00 00 <bri 0x00-0x64> 00 00 14 00 00`
+
+The state frame then shows byte 7 = `0x25`, byte 8 = `0x6F`, byte 15 = brightness.
 
 ## Still open
 
-- Warm white: needs a capture of the colour-temperature slider (requested on the issue).
 - Scene byte to effect name: several `IOTBT_SEGMENT_EFFECT_SCENES` entries share a scene byte.
 - Layout only verified on this lamp; no IOTBT6BA `EA 81` frame checked.

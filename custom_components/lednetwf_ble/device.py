@@ -37,6 +37,7 @@ from .const import (
     CANDLE_MODE_MARKER,
     IOTBT_V3_PRODUCT_IDS,
     IOTBT_SEGMENT_PRODUCT_IDS,
+    IOTBT_SEGMENT_WHITE_PRODUCT_IDS,
     IOTBT_DEFAULT_EFFECT_COUNT,
     IOTBT_EFFECT_COUNT_BY_PRODUCT,
     get_iotbt_effects,
@@ -102,6 +103,7 @@ class LEDNetWFDevice:
         self._brightness: int = 255  # 0-255
         self._rgb: tuple[int, int, int] | None = None
         self._color_temp_kelvin: int | None = None
+        self._white_mode: bool = False  # fixed warm-white output (segment 170)
         self._effect: str | None = None
         self._effect_speed: int = DEFAULT_EFFECT_SPEED  # 0-100
 
@@ -310,6 +312,27 @@ class LEDNetWFDevice:
         return IOTBT_EFFECT_COUNT_BY_PRODUCT.get(
             self._advertised_product_id, IOTBT_DEFAULT_EFFECT_COUNT
         )
+
+    @property
+    def advertised_product_id(self) -> int | None:
+        """Return the product ID from the advertisement (bytes 8-9), if seen."""
+        return self._advertised_product_id
+
+    @property
+    def has_segment_white(self) -> bool:
+        """Return True if a segment IOTBT lamp has a fixed warm-white channel.
+
+        Brightness-only white via 0xE0 0x01 0x00 0xB1 (issue #114, product 170).
+        """
+        return (
+            self.is_iotbt_segment
+            and self._advertised_product_id in IOTBT_SEGMENT_WHITE_PRODUCT_IDS
+        )
+
+    @property
+    def white_mode(self) -> bool:
+        """Return True if the fixed white channel is the active output."""
+        return self._white_mode and not self._effect
 
     @property
     def has_rgb(self) -> bool:
@@ -1093,6 +1116,10 @@ class LEDNetWFDevice:
             if seg_state["is_white_mode"]:
                 white_pct = min(100, seg_state["white_brightness"])
                 self._brightness = round(white_pct * 255 / 100)
+                if self.has_segment_white:
+                    self._white_mode = True
+            elif seg_state["is_static_colour"] and self.has_segment_white:
+                self._white_mode = False
             elif seg_state["is_scene_mode"] and 1 <= seg_state["speed"] <= 100:
                 self._effect_speed = seg_state["speed"]
 
@@ -1787,6 +1814,29 @@ class LEDNetWFDevice:
             self._rgb = rgb
             self._brightness = brightness
             self._effect = None  # Clear effect when setting color
+            self._color_temp_kelvin = None
+            self._white_mode = False
+            self._notify_callbacks()
+            return True
+        return False
+
+    async def set_white(self, brightness: int = 255) -> bool:
+        """Switch a segment lamp to its fixed warm-white channel.
+
+        Args:
+            brightness: Brightness 0-255 (sent as 0-100 percent)
+        """
+        if not self.has_segment_white:
+            _LOGGER.warning("Device %s has no fixed white channel", self._name)
+            return False
+        brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
+        packet = protocol.build_iotbt_segment_white_command(brightness_pct)
+        _LOGGER.debug("IOTBT segment white: %d/255 -> %d%%", brightness, brightness_pct)
+        if await self._send_command(packet):
+            self._brightness = brightness
+            self._white_mode = True
+            self._effect = None
+            self._rgb = None
             self._color_temp_kelvin = None
             self._notify_callbacks()
             return True

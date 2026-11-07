@@ -388,6 +388,25 @@ def build_iotbt_white_command(brightness: int = 100) -> bytearray:
     return wrap_command(raw_cmd, cmd_family=0x0a)
 
 
+def build_iotbt_segment_white_command(brightness: int = 100) -> bytearray:
+    """
+    Build the segment-family white mode command (0xE0 0x01 0x00 0xB1).
+
+    Source: issue #114 btsnoop capture, Surplife app white button on IOTBTC68
+    (product 170). The white LEDs are a single fixed warm-white channel, so only
+    brightness is carried.
+
+    Format: [E0 01 00 B1 00 00 00 00 <brightness 0-100> 00 00 14 00 00]
+
+    Args:
+        brightness: Brightness percentage (0-100)
+    """
+    level = max(0, min(100, int(brightness)))
+    raw_cmd = bytearray([0xE0, 0x01, 0x00, 0xB1, 0x00, 0x00, 0x00, 0x00,
+                         level, 0x00, 0x00, 0x14, 0x00, 0x00])
+    return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
 def build_iotbt_effect_command(
     effect_id: int,
     speed: int = 50,
