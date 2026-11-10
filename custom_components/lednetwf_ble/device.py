@@ -340,8 +340,24 @@ class LEDNetWFDevice:
         return bool(self._capabilities.get("has_rgb"))
 
     @property
+    def has_fixed_white(self) -> bool:
+        """Return True if the device has one fixed white channel (no colour temperature).
+
+        Unified-protocol (uses_color_v2) products with a warm-white channel and no
+        cool-white channel, e.g. product 39 Sunset Lamp (issue #121). The white
+        command is 0x3B 0xB1 with temp 0% and carries brightness only.
+        """
+        return bool(
+            self._capabilities.get("uses_color_v2")
+            and self._capabilities.get("has_ww")
+            and not self._capabilities.get("has_cw")
+        )
+
+    @property
     def has_color_temp(self) -> bool:
         """Return True if device supports color temperature."""
+        if self.has_fixed_white:
+            return False
         return bool(self._capabilities.get("has_ww") or self._capabilities.get("has_cw"))
 
     @property
@@ -1192,6 +1208,10 @@ class LEDNetWFDevice:
 
         self._is_on = result["is_on"]
 
+        # Fixed-white devices: white mode follows the state frame
+        if self.has_fixed_white:
+            self._white_mode = bool(result.get("is_white_mode"))
+
         # Debug: trace which condition will match
         _LOGGER.debug(
             "State parse conditions: is_effect=%s, is_white=%s, is_rgb=%s, "
@@ -1269,7 +1289,11 @@ class LEDNetWFDevice:
             # Color temp from byte 9 (ww position), 0-100%
             # Per protocol: 0% = 2700K (warm), 100% = 6500K (cool)
             temp_pct = result["ww"]
-            self._color_temp_kelvin = int(MIN_KELVIN + temp_pct * (MAX_KELVIN - MIN_KELVIN) / 100)
+            if self.has_fixed_white:
+                # One white channel: the temperature byte carries no information
+                self._color_temp_kelvin = None
+            else:
+                self._color_temp_kelvin = int(MIN_KELVIN + temp_pct * (MAX_KELVIN - MIN_KELVIN) / 100)
             _LOGGER.debug("White mode: brightness=%d (value1=%d), color_temp=%dK (pct=%d)",
                           self._brightness, result["value1"], self._color_temp_kelvin, temp_pct)
 
@@ -1826,12 +1850,25 @@ class LEDNetWFDevice:
         Args:
             brightness: Brightness 0-255 (sent as 0-100 percent)
         """
-        if not self.has_segment_white:
+        if not (self.has_segment_white or self.has_fixed_white):
             _LOGGER.warning("Device %s has no fixed white channel", self._name)
             return False
         brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
-        packet = protocol.build_iotbt_segment_white_command(brightness_pct)
-        _LOGGER.debug("IOTBT segment white: %d/255 -> %d%%", brightness, brightness_pct)
+        if self.has_segment_white:
+            packet = protocol.build_iotbt_segment_white_command(brightness_pct)
+            _LOGGER.debug("IOTBT segment white: %d/255 -> %d%%", brightness, brightness_pct)
+        elif self.uses_color_v2:
+            # Same frame the lamp acked as white mode in issue #75/#121:
+            # 0x3B 0xB1 with temp 0% and brightness only.
+            packet = protocol.build_cct_command_0x3B(
+                0, brightness_pct, delay=self._v2_delay(None, 0)
+            )
+            _LOGGER.debug("Fixed white (0x3B 0xB1): %d/255 -> %d%%", brightness, brightness_pct)
+        else:
+            # BLE < 5 firmware keeps the 0x31 colour command; warm white only
+            ww, cw = protocol.kelvin_to_ww_cw(MIN_KELVIN, brightness)
+            packet = protocol.build_color_command_0x31(0, 0, 0, ww, cw)
+            _LOGGER.debug("Fixed white (0x31): WW=%d, CW=%d", ww, cw)
         if await self._send_command(packet):
             self._brightness = brightness
             self._white_mode = True
@@ -2648,6 +2685,13 @@ class LEDNetWFDevice:
         # Color mode and associated values
         color_mode = result.get("color_mode")
 
+        # Fixed-white devices: the advert's mode decides white vs colour/effect
+        if self.has_fixed_white and color_mode in ("rgb", "cct", "effect"):
+            new_white = color_mode == "cct"
+            if self._white_mode != new_white:
+                self._white_mode = new_white
+                changed = True
+
         if color_mode == "rgb":
             # RGB mode - update RGB color
             rgb = result.get("rgb")
@@ -2686,7 +2730,7 @@ class LEDNetWFDevice:
             temp_pct = result.get("color_temp_percent")
             bright_pct = result.get("brightness_percent")
 
-            if temp_pct is not None:
+            if temp_pct is not None and not self.has_fixed_white:
                 # Convert percent to Kelvin
                 # Per working old code: 0% = warm/2700K, 100% = cool/6500K
                 new_kelvin = int(MIN_KELVIN + temp_pct * (MAX_KELVIN - MIN_KELVIN) / 100)
