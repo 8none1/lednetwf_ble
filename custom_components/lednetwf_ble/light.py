@@ -69,8 +69,8 @@ class LEDNetWFLight(LightEntity):
             color_modes.add(ColorMode.RGB)
         if device.has_color_temp:
             color_modes.add(ColorMode.COLOR_TEMP)
-        if device.has_segment_white:
-            # Fixed warm-white channel, brightness only (issue #114)
+        if device.has_segment_white or device.has_fixed_white:
+            # Fixed warm-white channel, brightness only (issues #114, #121)
             color_modes.add(ColorMode.WHITE)
 
         # If no color modes, at least support brightness
