@@ -2620,6 +2620,7 @@ class LEDNetWFDevice:
             self._name,
             simple_effects=self.effect_type == EffectType.SIMPLE,
             unified_color=self.uses_color_v2,
+            has_service_data=bool(service_data),
         )
         if not result:
             return False
