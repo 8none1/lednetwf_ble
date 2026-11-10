@@ -1984,9 +1984,14 @@ def parse_manufacturer_data(
     device_name: str | None = None,
     simple_effects: bool = False,
     unified_color: bool = False,
+    has_service_data: bool = False,
 ) -> dict | None:
     """
     Parse manufacturer data from BLE advertisement (Format B - bleak).
+
+    has_service_data: True when the same advertisement also carried 0x5Axx
+    service data. Needed to recognise BLE v7+ state-only manufacturer data
+    (issue #119), which has no product_id of its own.
 
     Source: protocol_docs/03_manufacturer_data_parsing.md
 
@@ -2217,6 +2222,41 @@ def parse_manufacturer_data(
                 "color_temp_percent": None,
                 "brightness_percent": None,
                 "effect_id": iotbt_effect_id,
+                "effect_speed": None,
+            }
+
+        # BLE v7+ state-only manufacturer data (issue #119, IOTWF1BB / product 0x41).
+        # When service data is also advertised, the manufacturer data carries the
+        # 25-byte state array from byte 1 instead of Format B (no MAC, no
+        # product_id). Byte 1 is then the power marker 0x23/0x24, which is never a
+        # real Format B ble_version. The product_id comes from service data.
+        # Layout (from the issue capture): data[1]=power, data[2]=mode (0x61),
+        # data[5]=channel flag (0x0F white/dimmer, 0xF0 RGB), data[10]=dimmer %.
+        # Only the dimmer case is decoded; other v7 devices get power state only.
+        if has_service_data and byte1 in (0x23, 0x24):
+            power_on = (byte1 == 0x23)
+            color_mode = None
+            brightness_percent = None
+            if (data[2] & 0xFF) == 0x61 and (data[5] & 0xFF) == 0x0F:
+                color_mode = "cct"
+                brightness_percent = data[10] & 0xFF
+            _LOGGER.debug(
+                "%sBLE v7 state-only manu data: power=%s, mode=0x%02X, channel=0x%02X, bright_pct=%s",
+                log_prefix, "ON" if power_on else "OFF", data[2], data[5], brightness_percent
+            )
+            return {
+                "product_id": None,  # Comes from service data
+                "power_state": power_on,
+                "format": "v7_state",
+                "manu_id": manu_id,
+                "ble_version": None,
+                "fw_version": None,
+                "sta": data[0] & 0xFF,
+                "color_mode": color_mode,
+                "rgb": None,
+                "color_temp_percent": None,
+                "brightness_percent": brightness_percent,
+                "effect_id": None,
                 "effect_speed": None,
             }
 

@@ -82,8 +82,18 @@ def _parse_discovery(discovery: BluetoothServiceInfoBleak) -> dict | None:
         return None
 
     # Parse manufacturer data
-    manu_data = protocol.parse_manufacturer_data(discovery.manufacturer_data, name)
-    if manu_data:
+    manu_data = protocol.parse_manufacturer_data(
+        discovery.manufacturer_data, name,
+        has_service_data=bool(discovery.service_data),
+    )
+    if manu_data and manu_data.get("format") == "v7_state":
+        # BLE v7+ state-only manufacturer data has no product_id; read it from
+        # service data instead (issue #119).
+        sd_bytes = protocol.get_service_data_from_advertisement(discovery.service_data)
+        sd_parsed = protocol.parse_service_data(sd_bytes) if sd_bytes else None
+        product_id = sd_parsed.get("advertised_product_id") if sd_parsed else None
+        fw_version = sd_parsed.get("firmware_ver_str") if sd_parsed else None
+    elif manu_data:
         product_id = manu_data.get("product_id")
         fw_version = manu_data.get("fw_version")
     else:
