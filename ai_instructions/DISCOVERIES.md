@@ -4,6 +4,30 @@ This document tracks significant findings and corrections made during the revers
 
 ## Documentation Errors Found and Fixed
 
+### BLE v7 manufacturer data is state only: power is the first state byte
+
+**Date**: 10 November 2026 (issue #119)
+
+**Device**: IOTWF1BB (product 0x41, Ctrl_Dim), BLE v7, fw 224. Capture and
+byte breakdown from the issue reporter, who read the app source.
+
+**Wrong**: `02_manufacturer_data.md` said v7 power is `state_data[11]`
+(`mfr_data[14]`). On this capture `mfr_data[14]` is 0 and power is the first
+state byte (`data[1]`, `0x24`). `protocol.parse_v7_with_service_data` was
+written to the same wrong layout; nothing called it, so it was removed.
+
+**Right**: with service data present on a v7 device, manufacturer data has no
+MAC or product_id and holds the 25-byte state array (`ZGHBDevice.java`:
+`bArr7[3:28]`, which is `data[1:26]` after Bleak strips the company ID). The
+product ID comes from service data. Read as Format B, a dimmer at 100% gave
+product ID 100 and the light got on/off only.
+
+**Fix**: `parse_manufacturer_data(..., has_service_data=True)` returns
+`format: "v7_state"`; `config_flow` reads the product ID from service data.
+
+**Still unverified**: whether dimmer brightness is `data[9]` or `data[10]`, and
+the RGB and effect state layouts.
+
 ### Unified 0x3B bytes 7-9 are a fade time in 10 ms units, not a delay in ms
 
 **Date**: 30 October 2026

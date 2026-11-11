@@ -2718,68 +2718,6 @@ def parse_service_data_with_state(service_data: bytes) -> dict | None:
     return result
 
 
-def parse_v7_with_service_data(
-    service_data: bytes,
-    mfr_data: bytes,
-    device_name: str | None = None
-) -> dict | None:
-    """
-    Parse BLE v7+ advertisement with service data.
-
-    Source: protocol_docs/17_device_configuration.md - BLE v7+ with Service Data
-
-    For BLE v7+ devices that have both service data AND manufacturer data:
-    - Device identification comes from service data
-    - State data comes from manufacturer data at OFFSET 3 (not 14!)
-
-    Args:
-        service_data: 16 bytes from service data AD type (UUID 0xFFFF)
-        mfr_data: 27+ bytes from manufacturer data AD type
-
-    Returns:
-        Dict with device info and state, or None if invalid
-    """
-    log_prefix = f"[{device_name}] " if device_name else ""
-
-    # Device ID and version from service data
-    device_info = parse_service_data(service_data)
-    if device_info is None:
-        _LOGGER.debug("%sService data parsing failed", log_prefix)
-        return None
-
-    ble_version = device_info["ble_version"]
-
-    # For v7+, state is in manufacturer data at offset 3
-    if ble_version >= 7 and len(mfr_data) >= 28:
-        state_data = mfr_data[3:28]  # 25 bytes starting at offset 3
-
-        # Power state is at state_data[11] (= mfr_data[14])
-        power_byte = state_data[11] & 0xFF
-        if power_byte == 0x23:
-            device_info["power_on"] = True
-        elif power_byte == 0x24:
-            device_info["power_on"] = False
-        else:
-            device_info["power_on"] = None
-
-        # Mode type at state_data[12] (= mfr_data[15])
-        mode_type = state_data[12] & 0xFF
-        sub_mode = state_data[13] & 0xFF
-
-        device_info["state_data"] = state_data
-        device_info["mode_type"] = mode_type
-        device_info["sub_mode"] = sub_mode
-
-        _LOGGER.debug(
-            "%sBLE v7+ parsed: power=%s, mode=0x%02X, sub_mode=0x%02X",
-            log_prefix,
-            "ON" if device_info.get("power_on") else "OFF",
-            mode_type, sub_mode
-        )
-
-    return device_info
-
-
 def get_service_data_from_advertisement(
     service_data_dict: dict[str, bytes]
 ) -> bytes | None:

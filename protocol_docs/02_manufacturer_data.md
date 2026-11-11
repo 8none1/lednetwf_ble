@@ -95,16 +95,63 @@ For BLE version >= 7, devices advertise BOTH service data AND manufacturer data.
 | 14 | check_key+fw_hi | Bits 0-1: check_key, Bits 2-7: fw high |
 | 15 | firmware_flag | Feature flags (bits 0-4) |
 
-### When Both Present (v7+)
+### 14-byte service data (seen on IOTWF dimmer controllers)
 
-- **Device ID**: From service data
-- **State data**: From manufacturer data at **offset 3** (NOT 14!)
+Some v7 devices send 14 bytes under a `0x5Axx` service UUID (e.g. `0x5A02`)
+instead of the 16-byte form above. Real capture, IOTWF1BB (product 0x41, issue #119):
 
-```python
-if ble_version >= 7 and has_service_data:
-    state_data = mfr_data[3:28]  # 25 bytes at offset 3
-    power_state = state_data[11]  # Power at offset 11 within state
 ```
+52 07 A8 17 10 66 31 BB 00 41 E0 04 01 00
+```
+
+| Byte | Field | Value |
+|------|-------|-------|
+| 0 | chip_id (manufacturer low byte) | 0x52 |
+| 1 | ble_version | 7 |
+| 2-7 | MAC (Wi-Fi MAC on this chip, BLE MAC is +1) | A8:17:10:66:31:BB |
+| 8-9 | product_id (big-endian) | 0x0041 (Ctrl_Dim) |
+| 10 | firmware_ver_lo | 0xE0 (224) |
+| 11 | led_version | 4 |
+| 12 | check_key + fw_hi | 0x01 |
+| 13 | firmware_flag | 0x00 |
+
+`protocol.parse_service_data` handles this form.
+
+### When Both Present (v7+): manufacturer data is state only
+
+- **Device ID**: from service data only
+- **Manufacturer data**: no MAC and no product_id. It is the 25-byte live
+  state array, so reading it as Format B gives nonsense (issue #119: a dimmer
+  at 100% put `0x64` in the Format B product ID bytes, giving product 100).
+- Source: `ZGHBDevice.java` takes `state = bArr7[3:28]` when `bleVersion >= 7`,
+  and `iconFlag` is the last byte when the raw array is 29 bytes or more.
+  Those offsets include the 2-byte company ID. **Bleak strips the company ID,
+  so the state array is `data[1:26]`.**
+- The first state byte is the power marker (`0x23` ON, `0x24` OFF). It is
+  never a real Format B `ble_version`, which is how the two layouts are told apart.
+
+Real capture, same device, light OFF at 100% (Bleak view, 27 bytes):
+
+```
+52 | 24 61 01 50 0F 00 00 00 64 64 00 00 00 ... 00 | 00
+|    |  |  |  |  |  |________| |  |                    iconFlag
+|    |  |  |  |  |    HSV V    |  data[10] dimmer/white brightness % (0x64)
+|    |  |  |  |  |             data[9]  warm white / CCT % (0x64)
+|    |  |  |  |  data[5] channel flag: 0x0F white/dimmer, 0xF0 RGB
+|    |  |  |  data[4] speed
+|    |  |  data[3] sub-mode
+|    |  data[2] mode (0x61 static)
+|    data[1] power
+data[0] chip_id
+```
+
+The layout follows the 25-byte `wifibleLightStandardV2` state (the same shape
+as the `0xEA 0x81` response in `08_state_query_response_parsing.md`). It was
+decoded by the issue reporter from the app source and one capture.
+**Unverified**: which of `data[9]` and `data[10]` carries dimmer brightness
+(both are 0x64 in every capture so far), and the RGB and effect layouts, which
+have no v7 capture yet. The integration decodes only the dimmer case
+(`format: "v7_state"` in `protocol.parse_manufacturer_data`).
 
 ---
 
@@ -196,11 +243,12 @@ def parse_advertisement(
 
     # Parse based on what's available
     if sd is not None and md is not None:
-        # BLE v7+: ID from service data, state from mfr_data offset 3
+        # BLE v7+: ID from service data. Manufacturer data is the 25-byte
+        # state array (data[1:26] in Bleak terms), power marker at data[1]
         ble_version = sd[3]
         product_id = (sd[10] << 8) | sd[11]
-        if ble_version >= 7 and len(md) >= 28:
-            power_byte = md[14]  # state_data[11] = mfr_data[3+11]
+        if ble_version >= 7 and len(md) >= 26:
+            power_byte = md[1]
         else:
             power_byte = md[14] if len(md) > 14 else None
     elif sd is not None:
@@ -252,7 +300,7 @@ def parse_discovery(info: BluetoothServiceInfoBleak) -> dict | None:
 ## Key Points
 
 1. **Company ID identifies format**: 0x5A** = ZengGe, 0x1102 = Telink
-2. **BLE v7+ uses service data**: Device ID in service data, state at mfr_data offset 3
+2. **BLE v7+ uses service data**: Device ID in service data; manufacturer data is the state array only (`data[1:26]`, power at `data[1]`)
 3. **Power state**: 0x23 = ON, 0x24 = OFF (ZengGe); non-zero = ON (Telink)
 4. **Product ID is big-endian**: `(byte[8] << 8) | byte[9]`
 
