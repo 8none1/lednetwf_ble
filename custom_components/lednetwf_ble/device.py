@@ -35,6 +35,7 @@ from .const import (
     convert_speed_from_adv,
     SOUND_REACTIVE_MARKER,
     CANDLE_MODE_MARKER,
+    IOTBT_E0_PRODUCT_IDS,
     IOTBT_V3_PRODUCT_IDS,
     IOTBT_SEGMENT_PRODUCT_IDS,
     IOTBT_SEGMENT_WHITE_PRODUCT_IDS,
@@ -280,6 +281,8 @@ class LEDNetWFDevice:
         # segment kept the segment effect list after being overridden to telink.
         # The v3 override and the v3 product check are left on auto-detection.
         override = self._iotbt_protocol_override
+        if self.is_iotbt_e0:
+            return EffectType.IOTBT_E0
         if override == "telink":
             segment = False
         elif override == "segment":
@@ -630,6 +633,9 @@ class LEDNetWFDevice:
             return True
         if self._iotbt_protocol_override in ("telink", "v3"):
             return False
+        # E0 01 string lights advertise the flags2 bit too, but are not segment.
+        if self._advertised_product_id in IOTBT_E0_PRODUCT_IDS:
+            return False
         # A product ID known to need v3 is not a segment device, whatever the
         # flags2 heuristic thinks. Without this, a v3 product that happened to
         # have the flags2 bit set would be routed to segment commands, because
@@ -641,6 +647,17 @@ class LEDNetWFDevice:
         if self._advertised_product_id in IOTBT_SEGMENT_PRODUCT_IDS:
             return True
         return self._is_iotbt_segment
+
+    @property
+    def is_iotbt_e0(self) -> bool:
+        """Return True for the E0 01 string-light family (product 197, issue #126).
+
+        Power E0 01 00 23/24, colour E0 01 00 C1 ..., scenes E1 21. Keyed on the
+        advertised product ID; a manual telink/segment/v3 override wins.
+        """
+        if self._iotbt_protocol_override in ("telink", "segment", "v3"):
+            return False
+        return self._advertised_product_id in IOTBT_E0_PRODUCT_IDS
 
     @property
     def is_iotbt_v3(self) -> bool:
@@ -667,6 +684,8 @@ class LEDNetWFDevice:
         """
         if self._iotbt_protocol_override == "v3":
             return True
+        if self.is_iotbt_e0:
+            return False
         # An explicit telink/segment override wins over auto-detection, same as
         # for is_iotbt_segment.
         if self._iotbt_protocol_override in ("telink", "segment"):
@@ -1606,6 +1625,9 @@ class LEDNetWFDevice:
             elif effect_id in IOTBT_MUSIC_EFFECTS:
                 return IOTBT_MUSIC_EFFECTS[effect_id]
             return None
+        elif eff_type == EffectType.IOTBT_E0:
+            from .const import IOTBT_E0_EFFECTS
+            return IOTBT_E0_EFFECTS.get(effect_id)
         elif eff_type == EffectType.IOTBT_SEGMENT:
             # IOTBT segment-based variant: 99 effects (1-99)
             from .const import IOTBT_SEGMENT_EFFECTS
@@ -1646,7 +1668,9 @@ class LEDNetWFDevice:
 
     async def turn_on(self, transition: float | None = None) -> bool:
         """Turn on the device, fading over transition seconds where supported."""
-        if self.is_iotbt_segment:
+        if self.is_iotbt_e0:
+            packet = protocol.build_iotbt_e0_power_command(turn_on=True)
+        elif self.is_iotbt_segment:
             # IOTBT segment-based variant uses standard 0x3B power command
             packet = protocol.build_power_command_0x3B(turn_on=True)
         elif self.is_iotbt:
@@ -1664,7 +1688,9 @@ class LEDNetWFDevice:
 
     async def turn_off(self, transition: float | None = None) -> bool:
         """Turn off the device, fading over transition seconds where supported."""
-        if self.is_iotbt_segment:
+        if self.is_iotbt_e0:
+            packet = protocol.build_iotbt_e0_power_command(turn_on=False)
+        elif self.is_iotbt_segment:
             # IOTBT segment-based variant uses standard 0x3B power command
             packet = protocol.build_power_command_0x3B(turn_on=False)
         elif self.is_iotbt:
@@ -1756,7 +1782,12 @@ class LEDNetWFDevice:
 
         # Standard color command (exits effect mode)
         eff_type = self.effect_type
-        if self.is_iotbt_segment:
+        if self.is_iotbt_e0:
+            brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
+            packet = protocol.build_iotbt_e0_color_command(
+                rgb[0], rgb[1], rgb[2], brightness_pct
+            )
+        elif self.is_iotbt_segment:
             # IOTBT segment-based variant uses 0xE1 0x03 command with segment HSB data
             # Source: User protocol capture (Dec 2025) - IOTBT65C device
             brightness_pct = max(1, round(brightness * 100 / 255)) if brightness > 0 else 0
