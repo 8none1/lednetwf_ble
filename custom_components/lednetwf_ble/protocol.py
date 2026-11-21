@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import colorsys
 import logging
-from typing import Tuple
+from typing import Final, Tuple
 
 from .const import (
     EffectType,
@@ -324,6 +324,96 @@ def build_iotbt_color_command(r: int, g: int, b: int, brightness: int = 100) -> 
 
     raw_cmd = bytearray([0xE2, 0x0B, hue & 0xFF, brightness_byte])
     return wrap_command(raw_cmd, cmd_family=0x0a)
+
+
+# =============================================================================
+# IOTBT E0 01 string-light family (issue #126, product 197)
+# =============================================================================
+
+def build_iotbt_e0_power_command(turn_on: bool) -> bytearray:
+    """Power command for the E0 01 string-light family.
+
+    E0 01 00 <23 on | 24 off> then 10 zero bytes. Source: issue #126 capture
+    (the app also sends 71 24 on a final power-off; E0 01 is the primary form).
+    cmd_family 0x0A matches every write in that capture.
+    """
+    raw_cmd = bytearray([0xE0, 0x01, 0x00, 0x23 if turn_on else 0x24]) + bytearray(10)
+    return wrap_command(raw_cmd, cmd_family=0x0A)
+
+
+def build_iotbt_e0_color_command(r: int, g: int, b: int, brightness: int = 100) -> bytearray:
+    """Solid colour for the E0 01 string-light family.
+
+    E0 01 00 C1 <hue/2> <sat | hue bit 0 << 7> <V> <CT> <W> 00 00 14 00 00.
+    The hue/sat bytes are the same packing as pack_hue_saturation. CT and W are
+    0 for every captured preset colour (the app only mirrors V into W on its RGB
+    picker), so they are left at 0. Brightness is the V byte; there is no
+    separate brightness command. Source: issue #126 capture.
+    """
+    h, s, v = rgb_to_hsv(r, g, b)
+    hs_hi, hs_lo = pack_hue_saturation(h, s)
+    val = max(1, min(100, round(brightness * v / 100)))
+    raw_cmd = bytearray([0xE0, 0x01, 0x00, 0xC1, hs_hi, hs_lo, val,
+                         0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00])
+    return wrap_command(raw_cmd, cmd_family=0x0A)
+
+
+# Scene payloads (E1 21 ...) for the same family, captured verbatim from the Aurelux
+# app (issue #126). Keyed by position in const.IOTBT_E0_EFFECTS. Sent as captured:
+# the brightness/speed/OPT bytes are not yet confirmed individually, so they are
+# not substituted.
+IOTBT_E0_SCENES: Final = {
+    1: "e121006402000150500000000000000300646400003c646400000000640000",  # Christmas 1
+    2: "e12100641d000164500000000000000405646400003c646400001e646400000000640000",  # Christmas 2
+    3: "e1210064140001646400000000000004000064000000646400003c646400001e64640000",  # Christmas 3
+    4: "e1210064130001505000000000000002016464000087e4640000",  # Halloween 1
+    5: "e121006416000164500000000000000396646400005a646400000e64640000",  # Halloween 2
+    6: "e12100641d000150500000000000000402e464000087e46400003c643700003c64640000",  # Halloween 3
+    7: "e1210064210001644e00000000000006b0e4640000b0e4640000aecb640000aecb640000b0e4640000b0e4640000",  # Valentine's Day
+    8: "e12100641a000164500000000000000204e46400001048640000",  # Thanksgiving
+    9: "e12100641c000150500000000000000208646400000e64640000",  # Mother's Day
+    10: "e12100641c00015050000000000000037864640000695a6400005a50640000",  # Father's Day
+    11: "e12100641100015050000000000000043c646400001e646400000e646400005a64640000",  # Forest Day
+    12: "e121006420000164500000000000000300646400000ee464000005e4640000",  # New Year
+    13: "e12100641600016450000000000000060064640000966464000078646400005a646400003c646400001e64640000",  # Children's Day
+    14: "e1210064040001645000000000000003006464000007646400000000640000",  # Easter
+    15: "e12100640100016450000000000000060064640000966464000078646400005a646400003c646400001e64640000",  # Birthday
+    16: "e12100642100016450000000000000063c64640000383264000000006400003c646400003850640000383c640000",  # St. Patrick's Day
+    17: "e12100641100016450000000000000080adf64000000000000000adf64000000000000000adf64000000000000000adf6400000000000000",  # Pumpkin Festival
+    18: "e121006419000164500000000000000500646400007864640000000064000000646400001e64640000",  # Puppet Festival
+    19: "e12100641400016450000000000000043c6464000087646400001e646400000be4640000",  # Easter Eggs
+    20: "e12100640a000164500000000000000800646400001e6464000000646400001e6464000000646400001e6464000000646400001e64640000",  # Candy Cane
+    21: "e12100640b00016450000000000000040064640000000064000000000000007864640000",  # Carnival
+    22: "e12100640200016450000000000000021e646400000ee4640000",  # Lemon Festival
+    23: "e1210064200001645000000000000003786464000000006400007864640000",  # Beer Festival
+    24: "e12100640d0001645000000000000004006464000017e46400008764590000a564590000",  # Midsummer Festival
+    25: "e12100640b00056450007864640000011e64640000",  # Meteor Shower
+    26: "e12100640a000164500000000000000700646400003c6464000078646400001e6464000096646400005a646400000000640000",  # Fantasy Fireworks
+    27: "e12100640e00016450000000000000035a646400003c646400001e64640000",  # Summer Wind
+    28: "e12100640e00016450000000000000020ee46400000000640000",  # Moonlight
+    29: "e121006425000164500000000000000700646400003c6464000078646400001e6464000096646400005a646400000000640000",  # Journey to the Planet
+    30: "e12100640a000164500000006400000678646400003c6464000000646400005a6464000096646400001e64640000",  # Dynamic Rhythm
+    31: "e121006411000150500000000000000600006400009664640000006464000078646400005a646400001e64640000",  # Champagne Party
+    32: "e121006419000164500000000000000700646400003c6464000078646400001e6464000096646400005a646400000000640000",  # Movie Night
+    33: "e12100640d00050350007264640000010000640000",  # Astral Summit
+    34: "e121006409000164500000000000000268e46400007864640000",  # Star Shining
+    35: "e12100640d000503500000006400000111e4640000",  # Meteoric Crest
+    36: "e12100640d01010350000000000000035a646400003c646400001e64640000",  # Dynamic Flow Line
+    37: "e12100641f00016450000000000000060064640000966464000078646400005a646400003c646400001e64640000",  # Science
+    38: "e12100642300056450000000000000060064640000966464000078646400005a646400003c646400001e64640000",  # Midnight City
+    39: "e121006416000164500000000000000700646400003c6464000078646400001e6464000096646400005a646400000000640000",  # Advertising
+    40: "e121006424000164500000000000000700646400003c6464000078646400001e6464000096646400005a646400000000640000",  # Fireworks Festival
+    41: "e12100640e00016450000000000000060064640000966464000078646400005a646400003c646400001e64640000",  # Rainbow Water
+    42: "e12100640b00016450000000000000060064640000966464000078646400005a646400003c646400001e64640000",  # Quality Stroke
+}
+
+
+def build_iotbt_e0_effect_command(effect_id: int) -> bytearray | None:
+    """Scene command (E1 21) for the E0 01 string-light family, or None if unknown."""
+    template = IOTBT_E0_SCENES.get(effect_id)
+    if template is None:
+        return None
+    return wrap_command(bytearray.fromhex(template), cmd_family=0x0A)
 
 
 def build_iotbt_v3_color_command(r: int, g: int, b: int, brightness: int = 100) -> bytearray:
@@ -1301,6 +1391,8 @@ def build_effect_command(
         - Music effects (encoded as effect_num << 8): 0xE1 0x05 command format
           Speed parameter is used as mic sensitivity for music mode
     """
+    if effect_type == EffectType.IOTBT_E0:
+        return build_iotbt_e0_effect_command(effect_id)
     if effect_type == EffectType.IOTBT_SEGMENT:
         # Standard IOTBT devices use different commands for regular effects vs music effects
         if effect_id >= 0x100:

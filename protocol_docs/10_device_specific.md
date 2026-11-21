@@ -115,3 +115,25 @@ No effect support. Use:
 ---
 
 **For detailed command formats, see [06_effect_commands.md](06_effect_commands.md)**
+
+## IOTBT E0 01 string lights (product 0xC5, issue #126)
+
+Minetom IR + Bluetooth Christmas String Lights (`IOTBT6E0`, Aurelux app). Advertises
+service data `5B 07 <mac> 00 C5 42 08 01 2A` (status byte 0x5B, flags2 0x2A, so the
+flags2 segment heuristic would wrongly pick the segment command set; the product ID
+takes precedence). Product 197 is not in the vendor `ble_devices.json`.
+
+Transport is the standard wrapper with cmd_family 0x0A. Payloads (after the 8-byte header):
+
+| Action | Payload |
+|---|---|
+| Power | `E0 01 00 23` (on) / `E0 01 00 24` (off) + 10 zero bytes |
+| Solid colour | `E0 01 00 C1 <hue/2> <sat or hue bit 0 << 7> <V> <CT> <W> 00 00 14 00 00` |
+| Multi-colour static | `EC 07 00 <bright> <count> <count x 5-byte colour>` (not implemented) |
+| Scene | `E1 21 00 <bright> <fx> <dir> <opt1> <opt2> <speed> 00 <5-byte bg> <count> <count x 5-byte colour>` |
+
+Brightness is the V byte of the colour tuple. The 42 scene payloads are stored verbatim
+(`protocol.IOTBT_E0_SCENES`); the dir/opt1/opt2/speed/brightness bytes are not yet
+confirmed individually, so speed and brightness sliders do not alter a running scene.
+State notifications arrive as JSON-wrapped `EA 81` frames; their layout is not parsed
+for this family yet.

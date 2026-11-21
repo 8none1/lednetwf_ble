@@ -53,6 +53,14 @@ IOTBT_SEGMENT_PRODUCT_IDS: Final = frozenset({170, 173})
 # (brightness only, no colour temperature). Issue #114 capture; 173 is not
 # included until someone captures it.
 IOTBT_SEGMENT_WHITE_PRODUCT_IDS: Final = frozenset({170})
+# Real product IDs (advertisement bytes 8-9) for the E0 01 string-light family:
+# power is E0 01 00 23/24, colour is E0 01 00 C1 <H/2> <S|hue bit> <V> <CT> <W> ...,
+# scenes are E1 21. These devices advertise flags2 bit 0x08 like segment lamps, so
+# the product ID has to win over the flags2 heuristic.
+# Product 197 (0xC5): Minetom IR + Bluetooth Christmas String Lights (IOTBT6E0),
+# issue #126. Not present in the vendor ble_devices.json.
+IOTBT_E0_PRODUCT_IDS: Final = frozenset({197})
+
 IOTBT_PROTOCOL_CHOICES: Final = (
     IOTBT_PROTOCOL_AUTO,
     IOTBT_PROTOCOL_TELINK,
@@ -156,6 +164,7 @@ class EffectType(IntEnum):
     ADDRESSABLE_0x53 = 3    # 0x38 command NO checksum (4 bytes), brightness in byte 3
     IOTBT = 4               # 0xE0 0x02 command, effects 1-12 (Telink BLE Mesh based)
     IOTBT_SEGMENT = 5       # 0xE1 0x01 command, segment-based with palette (newer IOTBT)
+    IOTBT_E0 = 6            # 0xE1 0x21 scenes (Minetom string lights, product 197)
 
 
 class ValueScale(IntEnum):
@@ -487,6 +496,54 @@ IOTBT_MUSIC_EFFECTS: Final = {
     0xD00: "Music 13",  # 13 << 8
 }
 
+# Scene names for the E0 01 string-light family (0xE1 0x21 command, issue #126).
+# Keys are the position in the Aurelux app list; templates live in
+# protocol.IOTBT_E0_SCENES under the same keys.
+IOTBT_E0_EFFECTS: Final = {
+    1: 'Christmas 1',
+    2: 'Christmas 2',
+    3: 'Christmas 3',
+    4: 'Halloween 1',
+    5: 'Halloween 2',
+    6: 'Halloween 3',
+    7: "Valentine's Day",
+    8: 'Thanksgiving',
+    9: "Mother's Day",
+    10: "Father's Day",
+    11: 'Forest Day',
+    12: 'New Year',
+    13: "Children's Day",
+    14: 'Easter',
+    15: 'Birthday',
+    16: "St. Patrick's Day",
+    17: 'Pumpkin Festival',
+    18: 'Puppet Festival',
+    19: 'Easter Eggs',
+    20: 'Candy Cane',
+    21: 'Carnival',
+    22: 'Lemon Festival',
+    23: 'Beer Festival',
+    24: 'Midsummer Festival',
+    25: 'Meteor Shower',
+    26: 'Fantasy Fireworks',
+    27: 'Summer Wind',
+    28: 'Moonlight',
+    29: 'Journey to the Planet',
+    30: 'Dynamic Rhythm',
+    31: 'Champagne Party',
+    32: 'Movie Night',
+    33: 'Astral Summit',
+    34: 'Star Shining',
+    35: 'Meteoric Crest',
+    36: 'Dynamic Flow Line',
+    37: 'Science',
+    38: 'Midnight City',
+    39: 'Advertising',
+    40: 'Fireworks Festival',
+    41: 'Rainbow Water',
+    42: 'Quality Stroke',
+}
+
 # IOTBT Segment-based effects (0xE1 0x01 command)
 # Source: User protocol capture (Dec 2025) - IOTBT devices with addressable segments
 # These devices use 0xE1 0x03 for color, 0xE1 0x01 for effects, 0x3B for power
@@ -808,6 +865,8 @@ def get_effect_list(
         # Plus 8 music reactive effects via 0xE1 0x05 command
         effects = list(get_iotbt_effects(iotbt_effect_count).values())
         effects.extend(list(IOTBT_MUSIC_EFFECTS.values()))
+    elif effect_type == EffectType.IOTBT_E0:
+        effects = list(IOTBT_E0_EFFECTS.values())
     elif effect_type == EffectType.IOTBT_SEGMENT:
         # IOTBT Segment-based devices have 99 effects via 0xE1 0x01 command
         effects = list(IOTBT_SEGMENT_EFFECTS.values())
@@ -915,6 +974,10 @@ def get_effect_id(
         for eid, name in IOTBT_MUSIC_EFFECTS.items():
             if name == effect_name:
                 return eid  # Already encoded (e.g., 0x100 for Music 1)
+    elif effect_type == EffectType.IOTBT_E0:
+        for eid, name in IOTBT_E0_EFFECTS.items():
+            if name == effect_name:
+                return eid
     elif effect_type == EffectType.IOTBT_SEGMENT:
         # Segment-based effects (1-99) via 0xE1 0x01 command
         for eid, name in IOTBT_SEGMENT_EFFECTS.items():
