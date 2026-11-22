@@ -76,6 +76,7 @@ same product ID:
 | Telink (e.g. IOTBT812) | `0x71` | `E2 0B <hue> <0xE0\|lvl>` | `E0 02` |
 | Segment (e.g. IOTBT6BA) | `0x3B` | `E1 03` + `A1` blocks | `E1 01` |
 | v3 wrapper (ZJ-BBLA-RGBWW, PR #101) | `0x71` | `E0 01 00 A1 ...` | unknown |
+| E0 01 string lights (Minetom, product 0xC5, #126) | `E0 01 00 23/24` | `E0 01 00 C1 ...` (5-byte HSV+W) | `E1 21` |
 
 Detection is a heuristic on service-data `flags2` bit `0x08`, with a manual
 `CONF_IOTBT_PROTOCOL` override. See `iotbt_variant_findings.md`.

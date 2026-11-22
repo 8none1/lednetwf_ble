@@ -70,6 +70,7 @@ All commands must be wrapped in transport layer. See [04_connection_transport.md
 | Set color order / LED count | [17_device_configuration.md](17_device_configuration.md) |
 | IOTBT (0x80) protocol | [17_device_configuration.md](17_device_configuration.md) |
 | 0xE0 "v3" command wrapper | [17_device_configuration.md](17_device_configuration.md) |
+| IOTBT E0 01 string lights (product 0xC5) | [10_device_specific.md](10_device_specific.md) |
 | Sound reactive / music mode | [18_sound_reactive_music_mode.md](18_sound_reactive_music_mode.md) |
 
 ---
