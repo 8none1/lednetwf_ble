@@ -35,6 +35,19 @@ def test_routed_as_e0_not_segment_despite_flags2():
     assert d.effect_type == EffectType.IOTBT_E0
 
 
+def test_product_100_routed_as_e0_with_flags2_bit_clear():
+    # Surplife-app string lights: product 0x0064, flags2 0x05. MAC tail zeroed.
+    d = LEDNetWFDevice(MagicMock(), "E4:98:BB:00:00:00", "IOTBT000", product_id=0x00)
+    d.update_from_advertisement(
+        {}, {SERVICE_UUID_5A00: bytes.fromhex("5B07E498BB000000006426050105")}
+    )
+    assert d.advertised_product_id == 0x64
+    assert d.is_iotbt_e0
+    assert not d.is_iotbt_segment
+    assert not d.is_iotbt_v3
+    assert d.effect_type == EffectType.IOTBT_E0
+
+
 def test_manual_override_wins():
     d = make_device()
     d.set_iotbt_protocol_override("telink")
