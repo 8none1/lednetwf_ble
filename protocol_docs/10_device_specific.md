@@ -123,6 +123,13 @@ service data `5B 07 <mac> 00 C5 42 08 01 2A` (status byte 0x5B, flags2 0x2A, so 
 flags2 segment heuristic would wrongly pick the segment command set; the product ID
 takes precedence). Product 197 is not in the vendor `ble_devices.json`.
 
+Product 100 (0x64), Christmas string lights sold with the Surplife app, uses the same
+commands. It advertises service data `5B 07 <mac> 00 64 26 05 01 05` (flags2 0x05, so
+the heuristic would pick Telink, where only power works). Confirmed by writing the
+payloads below directly and reading the state back with `EA 81 8A 8B`. The JSON reply's
+payload was `EA 81 00 00 64 05 <23 on | 24 off> <71 scene | A3 solid> <fx> <speed> 00
+<hue/2> <sat> <V> ...`, with the fx and speed bytes matching the scene just sent.
+
 Transport is the standard wrapper with cmd_family 0x0A. Payloads (after the 8-byte header):
 
 | Action | Payload |

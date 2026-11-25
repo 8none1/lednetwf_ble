@@ -59,7 +59,10 @@ IOTBT_SEGMENT_WHITE_PRODUCT_IDS: Final = frozenset({170})
 # the product ID has to win over the flags2 heuristic.
 # Product 197 (0xC5): Minetom IR + Bluetooth Christmas String Lights (IOTBT6E0),
 # issue #126. Not present in the vendor ble_devices.json.
-IOTBT_E0_PRODUCT_IDS: Final = frozenset({197})
+# Product 100 (0x64): Christmas string lights sold with the Surplife app. flags2 is
+# 0x05 (bit 0x08 clear), so the heuristic would pick Telink, where only power works.
+# E0 01 power/colour and E1 21 scenes confirmed by direct writes with EA 81 readback.
+IOTBT_E0_PRODUCT_IDS: Final = frozenset({100, 197})
 
 IOTBT_PROTOCOL_CHOICES: Final = (
     IOTBT_PROTOCOL_AUTO,
