@@ -118,3 +118,29 @@ def test_effect_list_and_dispatch():
     assert "Christmas 1" in get_effect_list(EffectType.IOTBT_E0)
     pkt = protocol.build_effect_command(EffectType.IOTBT_E0, 1, 50, 100)
     assert body(pkt).startswith("e12100640200015050")
+
+
+def test_identity_line_logged_once_per_debug_session(caplog):
+    # Bug-report logs rarely contain the advertisement parse (a connected device
+    # stops advertising), so the first command of a debug session repeats it.
+    import logging
+
+    d = make_device()
+    logger = "lednetwf_ble.device"
+    with caplog.at_level(logging.DEBUG, logger=logger):
+        d._log_identity_once()
+        d._log_identity_once()
+    lines = [r.getMessage() for r in caplog.records if "Device identity" in r.getMessage()]
+    assert len(lines) == 1
+    assert "advertised_product_id=0xC5" in lines[0]
+    assert "flags2=0x2A" in lines[0]
+    assert "effect_type=IOTBT_E0" in lines[0]
+    assert "service_data=5B 07 08 65 F0 52 56 E0 00 C5 42 08 01 2A" in lines[0]
+
+    # Debug off clears the flag, so the next debug session logs the line again.
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=logger):
+        d._log_identity_once()
+    with caplog.at_level(logging.DEBUG, logger=logger):
+        d._log_identity_once()
+    assert sum("Device identity" in r.getMessage() for r in caplog.records) == 1
