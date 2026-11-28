@@ -136,6 +136,10 @@ class LEDNetWFDevice:
         # is_iotbt_segment property applies any manual protocol override on top.
         self._is_iotbt_segment: bool = False
         self._iotbt_flags2: int | None = None
+        # Last raw service data seen, kept only so the identity debug line can show it.
+        self._last_service_data: bytes | None = None
+        # True once the identity line has been written in the current debug session.
+        self._identity_logged = False
         # The device's real product ID from advertisement bytes 8-9. IOTBT devices
         # have product_id 0x00 forced for capability lookup, so this is kept
         # separately and used only to pick the command family.
@@ -1634,6 +1638,42 @@ class LEDNetWFDevice:
             return IOTBT_SEGMENT_EFFECTS.get(effect_id)
         return None
 
+    def _log_identity_once(self) -> None:
+        """Write one debug line saying what this device is and how it is routed.
+
+        A connected device stops advertising, and users usually switch debug logging
+        on after setup, so the advertisement parse lines are rarely in a bug-report
+        log. This repeats the facts from the last advertisement before the first
+        command of each debug session. The flag is cleared whenever debug logging is
+        off, so switching it on again writes the line again.
+        """
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            self._identity_logged = False
+            return
+        if self._identity_logged:
+            return
+        self._identity_logged = True
+
+        def hx(value: int | None) -> str:
+            return "unknown" if value is None else f"0x{value:02X}"
+
+        sd = self._last_service_data
+        _LOGGER.debug(
+            "Device identity for %s: product_id=%s, advertised_product_id=%s, "
+            "flags2=%s, ble_version=%s, led_version=%s, firmware=%s, "
+            "iotbt_protocol=%s, effect_type=%s, service_data=%s",
+            self._name,
+            hx(self._product_id),
+            hx(self._advertised_product_id),
+            hx(self._iotbt_flags2),
+            self._ble_version,
+            self._led_version,
+            self._firmware_ver,
+            self._iotbt_protocol_override or "auto",
+            self.effect_type.name,
+            " ".join(f"{b:02X}" for b in sd) if sd else "none seen",
+        )
+
     async def _send_command(self, packet: bytearray, with_response: bool = False) -> bool:
         """Send a command packet to the device.
 
@@ -1648,6 +1688,8 @@ class LEDNetWFDevice:
             # Update sequence number in packet
             self._seq = (self._seq + 1) % 256
             packet[1] = self._seq
+
+            self._log_identity_once()
 
             # Format as 0xNN for debugging
             pkt_hex = ' '.join(f'0x{b:02X}' for b in packet)
@@ -2612,6 +2654,7 @@ class LEDNetWFDevice:
                     self._name, len(sd_bytes),
                     ' '.join(f'{b:02X}' for b in sd_bytes[:20])  # First 20 bytes
                 )
+                self._last_service_data = bytes(sd_bytes)
                 sd_result = protocol.parse_service_data(sd_bytes)
                 if sd_result:
                     # Update device info from service data
