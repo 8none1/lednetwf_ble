@@ -130,6 +130,14 @@ payloads below directly and reading the state back with `EA 81 8A 8B`. The JSON 
 payload was `EA 81 00 00 64 05 <23 on | 24 off> <71 scene | A3 solid> <fx> <speed> 00
 <hue/2> <sat> <V> ...`, with the fx and speed bytes matching the scene just sent.
 
+Product 253 (0xFD), a Surplife Christmas tree star (`IOTBTAF1`, about 30 pixels, issue
+#130), is routed to the same commands provisionally. Evidence so far: its state reply is
+`EA 81 00 00 FD 07 <23 on | 24 off> <25 scene | 24 solid> <fx> <speed> 00 <hue/2> <sat>
+<V> ...`, the same layout as product 197; `E0 02 00 <id> <speed> <bright>` effects are
+ignored; `E0 01 00 A1 ...` colour and `71 23/24` power work. IR remote presses reported
+fx ids 0x09, 0x0A, 0x07 and 0x05 (0x07 and 0x05 are not used by the 42 named scenes).
+Not yet confirmed on this product: `E0 01 00 23/24` power, `C1` colour, `E1 21` scenes.
+
 Transport is the standard wrapper with cmd_family 0x0A. Payloads (after the 8-byte header):
 
 | Action | Payload |
