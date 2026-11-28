@@ -359,9 +359,9 @@ def build_iotbt_e0_color_command(r: int, g: int, b: int, brightness: int = 100) 
 
 
 # Scene payloads (E1 21 ...) for the same family, captured verbatim from the Aurelux
-# app (issue #126). Keyed by position in const.IOTBT_E0_EFFECTS. Sent as captured:
-# the brightness/speed/OPT bytes are not yet confirmed individually, so they are
-# not substituted.
+# app (issue #126). Keyed by position in const.IOTBT_E0_EFFECTS. Byte 3 is the
+# overall brightness (0x64 in every capture) and is replaced with the requested
+# brightness; the speed/dir/OPT bytes are sent as captured.
 IOTBT_E0_SCENES: Final = {
     1: "e121006402000150500000000000000300646400003c646400000000640000",  # Christmas 1
     2: "e12100641d000164500000000000000405646400003c646400001e646400000000640000",  # Christmas 2
@@ -408,12 +408,19 @@ IOTBT_E0_SCENES: Final = {
 }
 
 
-def build_iotbt_e0_effect_command(effect_id: int) -> bytearray | None:
-    """Scene command (E1 21) for the E0 01 string-light family, or None if unknown."""
+def build_iotbt_e0_effect_command(effect_id: int, brightness: int = 100) -> bytearray | None:
+    """Scene command (E1 21) for the E0 01 string-light family, or None if unknown.
+
+    brightness is 0-100 and goes in byte 3 (E1 21 00 <bright> <fx> ...), the field
+    the issue #126 capture notes label as overall brightness. At 100 the payload is
+    the captured template unchanged.
+    """
     template = IOTBT_E0_SCENES.get(effect_id)
     if template is None:
         return None
-    return wrap_command(bytearray.fromhex(template), cmd_family=0x0A)
+    raw_cmd = bytearray.fromhex(template)
+    raw_cmd[3] = max(1, min(100, brightness))
+    return wrap_command(raw_cmd, cmd_family=0x0A)
 
 
 def build_iotbt_v3_color_command(r: int, g: int, b: int, brightness: int = 100) -> bytearray:
@@ -1392,7 +1399,7 @@ def build_effect_command(
           Speed parameter is used as mic sensitivity for music mode
     """
     if effect_type == EffectType.IOTBT_E0:
-        return build_iotbt_e0_effect_command(effect_id)
+        return build_iotbt_e0_effect_command(effect_id, brightness)
     if effect_type == EffectType.IOTBT_SEGMENT:
         # Standard IOTBT devices use different commands for regular effects vs music effects
         if effect_id >= 0x100:

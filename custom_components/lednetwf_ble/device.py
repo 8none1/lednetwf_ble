@@ -36,6 +36,7 @@ from .const import (
     SOUND_REACTIVE_MARKER,
     CANDLE_MODE_MARKER,
     IOTBT_E0_PRODUCT_IDS,
+    IOTBT_E0_HIDDEN_SCENES_BY_PRODUCT,
     IOTBT_V3_PRODUCT_IDS,
     IOTBT_SEGMENT_PRODUCT_IDS,
     IOTBT_SEGMENT_WHITE_PRODUCT_IDS,
@@ -306,6 +307,7 @@ class LEDNetWFDevice:
             self.effect_type, self.has_bg_color, self.has_ic_config,
             self.has_builtin_mic, self.has_candle_mode,
             iotbt_effect_count=self.iotbt_effect_count,
+            iotbt_e0_hidden_scenes=self.iotbt_e0_hidden_scenes,
         )
 
     @property
@@ -318,6 +320,16 @@ class LEDNetWFDevice:
         """
         return IOTBT_EFFECT_COUNT_BY_PRODUCT.get(
             self._advertised_product_id, IOTBT_DEFAULT_EFFECT_COUNT
+        )
+
+    @property
+    def iotbt_e0_hidden_scenes(self) -> frozenset[int]:
+        """Return the E1 21 scene IDs this product does not run (E0 01 family).
+
+        Keyed on the advertised product ID, like iotbt_effect_count.
+        """
+        return IOTBT_E0_HIDDEN_SCENES_BY_PRODUCT.get(
+            self._advertised_product_id, frozenset()
         )
 
     @property
@@ -2077,6 +2089,7 @@ class LEDNetWFDevice:
             effect_name, eff_type, self.has_bg_color, self.has_ic_config,
             self.has_builtin_mic, self.has_candle_mode,
             iotbt_effect_count=self.iotbt_effect_count,
+            iotbt_e0_hidden_scenes=self.iotbt_e0_hidden_scenes,
         )
 
         if effect_id is None:

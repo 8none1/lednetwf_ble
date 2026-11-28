@@ -144,3 +144,55 @@ def test_identity_line_logged_once_per_debug_session(caplog):
     with caplog.at_level(logging.DEBUG, logger=logger):
         d._log_identity_once()
     assert sum("Device identity" in r.getMessage() for r in caplog.records) == 1
+
+
+# --- Issue #130: product 253 tree star, beta27 test -------------------------------
+
+def make_star() -> LEDNetWFDevice:
+    d = LEDNetWFDevice(MagicMock(), "E4:98:BB:00:00:00", "IOTBTAF1", product_id=0x00)
+    d.update_from_advertisement(
+        {}, {SERVICE_UUID_5A00: bytes.fromhex("5B07E498BB00000000FD26070105")}
+    )
+    return d
+
+
+def test_scene_brightness_goes_in_byte_3():
+    # Full brightness leaves the captured template untouched.
+    assert body(protocol.build_iotbt_e0_effect_command(1, 100)) == protocol.IOTBT_E0_SCENES[1]
+    p = bytes(protocol.build_iotbt_e0_effect_command(1, 23)[8:])
+    assert p[3] == 23
+    assert p[4:] == bytes.fromhex(protocol.IOTBT_E0_SCENES[1])[4:]
+
+
+@pytest.mark.parametrize("pct,expected", [(0, 1), (150, 100)])
+def test_scene_brightness_clamped(pct, expected):
+    assert protocol.build_iotbt_e0_effect_command(1, pct)[8 + 3] == expected
+
+
+def test_dispatch_passes_brightness():
+    pkt = protocol.build_effect_command(EffectType.IOTBT_E0, 1, 50, 40)
+    assert pkt[8 + 3] == 40
+
+
+def test_star_hidden_scenes_are_the_high_fx_engines():
+    # The 15 scenes reported broken on beta27 are exactly those with fx >= 0x19.
+    from lednetwf_ble.const import IOTBT_E0_HIDDEN_SCENES_BY_PRODUCT
+
+    high_fx = {
+        eid for eid, hexstr in protocol.IOTBT_E0_SCENES.items()
+        if bytes.fromhex(hexstr)[4] >= 0x19
+    }
+    assert IOTBT_E0_HIDDEN_SCENES_BY_PRODUCT[253] == high_fx
+
+
+def test_star_effect_list_hides_unsupported_scenes():
+    d = make_star()
+    effects = d.effect_list
+    assert "Christmas 1" in effects and "Quality Stroke" in effects
+    assert "Christmas 2" not in effects and "Fireworks Festival" not in effects
+    assert sum(1 for name in IOTBT_E0_EFFECTS.values() if name in effects) == 27
+
+
+def test_other_e0_products_keep_all_scenes():
+    d = make_device()  # product 197
+    assert all(name in d.effect_list for name in IOTBT_E0_EFFECTS.values())
