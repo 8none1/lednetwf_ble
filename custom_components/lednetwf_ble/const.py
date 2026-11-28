@@ -62,11 +62,17 @@ IOTBT_SEGMENT_WHITE_PRODUCT_IDS: Final = frozenset({170})
 # Product 100 (0x64): Christmas string lights sold with the Surplife app. flags2 is
 # 0x05 (bit 0x08 clear), so the heuristic would pick Telink, where only power works.
 # E0 01 power/colour and E1 21 scenes confirmed by direct writes with EA 81 readback.
-# Product 253 (0xFD): Surplife Christmas tree star (IOTBTAF1), issue #130. PROVISIONAL:
-# added on the strength of an identical EA 81 state layout (mode 0x24/0x25, fx, speed)
-# and E0 02 effects being ignored, same as product 197. E0 01 00 A1 colour and 71 23/24
-# power are confirmed; E0 01 23/24 power, C1 colour and E1 21 scenes await a user test.
+# Product 253 (0xFD): Surplife Christmas tree star (IOTBTAF1), issue #130. Power,
+# colour, brightness and 27 of the 42 E1 21 scenes confirmed by a user on beta27.
 IOTBT_E0_PRODUCT_IDS: Final = frozenset({100, 197, 253})
+
+# E1 21 scenes (keys of IOTBT_E0_EFFECTS) that a product does not run, hidden from
+# its effect list. Product 253: the 15 scenes reported as not working on beta27
+# (issue #130) are exactly the ones whose animation engine byte (fx, byte 4 of the
+# E1 21 payload) is 0x19 or above. The star runs every scene with fx 0x16 or below.
+IOTBT_E0_HIDDEN_SCENES_BY_PRODUCT: Final = {
+    253: frozenset({2, 6, 7, 8, 9, 10, 12, 16, 18, 23, 29, 32, 37, 38, 40}),
+}
 
 IOTBT_PROTOCOL_CHOICES: Final = (
     IOTBT_PROTOCOL_AUTO,
@@ -828,6 +834,7 @@ def get_effect_list(
     has_builtin_mic: bool = False,
     has_candle_mode: bool = False,
     iotbt_effect_count: int = IOTBT_DEFAULT_EFFECT_COUNT,
+    iotbt_e0_hidden_scenes: frozenset[int] = frozenset(),
 ) -> list[str]:
     """Get list of effect names for the given effect type.
 
@@ -839,6 +846,8 @@ def get_effect_list(
         has_candle_mode: If True, include "Candle Mode" option (0x54, 0x5B devices)
         iotbt_effect_count: Number of 0xE0 0x02 effects for IOTBT devices
             (see IOTBT_EFFECT_COUNT_BY_PRODUCT)
+        iotbt_e0_hidden_scenes: E1 21 scene IDs to leave out for this product
+            (see IOTBT_E0_HIDDEN_SCENES_BY_PRODUCT)
 
     Returns:
         List of effect names
@@ -873,7 +882,10 @@ def get_effect_list(
         effects = list(get_iotbt_effects(iotbt_effect_count).values())
         effects.extend(list(IOTBT_MUSIC_EFFECTS.values()))
     elif effect_type == EffectType.IOTBT_E0:
-        effects = list(IOTBT_E0_EFFECTS.values())
+        effects = [
+            name for eid, name in IOTBT_E0_EFFECTS.items()
+            if eid not in iotbt_e0_hidden_scenes
+        ]
     elif effect_type == EffectType.IOTBT_SEGMENT:
         # IOTBT Segment-based devices have 99 effects via 0xE1 0x01 command
         effects = list(IOTBT_SEGMENT_EFFECTS.values())
@@ -907,6 +919,7 @@ def get_effect_id(
     has_builtin_mic: bool = False,
     has_candle_mode: bool = False,
     iotbt_effect_count: int = IOTBT_DEFAULT_EFFECT_COUNT,
+    iotbt_e0_hidden_scenes: frozenset[int] = frozenset(),
 ) -> int | None:
     """Get effect ID from name.
 
@@ -919,6 +932,8 @@ def get_effect_id(
         has_candle_mode: If True, recognize "Candle Mode" effect (0x54, 0x5B devices)
         iotbt_effect_count: Number of 0xE0 0x02 effects for IOTBT devices
             (see IOTBT_EFFECT_COUNT_BY_PRODUCT)
+        iotbt_e0_hidden_scenes: E1 21 scene IDs to leave out for this product
+            (see IOTBT_E0_HIDDEN_SCENES_BY_PRODUCT)
 
     Returns:
         Effect ID or None if not found.
@@ -983,7 +998,7 @@ def get_effect_id(
                 return eid  # Already encoded (e.g., 0x100 for Music 1)
     elif effect_type == EffectType.IOTBT_E0:
         for eid, name in IOTBT_E0_EFFECTS.items():
-            if name == effect_name:
+            if name == effect_name and eid not in iotbt_e0_hidden_scenes:
                 return eid
     elif effect_type == EffectType.IOTBT_SEGMENT:
         # Segment-based effects (1-99) via 0xE1 0x01 command

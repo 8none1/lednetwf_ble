@@ -136,12 +136,18 @@ payload was `EA 81 00 00 64 05 <23 on | 24 off> <71 scene | A3 solid> <fx> <spee
 <hue/2> <sat> <V> ...`, with the fx and speed bytes matching the scene just sent.
 
 Product 253 (0xFD), a Surplife Christmas tree star (`IOTBTAF1`, about 30 pixels, issue
-#130), is routed to the same commands provisionally. Evidence so far: its state reply is
-`EA 81 00 00 FD 07 <23 on | 24 off> <25 scene | 24 solid> <fx> <speed> 00 <hue/2> <sat>
-<V> ...`, the same layout as product 197; `E0 02 00 <id> <speed> <bright>` effects are
-ignored; `E0 01 00 A1 ...` colour and `71 23/24` power work. IR remote presses reported
-fx ids 0x09, 0x0A, 0x07 and 0x05 (0x07 and 0x05 are not used by the 42 named scenes).
-Not yet confirmed on this product: `E0 01 00 23/24` power, `C1` colour, `E1 21` scenes.
+#130), uses the same commands. Its state reply is `EA 81 00 00 FD 07 <23 on | 24 off>
+<25 scene | 24 solid> <fx> <speed> 00 <hue/2> <sat> <V> ...`, the same layout as product
+197; `E0 02 00 <id> <speed> <bright>` effects are ignored. A tester on 2.0.1-beta27
+confirmed `E0 01 00 23/24` power, `C1` colour and brightness, and 27 of the 42 `E1 21`
+scenes. The 15 scenes that do nothing on the star (2, 6, 7, 8, 9, 10, 12, 16, 18, 23,
+29, 32, 37, 38, 40) are exactly the ones whose fx byte is 0x19 or above; every scene
+with fx 0x16 or below works. The star echoes the unsupported fx in its state reply
+anyway. Those scenes are hidden from the star's effect list
+(`const.IOTBT_E0_HIDDEN_SCENES_BY_PRODUCT`). IR remote presses reported fx ids 0x03,
+0x05, 0x06, 0x07, 0x09 and 0x0A (0x03, 0x05, 0x06 and 0x07 are not used by the 42 named
+scenes). Dimming a running scene from the IR remote does not change any byte of the
+`EA 81` reply, so scene brightness cannot be read back.
 
 Transport is the standard wrapper with cmd_family 0x0A. Payloads (after the 8-byte header):
 
@@ -153,8 +159,10 @@ Transport is the standard wrapper with cmd_family 0x0A. Payloads (after the 8-by
 | Scene | `E1 21 00 <bright> <fx> <dir> <opt1> <opt2> <speed> 00 <5-byte bg> <count> <count x 5-byte colour>` |
 
 Brightness is the V byte of the colour tuple. The 42 scene payloads are stored verbatim
-(`protocol.IOTBT_E0_SCENES`), so the speed and brightness sliders do not alter a running
-scene yet. The speed byte position is confirmed: a tester on product 197 (firmware 43)
+(`protocol.IOTBT_E0_SCENES`) apart from byte 3, which the integration replaces with the
+requested brightness (`0x01`-`0x64`; the captures all have `0x64`). The #126 capture
+notes label byte 3 as overall brightness; the effect is not yet confirmed by eye. The
+speed slider does not alter a running scene yet. The speed byte position is confirmed: a tester on product 197 (firmware 43)
 sent `E1 21` frames with different speed values, the state reply echoed each one, and
 `0xC8` (above the app's maximum of `0x64`) was accepted and visibly faster. The
 dir/opt1/opt2 bytes are still unconfirmed.
