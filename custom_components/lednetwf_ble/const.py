@@ -62,7 +62,11 @@ IOTBT_SEGMENT_WHITE_PRODUCT_IDS: Final = frozenset({170})
 # Product 100 (0x64): Christmas string lights sold with the Surplife app. flags2 is
 # 0x05 (bit 0x08 clear), so the heuristic would pick Telink, where only power works.
 # E0 01 power/colour and E1 21 scenes confirmed by direct writes with EA 81 readback.
-IOTBT_E0_PRODUCT_IDS: Final = frozenset({100, 197})
+# Product 253 (0xFD): Surplife Christmas tree star (IOTBTAF1), issue #130. PROVISIONAL:
+# added on the strength of an identical EA 81 state layout (mode 0x24/0x25, fx, speed)
+# and E0 02 effects being ignored, same as product 197. E0 01 00 A1 colour and 71 23/24
+# power are confirmed; E0 01 23/24 power, C1 colour and E1 21 scenes await a user test.
+IOTBT_E0_PRODUCT_IDS: Final = frozenset({100, 197, 253})
 
 IOTBT_PROTOCOL_CHOICES: Final = (
     IOTBT_PROTOCOL_AUTO,
