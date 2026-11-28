@@ -46,7 +46,7 @@ Before starting work, read the detailed context files in `ai_instructions/`:
 - **Work in feature branches.** Do not commit directly to `main`.
 - **Run the tests.** `python3 -m pytest tests -q` (CI runs the same on push/PR and before a release build, see `.github/workflows/tests.yml`).
 - **Keep changes minimal.** Only modify what's needed for the task. Don't refactor surrounding code.
-- **Bug reports often include log files.** Download and analyse them. Key things to look for: product_id detection, capability resolution, command sends ("Sending to"), state notifications, and the state parse conditions line.
+- **Bug reports often include log files.** Download and analyse them. Key things to look for: the `Device identity for` line (product IDs, flags2, protocol override, raw service data), product_id detection, capability resolution, command sends ("Sending to"), state notifications, and the state parse conditions line.
 
 ## Decompiled App Location
 

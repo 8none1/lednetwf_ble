@@ -116,12 +116,17 @@ No effect support. Use:
 
 **For detailed command formats, see [06_effect_commands.md](06_effect_commands.md)**
 
-## IOTBT E0 01 string lights (product 0xC5, issue #126)
+## IOTBT E0 01 string lights (products 0xC5, 0x64, 0xFD; issues #126, #130)
 
 Minetom IR + Bluetooth Christmas String Lights (`IOTBT6E0`, Aurelux app). Advertises
 service data `5B 07 <mac> 00 C5 42 08 01 2A` (status byte 0x5B, flags2 0x2A, so the
 flags2 segment heuristic would wrongly pick the segment command set; the product ID
 takes precedence). Product 197 is not in the vendor `ble_devices.json`.
+
+A second product 197 device was tested on 2.0.1-beta26 (issue #126): string lights sold
+with the Surplife app (`IOTBT26B`, `IOTBT499`), firmware 43, ble_version 7, flags2 0x07.
+Power, `C1` colour and the `E1 21` scenes work there with no override, so routing on
+the product ID alone holds across both firmwares.
 
 Product 100 (0x64), Christmas string lights sold with the Surplife app, uses the same
 commands. It advertises service data `5B 07 <mac> 00 64 26 05 01 05` (flags2 0x05, so
@@ -144,11 +149,34 @@ Transport is the standard wrapper with cmd_family 0x0A. Payloads (after the 8-by
 |---|---|
 | Power | `E0 01 00 23` (on) / `E0 01 00 24` (off) + 10 zero bytes |
 | Solid colour | `E0 01 00 C1 <hue/2> <sat or hue bit 0 << 7> <V> <CT> <W> 00 00 14 00 00` |
-| Multi-colour static | `EC 07 00 <bright> <count> <count x 5-byte colour>` (not implemented) |
+| Multi-colour static | `EC 07 00 <bright 01-64> <count> <count x 5-byte colour>` (not implemented; state then reports mode 0x24) |
 | Scene | `E1 21 00 <bright> <fx> <dir> <opt1> <opt2> <speed> 00 <5-byte bg> <count> <count x 5-byte colour>` |
 
 Brightness is the V byte of the colour tuple. The 42 scene payloads are stored verbatim
-(`protocol.IOTBT_E0_SCENES`); the dir/opt1/opt2/speed/brightness bytes are not yet
-confirmed individually, so speed and brightness sliders do not alter a running scene.
-State notifications arrive as JSON-wrapped `EA 81` frames; their layout is not parsed
-for this family yet.
+(`protocol.IOTBT_E0_SCENES`), so the speed and brightness sliders do not alter a running
+scene yet. The speed byte position is confirmed: a tester on product 197 (firmware 43)
+sent `E1 21` frames with different speed values, the state reply echoed each one, and
+`0xC8` (above the app's maximum of `0x64`) was accepted and visibly faster. The
+dir/opt1/opt2 bytes are still unconfirmed.
+
+State notifications arrive as JSON-wrapped `EA 81` frames. The integration does not
+parse them for this family yet, so IR remote and app changes are not reflected in Home
+Assistant. Observed layout:
+
+`EA 81 00 00 <product> <fw> <23 on | 24 off> <mode> <fx> <speed> 00 <hue/2> <sat> <V> ...`
+
+| Product | Mode byte, solid colour | Mode byte, scene |
+|---|---|---|
+| 197 (0xC5) | `0x24` (fx byte `0x14` solid, `0x01` multi-colour static) | `0x25` |
+| 253 (0xFD) | `0x24` | `0x25` |
+| 100 (0x64) | `0xA3` | `0x71` |
+
+Other findings reported by the product 197 (firmware 43) tester, by eye on the lights:
+
+- `E0 01 00 A1 ...` (the v3 colour form) sets a solid colour as well as `C1`.
+- The `E1 21` and `EC 07` colour list is a palette, not a bulb map. Padding the list
+  with "off" entries does not address individual bulbs; the controller scatters the
+  palette along the string.
+- Animations repeat per section of the string. No segment setting has been found.
+- No effect on this product: `E0 02` effects, the `E1 03` / `E1 01` segment commands,
+  and the `52 5A 5B` custom query (no reply).

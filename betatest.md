@@ -49,6 +49,8 @@ Use this method if your device is already added to Home Assistant.
 6. Go back to the integration and click **"Disable debug logging"**
 7. A file will automatically download containing all the debug logs
 
+On releases after 2.0.1-beta27, the log contains a line starting `Device identity for` just before the first command. That line tells us exactly which device model you have, so please make sure you send at least one command (for example turning the light on) while debug logging is enabled.
+
 ### Method 2: Via configuration.yaml
 
 Use this method if:

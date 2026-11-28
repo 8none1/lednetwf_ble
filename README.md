@@ -16,7 +16,8 @@ This integration supports various models of Zengge LEDnetWF devices, which may a
 - YBCRG-RGBWW
 - Magic Hue
 - Bluetooth full colors selfie ring light
-- Devices advertising as "iotb" prefix. Both IOTBT protocol families are supported: the older "Telink" style (hue colour + classic effects) and the newer "segment" style (per-segment addressable colour + the full built-in scene/effect list, e.g. the "IOTBT6BA" USB corner lamp). The integration auto-detects which family a device uses, and you can override it manually if needed (see [IOTBT Protocol](#iotbt-protocol-telink-vs-segment)).
+- Devices advertising as "iotb" prefix. Several IOTBT protocol families are supported: the older "Telink" style (hue colour + classic effects), the newer "segment" style (per-segment addressable colour + the full built-in scene/effect list, e.g. the "IOTBT6BA" USB corner lamp), and Christmas string lights with named scenes (e.g. Minetom / Aurelux and Surplife string lights). The integration auto-detects which family a device uses, and you can override it manually if needed (see [IOTBT Protocol](#iotbt-protocol-telink-vs-segment)).
+- IR + Bluetooth Christmas string lights sold with the Aurelux or Surplife apps (Minetom and similar): power, colour, brightness and the 42 named scenes. The Surplife Christmas tree star (`IOTBTAF1`) has trial support in the beta releases.
 
 New devices using the Zengge platform are being released all the time.  We support as many of these as we can.  If you have a device which isn't supported, please log an issue and we will work with you to try and add support.
 
@@ -92,16 +93,18 @@ Search for "LEDnetWF BLE" and click install.  You will also get notified of futu
 
 #### IOTBT Protocol (Telink vs Segment)
 
-Devices whose name begins with `IOTBT` come in two protocol families that advertise almost identically but speak different command sets:
+Devices whose name begins with `IOTBT` come in several protocol families that advertise almost identically but speak different command sets:
 
 - **Telink** - hue-based colour and classic effects.
 - **Segment** - per-segment addressable colour and palette-based scenes.
+- **v3** - Telink-style power with a different colour command. Effects are not supported on this family.
+- **String lights** - Christmas string lights with 42 named scenes. These are recognised by their product ID, so there is no manual option for them; leave the setting on `auto`.
 
 The integration auto-detects which family a device belongs to. Because the two can be genuinely hard to tell apart (and the distinguishing data can change after a device firmware update), you can override the choice:
 
 - **Setting**: device's **Configure** dialog → **IOTBT protocol**
-- **Options**: `auto` (default), `telink`, `segment`
-- **When to use it**: if an IOTBT device turns on and off correctly but **colours or effects don't work**, the protocol was probably auto-detected wrongly. Switch between `telink` and `segment` (and restart / re-open the light) until colour and effects respond. Leave it on `auto` unless you hit this.
+- **Options**: `auto` (default), `telink`, `segment`, `v3`
+- **When to use it**: if an IOTBT device turns on and off correctly but **colours or effects don't work**, the protocol was probably auto-detected wrongly. Switch between `telink`, `segment` and `v3` (and restart / re-open the light) until colour and effects respond. Leave it on `auto` unless you hit this. If colour only works on `v3` and effects do nothing, please log an issue with a debug log: the device may be an unrecognised string-light model.
 
 #### Advanced Settings
 
