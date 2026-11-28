@@ -665,3 +665,34 @@ The state frame then shows byte 7 = `0x25`, byte 8 = `0x6F`, byte 15 = brightnes
 
 - Scene byte to effect name: several `IOTBT_SEGMENT_EFFECT_SCENES` entries share a scene byte.
 - Layout only verified on this lamp; no IOTBT6BA `EA 81` frame checked.
+
+---
+
+# A fifth variant: the E0 01 string-light family (issues #126 and #130, PR #129, November 2026)
+
+Full command and state layout: `protocol_docs/10_device_specific.md`, section
+"IOTBT E0 01 string lights". Summary of what matters for variant detection:
+
+| Product | Device | flags2 | Heuristic would pick | Status |
+|---|---|---|---|---|
+| 197 (0xC5) | Minetom / Aurelux string lights, IOTBT6E0, firmware 0x08 | `0x2A` | segment (wrong) | Confirmed, 2.0.1-beta25 |
+| 197 (0xC5) | Surplife-app string lights, IOTBT26B / IOTBT499, firmware 43 | `0x07` | Telink (wrong) | Confirmed, 2.0.1-beta26 |
+| 100 (0x64) | Surplife-app Christmas string lights | `0x05` | Telink (wrong) | Confirmed, 2.0.1-beta26 |
+| 253 (0xFD) | Surplife Christmas tree star, IOTBTAF1, firmware 0x07 | not captured | unknown | Provisional, 2.0.1-beta27 |
+
+- flags2 is useless for this family: the same product ID appears with bit `0x08` set
+  and clear. Routing is by advertised product ID (`const.IOTBT_E0_PRODUCT_IDS`), checked
+  before the segment and v3 product lists and before the flags2 heuristic. A manual
+  telink / segment / v3 override still wins.
+- None of these product IDs is in the vendor `ble_devices.json`.
+- Product 253 was added without a capture. The evidence is the `EA 81` state layout and
+  the ignored `E0 02` effects (see `DISCOVERIES.md`). `E0 01 00 23/24` power, `C1`
+  colour and `E1 21` scenes are unconfirmed on it. If the reporter says any of those
+  fail, remove 253 from the list, do not patch around it.
+
+## Still open for this family
+
+- Parse the `EA 81` state reply (mode byte differs: `0x24`/`0x25` on 197 and 253,
+  `0xA3`/`0x71` on 100).
+- Speed and brightness on a running `E1 21` scene. Speed byte position is confirmed.
+- The 5 `EC 07` multi-colour presets.

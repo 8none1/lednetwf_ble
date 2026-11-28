@@ -757,3 +757,39 @@ below: https://gist.github.com/HelloPackets89/f7836b577a714576b206af4ca3574a1f
 **Date**: 7 November 2026 (issue #114)
 
 We asked the reporter for a colour-temperature slider capture, but the Surplife app has no such slider for this device. The white button is brightness only (one fixed warm-white channel). See `iotbt_variant_findings.md`.
+
+---
+
+### Bug-report logs do not contain the advertisement data
+
+**Date**: 28 November 2026 (issues #126, #130)
+
+The advertisement parse in `device.update_from_advertisement` logs the raw service data
+and flags2 at debug level, but none of the three logs attached to #126 and #130 had
+those lines. A connected device stops advertising, and reporters enable debug logging
+after setup, so the parse ran before logging was on. Do not assume a debug log will
+show the service data.
+
+Fix (PR #132): `device._log_identity_once` writes a `Device identity for <name>` line
+before the first command of each debug session, from the last advertisement seen.
+
+Related mistake: a draft reply told a reporter to find the service data under
+"Settings > Devices & services > Bluetooth > Configure > Advertisement monitor". That
+path was written from memory and the Home Assistant Bluetooth documentation does not
+describe it. Do not give Home Assistant menu paths without checking them.
+
+---
+
+### `E0 02` effects ignored + `EA 81` mode 0x24/0x25 means the E0 01 family
+
+**Date**: 28 November 2026 (issues #126, #130)
+
+Product 253 (tree star, #130) looked like a v3 device: power and `E0 01 00 A1` colour
+worked under the `v3` override, effects did not. The `EA 81` reply gave it away: byte 7
+is `0x24` for solid colour and `0x25` for a scene, with the fx id in byte 8, exactly as
+on product 197. `E0 02` effects are ignored on product 197 too. An IOTBT device showing
+that combination should be tried on the E0 01 command set (`IOTBT_E0_PRODUCT_IDS`)
+before anything else. Product 253 was added provisionally in 2.0.1-beta27.
+
+Note the mode bytes are not uniform across the family: product 100 reports `0xA3`
+(solid) and `0x71` (scene). See `protocol_docs/10_device_specific.md`.

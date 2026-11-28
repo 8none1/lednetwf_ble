@@ -66,7 +66,7 @@
 | ID | Hex | Company ID | Notes |
 |----|-----|------------|-------|
 | 0 | 0x00 | 0x1102 | Telink BLE Mesh |
-| 0 | 0x00 | 0x5A00-0x5AFF | Same product_id, **three** different command families |
+| 0 | 0x00 | 0x5A00-0x5AFF | Same product_id, **four** different command families |
 
 `product_id = 0x00` is not one device type. Known families, all advertising the
 same product ID:
@@ -76,10 +76,30 @@ same product ID:
 | Telink (e.g. IOTBT812) | `0x71` | `E2 0B <hue> <0xE0\|lvl>` | `E0 02` |
 | Segment (e.g. IOTBT6BA) | `0x3B` | `E1 03` + `A1` blocks | `E1 01` |
 | v3 wrapper (ZJ-BBLA-RGBWW, PR #101) | `0x71` | `E0 01 00 A1 ...` | unknown |
-| E0 01 string lights (Minetom, product 0xC5, #126) | `E0 01 00 23/24` | `E0 01 00 C1 ...` (5-byte HSV+W) | `E1 21` |
+| E0 01 string lights (products 0xC5, 0x64, 0xFD) | `E0 01 00 23/24` | `E0 01 00 C1 ...` (5-byte HSV+W) | `E1 21` |
 
-Detection is a heuristic on service-data `flags2` bit `0x08`, with a manual
-`CONF_IOTBT_PROTOCOL` override. See `iotbt_variant_findings.md`.
+E0 01 family members (`const.IOTBT_E0_PRODUCT_IDS`), chosen by advertised product ID:
+
+| Product | Device | Status |
+|---------|--------|--------|
+| 197 (0xC5) | Minetom / Aurelux string lights, also Surplife-app string lights (#126) | Confirmed on firmware 0x08 (flags2 0x2A) and firmware 43 (flags2 0x07) |
+| 100 (0x64) | Surplife-app Christmas string lights (PR #129) | Confirmed by direct writes |
+| 253 (0xFD) | Surplife Christmas tree star, IOTBTAF1 (#130) | Provisional since 2.0.1-beta27, awaiting a user test |
+
+Detection order: a manual `CONF_IOTBT_PROTOCOL` override (`telink` / `segment` / `v3`)
+wins, then the advertised product ID lists (`IOTBT_E0_PRODUCT_IDS`,
+`IOTBT_V3_PRODUCT_IDS`, `IOTBT_SEGMENT_PRODUCT_IDS`), then the heuristic on
+service-data `flags2` bit `0x08`. See `iotbt_variant_findings.md`.
+
+Signs that an unknown IOTBT device belongs to the E0 01 family: `E0 02` effects are
+ignored with no state reply, `E0 01 00 A1 ...` colour works under the `v3` override,
+and the `EA 81` reply has byte 7 = `0x24` (solid) / `0x25` (scene) with the fx id in
+byte 8 and speed in byte 9.
+
+Debug logs (releases after 2.0.1-beta27): the first command of each debug session is preceded by a
+`Device identity for <name>: ...` line giving both product IDs, flags2, versions, the
+protocol override, the effect type and the raw service data. Advertisement parse lines
+are usually absent from bug-report logs because a connected device stops advertising.
 
 ## Command Formats
 
